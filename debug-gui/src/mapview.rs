@@ -57,10 +57,7 @@ impl Plugin for PathPlugin<'_> {
                         continue;
                     }
                     painter.line_segment(
-                        [
-                            screen(projector, lat1, lon1),
-                            screen(projector, lat2, lon2),
-                        ],
+                        [screen(projector, lat1, lon1), screen(projector, lat2, lon2)],
                         Stroke::new(width, color),
                     );
                 }

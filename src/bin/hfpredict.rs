@@ -253,7 +253,7 @@ fn season_at(month: u32, latitude_deg: f64) -> Season {
     // Determine the astronomical bucket in northern-hemisphere terms first.
     let north_season = match month {
         12 | 1 | 2 => Season::Winter,
-        6 | 7 | 8 => Season::Summer,
+        6..=8 => Season::Summer,
         _ => Season::Equinox,
     };
     let _ = northern;
@@ -295,9 +295,10 @@ fn representative_fof2_mhz(day: bool, season: Season, solar: Solar) -> f64 {
             Season::Equinox => 11.0,
             Season::Summer => 8.0,
         },
+        // Winter and equinox coincide at solar minimum in this coarse table;
+        // the winter anomaly only separates them at solar maximum.
         (true, Solar::Low) => match season {
-            Season::Winter => 7.0,
-            Season::Equinox => 7.0,
+            Season::Winter | Season::Equinox => 7.0,
             Season::Summer => 5.0,
         },
         // Night foF2 is much less season-dependent at midlatitudes.
@@ -404,14 +405,24 @@ fn run(args: &Args) -> Result<(), String> {
     // Field-free, so the near-vertical Spitze that motivates the default 80 deg
     // scan cap cannot occur; raise the cap to reach NVIS (near-vertical) short
     // paths. Everything else stays at the validated defaults.
-    let mut homing_config = HomingConfig::default();
-    homing_config.elev_max = Radians::from_degrees(88.0);
+    let homing_config = HomingConfig {
+        elev_max: Radians::from_degrees(88.0),
+        ..Default::default()
+    };
     let homing = Homing {
         tracer: &tracer,
         config: homing_config,
     };
 
-    search_and_report(&homing, &tx, brng, total_arc, distance_m, args.max_hops, args.freq_hz)
+    search_and_report(
+        &homing,
+        &tx,
+        brng,
+        total_arc,
+        distance_m,
+        args.max_hops,
+        args.freq_hz,
+    )
 }
 
 fn resolve_ionosphere(

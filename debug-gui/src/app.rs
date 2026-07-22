@@ -1,13 +1,22 @@
 //! Application shell: layout, map interaction, and the run trigger.
 
 use eframe::{App, CreationContext, Frame};
-use egui::{CentralPanel, Color32, Panel, RichText, ScrollArea, Ui};
+use egui::{
+    CentralPanel, Color32, CornerRadius, FontFamily, FontId, Margin, Panel, RichText, ScrollArea,
+    Stroke, TextStyle, Ui,
+};
 use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreetMap};
 
 use crate::mapview::PathPlugin;
-use crate::panels;
+use crate::panels::{self, BAD, FAIL, MUTED, OK};
 use crate::scenario::{self, Assumptions, Inputs, PlaceMode, ProfileRow};
 use crate::solve::{self, Solution, SolveOutcome};
+
+const INPUTS_MIN: f32 = 240.0;
+const INPUTS_MAX: f32 = 420.0;
+const DEBUG_MIN: f32 = 280.0;
+const DEBUG_MAX: f32 = 760.0;
+const MAP_MIN: f32 = 260.0;
 
 pub struct DebugApp {
     tiles: HttpTiles,
@@ -20,19 +29,14 @@ pub struct DebugApp {
     visible: Vec<bool>,
     selected: Option<usize>,
     build_error: Option<String>,
-    /// Set when the view should be re-fitted to the TX/RX span on the next
-    /// frame, once the map's on-screen size is known.
     needs_fit: bool,
+    styled_for_width: f32,
 }
 
 impl DebugApp {
     pub fn new(cc: &CreationContext<'_>) -> Self {
         let inputs = Inputs::default();
         Self {
-            // Live OpenStreetMap tiles are fine for personal, low-volume use.
-            // If this tool ever sees sustained or multi-user traffic, OSM's
-            // tile usage policy requires switching to a local tile cache or a
-            // self-hosted tile server rather than hammering tile.osm.org.
             tiles: HttpTiles::new(OpenStreetMap, cc.egui_ctx.clone()),
             map_memory: MapMemory::default(),
             inputs,
@@ -44,13 +48,38 @@ impl DebugApp {
             selected: None,
             build_error: None,
             needs_fit: true,
+            styled_for_width: 0.0,
         }
     }
 
-    /// Web-Mercator zoom level that fits the TX/RX span in `size` pixels.
-    /// The world is 256 * 2^z pixels wide for 360 deg of longitude; latitude
-    /// is treated linearly over 180 deg, which is only approximate near the
-    /// poles but is plenty for framing a path. 1.4 leaves a margin.
+    /// Text and spacing scale from the window width, so the same readouts stay
+    /// legible on a laptop and don't look cramped on a large display.
+    fn apply_scale(&mut self, ui: &mut Ui, width: f32) {
+        if (width - self.styled_for_width).abs() < 40.0 {
+            return;
+        }
+        self.styled_for_width = width;
+        let scale = (width / 1440.0).clamp(0.86, 1.18);
+
+        let style = ui.style_mut();
+        let mono = FontFamily::Monospace;
+        let prop = FontFamily::Proportional;
+        style.text_styles = [
+            (TextStyle::Heading,   FontId::new(17.0 * scale, prop.clone())),
+            (TextStyle::Body,      FontId::new(13.0 * scale, prop.clone())),
+            (TextStyle::Button,    FontId::new(13.0 * scale, prop.clone())),
+            (TextStyle::Small,     FontId::new(11.0 * scale, prop)),
+            (TextStyle::Monospace, FontId::new(11.5 * scale, mono)),
+        ].into();
+
+        style.spacing.item_spacing     = egui::vec2(6.0 * scale, 4.0 * scale);
+        style.spacing.button_padding   = egui::vec2(7.0 * scale, 4.0 * scale);
+        style.spacing.indent           = 14.0 * scale;
+        style.spacing.interact_size.y  = 20.0 * scale;
+        style.visuals.widgets.noninteractive.bg_stroke =
+            Stroke::new(1.0, Color32::from_gray(0x3A));
+    }
+
     fn fit_zoom(&self, size: egui::Vec2) -> f64 {
         let raw_dlon = (self.inputs.tx_lon - self.inputs.rx_lon).abs();
         let dlon = if raw_dlon > 180.0 {
@@ -58,7 +87,7 @@ impl DebugApp {
         } else {
             raw_dlon
         }
-        .max(0.05);
+            .max(0.05);
         let dlat = (self.inputs.tx_lat - self.inputs.rx_lat).abs().max(0.05);
         let w = f64::from(size.x.max(200.0));
         let h = f64::from(size.y.max(200.0));
@@ -95,79 +124,116 @@ impl DebugApp {
         }
         self.assumptions = Some(a);
     }
+
+    fn status_chip(ui: &mut Ui, out: &SolveOutcome) {
+        let (colour, text) = if out.solutions.is_empty() {
+            (FAIL, "NO PATH CONNECTS at this frequency".to_string())
+        } else {
+            (
+                OK,
+                format!("CONNECTS - {} mode(s) found", out.solutions.len()),
+            )
+        };
+        egui::Frame::NONE
+            .fill(colour.gamma_multiply(0.18))
+            .stroke(Stroke::new(1.0, colour))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::symmetric(8, 5))
+            .show(ui, |ui| {
+                ui.colored_label(colour, RichText::new(text).strong());
+            });
+    }
 }
 
 impl App for DebugApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
+        let total_w = ui.available_width();
+        self.apply_scale(ui, total_w);
+
         let mut run = false;
 
+        // Panel widths track the window so neither side crowds out the map on a
+        // small screen, and both stay draggable within sane bounds.
+        let inputs_w = (total_w * 0.20).clamp(INPUTS_MIN, INPUTS_MAX);
+        let debug_w = (total_w * 0.32).clamp(DEBUG_MIN, DEBUG_MAX);
+        let debug_max = (total_w - inputs_w - MAP_MIN).clamp(DEBUG_MIN, DEBUG_MAX);
+        let debug_w = debug_w.min(debug_max);
+
         Panel::left("inputs_panel")
-            .default_size(330.0)
+            .resizable(true)
+            .default_size(inputs_w)
+            .size_range(INPUTS_MIN..=INPUTS_MAX)
             .show(ui, |ui| {
-                ScrollArea::vertical().show(ui, |ui| {
-                    run = panels::inputs_panel(ui, &mut self.inputs, &mut self.place);
-                });
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        run = panels::inputs_panel(ui, &mut self.inputs, &mut self.place);
+                    });
             });
 
         Panel::right("debug_panel")
-            .default_size(620.0)
+            .resizable(true)
+            .default_size(debug_w)
+            .size_range(DEBUG_MIN..=debug_max.max(DEBUG_MIN))
             .show(ui, |ui| {
-                ScrollArea::vertical().show(ui, |ui| {
-                    ui.heading("Debug output");
-                    if let Some(e) = &self.build_error {
-                        ui.colored_label(
-                            Color32::from_rgb(0xC8, 0x3A, 0x1C),
-                            RichText::new(format!("model build failed: {e}")).monospace(),
-                        );
-                    }
-                    if self.outcome.is_none() && self.build_error.is_none() {
-                        ui.label("Press RUN TRACE.");
-                    }
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.heading("Debug output");
+                        ui.add_space(4.0);
 
-                    if let Some(out) = &self.outcome {
-                        if out.solutions.is_empty() {
+                        if let Some(e) = &self.build_error {
                             ui.colored_label(
-                                Color32::from_rgb(0xD0, 0x21, 0x1C),
-                                RichText::new("NO PATH CONNECTS at this frequency.").strong(),
-                            );
-                        } else {
-                            ui.colored_label(
-                                Color32::from_rgb(0x1B, 0x7F, 0x3B),
-                                RichText::new(format!(
-                                    "CONNECTS: {} mode(s) found.",
-                                    out.solutions.len()
-                                ))
-                                .strong(),
+                                BAD,
+                                RichText::new(format!("model build failed: {e}"))
+                                    .monospace()
+                                    .small(),
                             );
                         }
-                        ui.separator();
-                        panels::reference_panel(ui, out);
-                        panels::legend_panel(ui, out, &mut self.visible, &mut self.selected);
-                        if let Some(sol) = self.selected.and_then(|i| out.solutions.get(i)) {
-                            panels::solution_panel(ui, sol);
+                        if self.outcome.is_none() && self.build_error.is_none() {
+                            ui.label(RichText::new("Press RUN TRACE.").color(MUTED));
                         }
-                        panels::near_miss_panel(ui, out);
-                        panels::errors_panel(ui, out);
-                    }
 
-                    if let Some(a) = &self.assumptions {
-                        panels::assumptions_panel(ui, a);
-                    }
-                    if !self.profile.is_empty() {
-                        panels::profile_panel(ui, &self.profile);
-                    }
-                });
+                        if let Some(out) = &self.outcome {
+                            Self::status_chip(ui, out);
+                            ui.add_space(6.0);
+                            panels::reference_panel(ui, out);
+                            panels::legend_panel(
+                                ui,
+                                out,
+                                &mut self.visible,
+                                &mut self.selected,
+                            );
+                            if let Some(sol) = self.selected.and_then(|i| out.solutions.get(i)) {
+                                panels::solution_panel(ui, sol);
+                            }
+                            panels::near_miss_panel(ui, out);
+                            panels::errors_panel(ui, out);
+                        }
+
+                        if let Some(a) = &self.assumptions {
+                            panels::assumptions_panel(ui, a);
+                        }
+                        if !self.profile.is_empty() {
+                            panels::profile_panel(ui, &self.profile);
+                        }
+                        ui.add_space(8.0);
+                    });
             });
 
         CentralPanel::default().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(format!(
-                    "Click the map to place: {}",
-                    match self.place {
-                        PlaceMode::Tx => "TX",
-                        PlaceMode::Rx => "RX",
-                    }
-                )));
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Click to place: {}",
+                        match self.place {
+                            PlaceMode::Tx => "TX",
+                            PlaceMode::Rx => "RX",
+                        }
+                    ))
+                        .strong(),
+                );
+                ui.separator();
                 if ui.button("Fit path").clicked() {
                     self.needs_fit = true;
                 }
@@ -189,22 +255,21 @@ impl App for DebugApp {
                 ui.label(
                     RichText::new("drag to pan, scroll to zoom")
                         .small()
-                        .color(Color32::GRAY),
+                        .color(MUTED),
                 );
             });
+            ui.add_space(2.0);
 
             let center = self.map_center();
             let center_pos = lat_lon(center.0, center.1);
 
-            // Fit on the first frame (and on request), now that the map's
-            // on-screen size is known. Without this the default zoom is
-            // street-level, which over a long path shows nothing but ocean.
             if self.needs_fit {
                 let z = self.fit_zoom(ui.available_size());
                 let _ = self.map_memory.set_zoom(z);
                 self.map_memory.center_at(center_pos);
                 self.needs_fit = false;
             }
+
             let empty: &[Solution] = &[];
             let sols = self
                 .outcome
@@ -217,9 +282,6 @@ impl App for DebugApp {
                 tx: (self.inputs.tx_lat, self.inputs.tx_lon),
                 rx: (self.inputs.rx_lat, self.inputs.rx_lon),
             };
-            // zoom_with_ctrl defaults to true in walkers, which makes a bare
-            // scroll pan instead of zoom. For a debug tool plain scroll-to-zoom
-            // is what people expect; drag still pans.
             let map = Map::new(Some(&mut self.tiles), &mut self.map_memory, center_pos)
                 .zoom_with_ctrl(false)
                 .with_plugin(plugin);

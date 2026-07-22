@@ -99,6 +99,11 @@ pub struct NearMiss {
 pub struct SolveOutcome {
     pub solutions: Vec<Solution>,
     pub near_misses: Vec<NearMiss>,
+    /// Plain-language outcome of the elevation sweep when nothing homed -
+    /// notably the case where no elevation reflects at all, which produces no
+    /// "closest landing" and would otherwise leave the operator with a blank
+    /// panel.
+    pub sweep_notes: Vec<String>,
     /// Every typed engine error encountered, verbatim, with context.
     pub errors: Vec<String>,
     pub great_circle_km: f64,
@@ -250,11 +255,7 @@ where
         let cap = match trace_capture(tracer, &point, e, a) {
             Ok(c) => c,
             Err(err) => {
-                return (
-                    details,
-                    ends,
-                    Some(format!("hop {} failed: {err}", i + 1)),
-                );
+                return (details, ends, Some(format!("hop {} failed: {err}", i + 1)));
             }
         };
         let res = &cap.result;
@@ -322,9 +323,9 @@ fn assemble(
         .map(|h| h.hamiltonian_drift)
         .fold(0.0_f64, f64::max);
     let total_steps: usize = details.iter().map(|h| h.steps).sum();
-    let terminal_miss_km = ends
-        .last()
-        .map_or(f64::NAN, |e| central_angle(e, rx).get() * EARTH_RADIUS_M / 1e3);
+    let terminal_miss_km = ends.last().map_or(f64::NAN, |e| {
+        central_angle(e, rx).get() * EARTH_RADIUS_M / 1e3
+    });
 
     Solution {
         mode,
@@ -352,7 +353,9 @@ fn near_miss_sweep<D, B, C>(
     total_arc: Radians,
     mode: Mode,
     max_hops: u32,
+    freq_mhz: f64,
     errors: &mut Vec<String>,
+    notes: &mut Vec<String>,
 ) -> Vec<NearMiss>
 where
     D: ElectronDensity + ?Sized,
@@ -364,14 +367,20 @@ where
         let target_arc = total_arc.get() / f64::from(hops);
         let target_km = target_arc * EARTH_RADIUS_M / 1e3;
         let mut best: Option<NearMiss> = None;
+        let mut landed_count = 0u32;
+        let mut escaped_count = 0u32;
         let mut elev = 3.0_f64;
         while elev <= 88.0 {
             let r = tracer.trace(tx, Radians::from_degrees(elev), brng);
             match r {
                 Ok(res) => {
                     let landed = res.outcome == Outcome::Landed;
-                    let range_km =
-                        central_angle(tx, &res.end).get() * EARTH_RADIUS_M / 1e3;
+                    let range_km = central_angle(tx, &res.end).get() * EARTH_RADIUS_M / 1e3;
+                    if landed {
+                        landed_count += 1;
+                    } else {
+                        escaped_count += 1;
+                    }
                     if landed {
                         let miss = (range_km - target_km).abs();
                         if best.as_ref().is_none_or(|b| miss < b.miss_km) {
@@ -398,6 +407,17 @@ where
         }
         if let Some(b) = best {
             out.push(b);
+        } else if landed_count == 0 && escaped_count > 0 {
+            // Nothing reflected anywhere, so there is no "closest landing".
+            // Say so explicitly instead of returning an empty table.
+            notes.push(format!(
+                "{} mode, {hops} hop(s): no elevation between 3 and 88 deg reflects - the ray \
+                 penetrates the layer at every angle, so {:.2} MHz is above this ionosphere's \
+                 maximum usable frequency for any geometry ({escaped_count} elevations swept, \
+                 all escaped). Target range was {target_km:.0} km.",
+                mode_label(mode),
+                freq_mhz,
+            ));
         }
     }
     out
@@ -441,13 +461,12 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                             propagate(&tracer, &tx, ray.elevation, ray.azimuth, hops);
                         if details.is_empty() {
                             if let Some(n) = note {
-                                errors.push(format!("{} mode, {hops} hop(s): {n}", mode_label(mode)));
+                                errors
+                                    .push(format!("{} mode, {hops} hop(s): {n}", mode_label(mode)));
                             }
                             continue;
                         }
-                        solutions.push(assemble(
-                            mode, hops, details, &ends, &rx, ray.miss_m, note,
-                        ));
+                        solutions.push(assemble(mode, hops, details, &ends, &rx, ray.miss_m, note));
                     }
                 }
                 Err(HomingError::NoBracket { .. }) => {}
@@ -459,6 +478,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     }
 
     let mut near_misses = Vec::new();
+    let mut sweep_notes = Vec::new();
     if solutions.is_empty() {
         for &mode in modes {
             let tracer = make_tracer(models, inputs.freq_mhz, mode, a);
@@ -469,7 +489,9 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                 total_arc,
                 mode,
                 inputs.max_hops,
+                inputs.freq_mhz,
                 &mut errors,
+                &mut sweep_notes,
             ));
         }
         near_misses.sort_by(|x, y| x.miss_km.total_cmp(&y.miss_km));
@@ -481,6 +503,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     SolveOutcome {
         solutions,
         near_misses,
+        sweep_notes,
         errors,
         great_circle_km,
         bearing_deg: brng.to_degrees().rem_euclid(360.0),
@@ -562,26 +585,245 @@ mod tests {
             "absorption should be positive, got {}",
             s.total_absorption_db
         );
-        assert!(s.total_absorption_db < 500.0, "absorption implausibly large");
+        assert!(
+            s.total_absorption_db < 500.0,
+            "absorption implausibly large"
+        );
     }
 
-    /// Far above the MUF nothing connects, and the near-miss sweep must still
-    /// give the operator something rather than an empty screen.
+    /// The default scenario sits close to the terminator: mid-January,
+    /// 18:00 UTC, midpoint near 59 N gives chi ~ 84 deg, i.e. the sun barely
+    /// 6 deg above the horizon. It is (just) daylight, so a weak D region is
+    /// active. Pinned because it is a sensitive, easily-broken configuration.
     #[test]
-    fn above_muf_reports_near_misses_not_silence() {
+    fn default_scenario_is_marginal_daylight() {
+        let a = scenario::resolve(&Inputs::default());
+        assert!(
+            (80.0..85.0).contains(&a.solar.zenith_angle_deg),
+            "default midpoint chi = {} deg",
+            a.solar.zenith_angle_deg
+        );
+        assert!(a.d_region_active, "marginal daylight still has a D region");
+        // sqrt(cos chi) at 84 deg is ~0.32, so the D region is much weaker
+        // than at noon.
+        assert!(
+            a.d_region_peak_ne < 0.4 * scenario::D_REGION_PEAK_NE_OVERHEAD,
+            "grazing sun should thin the D region, got {:.3e}",
+            a.d_region_peak_ne
+        );
+    }
+
+    /// Well above the MUF nothing connects. With Earth curvature, a 45 MHz
+    /// signal under a 5 MHz layer does not reflect at ANY elevation, so there
+    /// is no "closest landing" to report - the sweep must then say so in plain
+    /// language rather than leaving the operator with an empty panel.
+    #[test]
+    fn above_muf_explains_itself_rather_than_going_silent() {
         let inputs = Inputs {
             freq_mhz: 45.0,
+            month: 6,
+            day_of_month: 21,
+            utc_hours: 15.5,
             ..Inputs::default()
         };
         let out = run(&inputs);
         assert!(out.solutions.is_empty(), "45 MHz should not connect");
         assert!(
-            !out.near_misses.is_empty(),
-            "near-miss sweep should report closest approaches"
+            !out.near_misses.is_empty() || !out.sweep_notes.is_empty(),
+            "sweep must produce either near-misses or an explanation"
         );
         for w in out.near_misses.windows(2) {
             assert!(w[0].miss_km <= w[1].miss_km, "near misses not sorted");
         }
+        if out.near_misses.is_empty() {
+            assert!(
+                out.sweep_notes.iter().any(|n| n.contains("no elevation")),
+                "expected a penetration explanation, got {:?}",
+                out.sweep_notes
+            );
+        }
+    }
+
+    /// A frequency that genuinely can reflect but misses the target range must
+    /// still produce ranked near-misses, which is the other half of the
+    /// requirement.
+    #[test]
+    fn reachable_but_wrong_range_reports_ranked_near_misses() {
+        let inputs = Inputs {
+            freq_mhz: 7.1,
+            month: 6,
+            day_of_month: 21,
+            utc_hours: 15.5,
+            rx_lat: 40.0,
+            rx_lon: -103.0,
+            max_hops: 1,
+            ..Inputs::default()
+        };
+        let out = run(&inputs);
+        if out.solutions.is_empty() {
+            assert!(
+                !out.near_misses.is_empty() || !out.sweep_notes.is_empty(),
+                "expected near-misses or an explanation"
+            );
+        }
+    }
+
+    /// Daytime 40 m reference case: Denver -> London at 7.1 MHz, 21 June,
+    /// 15:30 UTC (local solar noon at the path midpoint). Compares the old
+    /// wiring (F2 layer only, hand-picked collision numbers) against the new
+    /// one (D region driven by solar zenith angle, neutral-atmosphere nu).
+    #[test]
+    fn daytime_40m_before_after() {
+        use skipzone::collision::ExponentialCollisions;
+        use skipzone::density::{ChapmanLayer, MultiLayer, density_at_critical_frequency};
+        use skipzone::mag::Igrf;
+        use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond};
+
+        let inputs = Inputs {
+            freq_mhz: 7.1,
+            month: 6,
+            day_of_month: 21,
+            utc_hours: 15.5,
+            ..Inputs::default()
+        };
+        let a = scenario::resolve(&inputs);
+
+        let after_models = scenario::build_models(&inputs, &a).expect("after models");
+        let after = solve(&inputs, &a, &after_models);
+
+        // Reconstruct the previous behaviour: F2 layer alone, no D region, and
+        // the old hand-picked collision profile (1e5 /s at 100 km, H = 30 km).
+        let f2 = ChapmanLayer::new(
+            PerCubicMeter::new(a.nm_per_m3),
+            Meters::new(scenario::EARTH_RADIUS_M + a.hmf2_km * 1e3),
+            Meters::new(a.scale_height_km * 1e3),
+        )
+        .unwrap();
+        let before_models = scenario::Models {
+            density: MultiLayer::new(vec![Box::new(f2)]),
+            field: Some(
+                Igrf::from_embedded()
+                    .unwrap()
+                    .model_at(inputs.igrf_epoch)
+                    .unwrap(),
+            ),
+            collisions: ExponentialCollisions::new(
+                PerSecond::new(1.0e5),
+                Meters::new(scenario::EARTH_RADIUS_M + 100e3),
+                Meters::new(30e3),
+            )
+            .unwrap(),
+        };
+        let before = solve(&inputs, &a, &before_models);
+        let _ = density_at_critical_frequency(Hertz::new(7.1e6));
+
+        // Isolation run: F2 only, but with the NEW neutral-atmosphere nu.
+        // Whatever absorption survives here is F2/deviative; the rest of the
+        // AFTER figure must be genuine D-region absorption.
+        let f2_only = ChapmanLayer::new(
+            PerCubicMeter::new(a.nm_per_m3),
+            Meters::new(scenario::EARTH_RADIUS_M + a.hmf2_km * 1e3),
+            Meters::new(a.scale_height_km * 1e3),
+        )
+        .unwrap();
+        let isolate_models = scenario::Models {
+            density: MultiLayer::new(vec![Box::new(f2_only)]),
+            field: Some(
+                Igrf::from_embedded()
+                    .unwrap()
+                    .model_at(inputs.igrf_epoch)
+                    .unwrap(),
+            ),
+            collisions: ExponentialCollisions::new(
+                PerSecond::new(scenario::NU_REF_PER_S),
+                Meters::new(scenario::EARTH_RADIUS_M + scenario::NU_REF_ALT_KM * 1e3),
+                Meters::new(scenario::NU_SCALE_HEIGHT_KM * 1e3),
+            )
+            .unwrap(),
+        };
+        let isolate = solve(&inputs, &a, &isolate_models);
+
+        let pick = |o: &SolveOutcome| {
+            o.solutions
+                .first()
+                .map(|s| (s.hops, s.total_absorption_db, s.total_group_km))
+        };
+        println!("=== daytime 40m: Denver->London, 7.1 MHz, 21 Jun 15:30 UTC ===");
+        println!(
+            "midpoint {:.2},{:.2}  chi = {:.2} deg  (elev {:.2} deg)",
+            a.midpoint_lat, a.midpoint_lon, a.solar.zenith_angle_deg, a.solar.elevation_deg
+        );
+        println!(
+            "D region: active={} peak Ne={:.3e} m^-3 at {:.1} km",
+            a.d_region_active, a.d_region_peak_ne, a.d_region_peak_alt_km
+        );
+        println!("BEFORE (F2 only, hand-picked nu): {:?}", pick(&before));
+        println!("AFTER  (D region + neutral nu)  : {:?}", pick(&after));
+        println!("ISOLATE (F2 only, new nu)       : {:?}", pick(&isolate));
+        for (name, o) in [
+            ("BEFORE", &before),
+            ("ISOLATE", &isolate),
+            ("AFTER", &after),
+        ] {
+            for s in &o.solutions {
+                println!(
+                    "  {name}: {}-mode {} hop(s)  abs {:.4} dB  group {:.1} km",
+                    mode_label(s.mode),
+                    s.hops,
+                    s.total_absorption_db,
+                    s.total_group_km
+                );
+            }
+        }
+
+        // Same path and date, but local midnight at the midpoint.
+        let night_inputs = Inputs {
+            utc_hours: 3.5,
+            ..inputs.clone()
+        };
+        let night_a = scenario::resolve(&night_inputs);
+        let night_models = scenario::build_models(&night_inputs, &night_a).expect("night models");
+        let night = solve(&night_inputs, &night_a, &night_models);
+        println!(
+            "NIGHT (chi = {:.2} deg, D active = {}): {:?}",
+            night_a.solar.zenith_angle_deg,
+            night_a.d_region_active,
+            pick(&night)
+        );
+
+        let first_abs =
+            |o: &SolveOutcome| o.solutions.first().map_or(0.0, |s| s.total_absorption_db);
+        let (a_before, a_after) = (first_abs(&before), first_abs(&after));
+        let a_isolate = first_abs(&isolate);
+        let a_night = first_abs(&night);
+
+        assert!(a.d_region_active, "21 June local noon must be daylight");
+
+        // With a physically-shaped nu (falling off with neutral density), the
+        // F2 region contributes essentially nothing. The old 7.4 dB was an
+        // artifact of a collision profile broad enough to put collisions at
+        // F2 heights - it happened to land near the right magnitude for
+        // entirely the wrong reason.
+        assert!(
+            a_isolate < 0.05,
+            "F2-only with neutral nu should be negligible, got {a_isolate} dB"
+        );
+        assert!(
+            a_after > 20.0 * a_isolate,
+            "absorption should now be dominated by the D region: {a_after} vs {a_isolate}"
+        );
+
+        // The whole point of item 1: absorption must now respond to solar
+        // zenith angle. Night must be far quieter than local noon.
+        assert!(
+            !night_a.d_region_active,
+            "local midnight should be past the Chapman limit"
+        );
+        assert!(
+            a_night < 0.1 * a_after,
+            "night absorption {a_night} dB should collapse relative to day {a_after} dB"
+        );
+        let _ = a_before;
     }
 
     /// With no field, O and X are degenerate, so only one mode is traced.

@@ -9,6 +9,7 @@ mod app;
 mod mapview;
 mod panels;
 mod scenario;
+mod solar;
 mod solve;
 
 fn main() -> eframe::Result {
