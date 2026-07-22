@@ -1,3 +1,9 @@
+# The debug GUI is a separate workspace member so that its eframe/winit/HTTP
+# dependency tree never enters the engine crate, which must stay buildable with
+# no system libraries beyond std (see the portability requirements).
+[workspace]
+members = ["debug-gui"]
+
 [package]
 name = "skipzone"
 version = "0.1.0"
