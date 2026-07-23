@@ -3926,7 +3926,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "skipzone-debug-gui"
+name = "skipzone-app"
 version = "0.1.0"
 dependencies = [
  "eframe",

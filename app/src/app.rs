@@ -7,11 +7,12 @@ use egui::{
 };
 use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreetMap};
 
-use crate::mapview::{PathPlugin, TerminatorPlugin};
-use crate::panels::{self, BAD, FAIL, MUTED, OK, WARN};
 use crate::scenario::{Assumptions, Inputs, PlaceMode, ProfileRow};
 use crate::solve::{Solution, SolveOutcome};
 use crate::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
+use crate::ui::map::{PathPlugin, TerminatorPlugin};
+use crate::ui::panels;
+use crate::ui::theme::{BAD, FAIL, MUTED, OK, WARN};
 
 const INPUTS_MIN: f32 = 240.0;
 const INPUTS_MAX: f32 = 420.0;
@@ -19,7 +20,7 @@ const DEBUG_MIN: f32 = 280.0;
 const DEBUG_MAX: f32 = 760.0;
 const MAP_MIN: f32 = 260.0;
 
-pub struct DebugApp {
+pub struct SkipzoneApp {
     tiles: HttpTiles,
     map_memory: MapMemory,
     inputs: Inputs,
@@ -51,7 +52,7 @@ enum Busy {
     Sweeping { done: usize, total: usize },
 }
 
-impl DebugApp {
+impl SkipzoneApp {
     pub fn new(cc: &CreationContext<'_>) -> Self {
         let inputs = Inputs::default();
         Self {
@@ -207,7 +208,7 @@ impl DebugApp {
     }
 }
 
-impl App for DebugApp {
+impl App for SkipzoneApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         let total_w = ui.available_width();
         self.apply_scale(ui, total_w);
@@ -435,21 +436,21 @@ impl App for DebugApp {
             let map = map.with_plugin(plugin);
             let resp = ui.add(map);
 
-            if resp.clicked() {
-                if let Some(p) = resp.interact_pointer_pos() {
-                    let projector = Projector::new(resp.rect, &self.map_memory, center_pos);
-                    let pos = projector.unproject(p.to_vec2());
-                    let (lat, lon) = (pos.y(), pos.x());
-                    if lat.is_finite() && lon.is_finite() {
-                        match self.place {
-                            PlaceMode::Tx => {
-                                self.inputs.tx_lat = lat.clamp(-89.9, 89.9);
-                                self.inputs.tx_lon = lon;
-                            }
-                            PlaceMode::Rx => {
-                                self.inputs.rx_lat = lat.clamp(-89.9, 89.9);
-                                self.inputs.rx_lon = lon;
-                            }
+            if resp.clicked()
+                && let Some(p) = resp.interact_pointer_pos()
+            {
+                let projector = Projector::new(resp.rect, &self.map_memory, center_pos);
+                let pos = projector.unproject(p.to_vec2());
+                let (lat, lon) = (pos.y(), pos.x());
+                if lat.is_finite() && lon.is_finite() {
+                    match self.place {
+                        PlaceMode::Tx => {
+                            self.inputs.tx_lat = lat.clamp(-89.9, 89.9);
+                            self.inputs.tx_lon = lon;
+                        }
+                        PlaceMode::Rx => {
+                            self.inputs.rx_lat = lat.clamp(-89.9, 89.9);
+                            self.inputs.rx_lon = lon;
                         }
                     }
                 }

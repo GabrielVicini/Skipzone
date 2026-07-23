@@ -1,10 +1,10 @@
 # Chapman grazing-incidence function and the twilight D region
 
-Derived here for `debug-gui/src/dregion.rs`. Unlike everything else in
-docs/derivations/, this supports the *scenario-level* debug harness, not the
-engine crate: it is the day/night-aware D-region absorbing layer the GUI feeds
-to the (unchanged) engine tracer. Notation and sign conventions follow
-conventions.md and density.rs.
+Derived here for `app/src/dregion.rs`. Unlike everything else in
+docs/derivations/, this supports the *scenario-level* app, not the engine
+crate: it is the day/night-aware D-region absorbing layer the app feeds to the
+(unchanged) engine tracer. Notation and sign conventions follow conventions.md
+and density.rs.
 
 ## 1. Why the plane-parallel layer is not enough
 

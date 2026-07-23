@@ -1,4 +1,4 @@
-//! Day/night-aware D-region absorbing layer for the debug harness.
+//! Day/night-aware D-region absorbing layer for the app.
 //!
 //! This is the one place the GUI carries physics of its own: a solar
 //! zenith-angle dependent alpha-Chapman layer built on the Chapman
@@ -16,7 +16,7 @@ use skipzone::geo::SphericalPoint;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 /// 2/sqrt(pi), the constant in erf'(t) and erfcx'(t).
-const TWO_OVER_SQRT_PI: f64 = 1.128_379_167_095_512_6;
+const TWO_OVER_SQRT_PI: f64 = std::f64::consts::FRAC_2_SQRT_PI;
 /// sqrt(pi).
 const SQRT_PI: f64 = 1.772_453_850_905_516;
 

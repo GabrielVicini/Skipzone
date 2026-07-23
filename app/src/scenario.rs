@@ -229,8 +229,8 @@ pub struct Assumptions {
 
 pub fn season_at(month: u32, latitude_deg: f64) -> Season {
     let north = match month {
-        12 | 1 | 2 => Season::Winter,
-        6 | 7 | 8 => Season::Summer,
+        1..=2 | 12 => Season::Winter,
+        6..=8 => Season::Summer,
         _ => Season::Equinox,
     };
     if latitude_deg >= 0.0 {
