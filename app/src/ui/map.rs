@@ -48,13 +48,37 @@ impl Plugin for TerminatorPlugin {
         if rect.width() < 1.0 || rect.height() < 1.0 {
             return;
         }
-        // Grid fine enough for a smooth gradient (~every 22 px), bounded so an
-        // extreme window size can neither alias the terminator nor explode the
-        // vertex count.
+        // The mesh colours the twilight ramp per-vertex and lets the GPU
+        // interpolate. When the whole 18 deg band collapses onto about one
+        // grid cell - which is what happens zoomed out, where many degrees of
+        // longitude fall on each pixel - that linear interpolation shows as
+        // hard facets. So size the grid from how much geography a pixel spans:
+        // measure degrees of longitude per pixel off the projector (Mercator x
+        // is linear in longitude, so this is stable at any latitude), work out
+        // how wide the twilight band is on screen, and aim for several cells
+        // across it. Zoomed in the band is hundreds of pixels wide, so this
+        // relaxes back to a cheap coarse grid.
+        let deg_per_px = {
+            let mid_y = rect.center().y;
+            let a = projector.unproject(vec2(rect.center().x, mid_y));
+            let b = projector.unproject(vec2(rect.center().x + 100.0, mid_y));
+            let mut d = (b.x() - a.x()).abs();
+            if d > 180.0 {
+                d = 360.0 - d; // guard the antimeridian wrap
+            }
+            (d / 100.0).max(1e-9)
+        };
+        // Pixels spanned by the twilight band, then the cell size that puts
+        // ~8 cells across it. Clamped so we never sample finer than 4 px or
+        // coarser than 22 px, and the cell count is bounded so an extreme
+        // zoom-out on a large window cannot explode the vertex count.
+        #[allow(clippy::cast_possible_truncation)]
+        let band_px = (TWILIGHT_DEG / deg_per_px) as f32;
+        let cell_px = (band_px / 8.0).clamp(4.0, 22.0);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let cols = ((rect.width() / 22.0).ceil() as usize).clamp(8, 96);
+        let cols = ((rect.width() / cell_px).ceil() as usize).clamp(8, 200);
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let rows = ((rect.height() / 22.0).ceil() as usize).clamp(8, 96);
+        let rows = ((rect.height() / cell_px).ceil() as usize).clamp(8, 200);
 
         let (sin_d, cos_d) = self.decl_deg.to_radians().sin_cos();
         let sub = self.sub_lon_deg.to_radians();
