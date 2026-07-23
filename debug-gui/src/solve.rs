@@ -591,6 +591,67 @@ mod tests {
         );
     }
 
+    /// Regression guard for the "absorption ~ 0 at the terminator" bug. Past
+    /// the engine's 85 deg plane-parallel limit the D region used to be omitted
+    /// entirely, collapsing absorption to the negligible F2-only floor
+    /// (~1e-3 dB). With the Chapman grazing layer the D region is still present
+    /// and producing a few degrees past 85 deg, so both the sampled density and
+    /// the solved absorption stay meaningfully non-zero.
+    #[test]
+    fn terminator_d_region_is_not_cut() {
+        use skipzone::density::ElectronDensity;
+        use skipzone::geo::SphericalPoint;
+        use skipzone::units::{Meters, Radians};
+
+        // Denver -> London in January, walked in UTC to a midpoint zenith angle
+        // just past the old 85 deg cliff.
+        let mut chosen: Option<(Inputs, scenario::Assumptions)> = None;
+        let mut utc = 17.5_f64;
+        while utc <= 20.0 {
+            let inputs = Inputs {
+                utc_hours: utc,
+                ..Inputs::default()
+            };
+            let a = scenario::resolve(&inputs);
+            if (85.0..88.0).contains(&a.solar.zenith_angle_deg) {
+                chosen = Some((inputs, a));
+                break;
+            }
+            utc += 0.1;
+        }
+        let (inputs, a) = chosen.expect("a terminator geometry in 17.5..=20 UTC");
+        assert!(a.solar.is_day(), "sun is still up just past 85 deg");
+
+        // The D region must still be producing at the midpoint: sample the
+        // density model actually fed to the tracer at its realised peak height.
+        // Under the old omit-past-85 logic this would be the F2 tail alone (~0).
+        let models = scenario::build_models(&inputs, &a).expect("models build");
+        let mid = SphericalPoint::new(
+            Meters::new(scenario::EARTH_RADIUS_M + a.d_region_peak_alt_km * 1e3),
+            Radians::from_degrees(90.0 - a.midpoint_lat),
+            Radians::from_degrees(a.midpoint_lon),
+        );
+        let ne = models.density.sample(&mid).ne;
+        assert!(
+            ne > 1e8,
+            "terminator D region should still produce, got Ne = {ne:.3e} at chi = {} deg",
+            a.solar.zenith_angle_deg
+        );
+
+        // And the solved path must absorb meaningfully, not collapse to the
+        // ~1e-3 dB F2-only floor that was the reported bug.
+        let out = solve(&inputs, &a, &models);
+        let s = out
+            .solutions
+            .first()
+            .expect("a solution at the terminator geometry");
+        assert!(
+            s.total_absorption_db > 0.1,
+            "terminator absorption collapsed to {} dB (the bug)",
+            s.total_absorption_db
+        );
+    }
+
     /// The default scenario sits close to the terminator: mid-January,
     /// 18:00 UTC, midpoint near 59 N gives chi ~ 84 deg, i.e. the sun barely
     /// 6 deg above the horizon. It is (just) daylight, so a weak D region is

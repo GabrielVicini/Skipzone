@@ -45,7 +45,10 @@ fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::NONE
         .inner_margin(Margin::symmetric(8, 6))
         .corner_radius(CornerRadius::same(6))
-        .stroke(Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+        .stroke(Stroke::new(
+            1.0,
+            ui.visuals().widgets.noninteractive.bg_stroke.color,
+        ))
         .show(ui, add)
         .inner
 }
@@ -366,19 +369,21 @@ pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
                     ui,
                     "D layer",
                     if a.d_region_active {
-                        "active".to_string()
+                        "producing at midpoint (varies along path)".to_string()
                     } else {
-                        "omitted (night)".to_string()
+                        "night at midpoint (still active on any sunlit part)".to_string()
                     },
                 );
-                if a.d_region_active {
-                    kv(ui, "  peak Ne", format!("{:.4e} m^-3", a.d_region_peak_ne));
-                    kv(
-                        ui,
-                        "  peak alt",
-                        format!("{:.2} km", a.d_region_peak_alt_km),
-                    );
-                }
+                kv(
+                    ui,
+                    "  midpoint peak Ne",
+                    format!("{:.4e} m^-3", a.d_region_peak_ne),
+                );
+                kv(
+                    ui,
+                    "  midpoint peak alt",
+                    format!("{:.2} km", a.d_region_peak_alt_km),
+                );
                 kv(ui, "  basis", a.d_region_source.clone());
 
                 sub_head(ui, "COLLISION FREQUENCY");
@@ -441,7 +446,7 @@ pub fn legend_panel(
                         sol.total_group_km,
                         sol.total_absorption_db
                     ))
-                        .small();
+                    .small();
                     if ui.selectable_label(*selected == Some(i), label).clicked() {
                         *selected = Some(i);
                     }

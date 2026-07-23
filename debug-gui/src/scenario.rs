@@ -5,13 +5,13 @@
 
 use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
 use skipzone::density::{
-    ChapmanLayer, ElectronDensity, MAX_CHAPMAN_ZENITH_ANGLE, MultiLayer, critical_frequency,
-    density_at_critical_frequency,
+    ChapmanLayer, ElectronDensity, MultiLayer, critical_frequency, density_at_critical_frequency,
 };
 use skipzone::geo::SphericalPoint;
 use skipzone::mag::{Igrf, IgrfModel, MagneticField};
 use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
+use crate::dregion::SolarChapmanD;
 use crate::solar::{self, SolarGeometry};
 
 /// Spherical Earth radius, matching the engine's validation suites.
@@ -304,31 +304,39 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     let day = solar.is_day();
     let season = season_at(inputs.month, mid_lat);
 
-    // D region: alpha-Chapman peak relations at the midpoint zenith angle.
+    // D region: day/night-aware alpha-Chapman layer on the Chapman grazing
+    // function (docs/derivations/chapman-grazing.md). The layer is ALWAYS built
+    // (build_models) and is evaluated at the LOCAL solar zenith angle at every
+    // point along the ray; these numbers are the realised peak at the path
+    // midpoint, for display only.
     let chi_deg = solar.zenith_angle_deg;
-    let d_region_active = chi_deg < MAX_CHAPMAN_ZENITH_ANGLE.to_degrees();
-    let cos_chi = chi_deg.to_radians().cos();
-    let (d_region_peak_ne, d_region_peak_alt_km, d_region_source) = if d_region_active {
-        (
-            D_REGION_PEAK_NE_OVERHEAD * cos_chi.sqrt(),
-            D_REGION_PEAK_ALT_KM + D_REGION_SCALE_HEIGHT_KM * (1.0 / cos_chi).ln(),
-            format!(
-                "alpha-Chapman at chi = {chi_deg:.2} deg: Nm x sqrt(cos chi), peak +H ln(sec chi); \
-                 overhead anchor {D_REGION_PEAK_NE_OVERHEAD:.1e} m^-3 at {D_REGION_PEAK_ALT_KM:.0} km \
-                 (order-of-magnitude, not a fitted model)"
-            ),
-        )
+    let d_disp = SolarChapmanD::new(
+        D_REGION_PEAK_NE_OVERHEAD,
+        EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
+        D_REGION_SCALE_HEIGHT_KM * 1e3,
+        solar.declination_deg,
+        inputs.utc_hours,
+    );
+    let chi_rad = chi_deg.to_radians();
+    let d_region_peak_ne = d_disp.realised_peak_ne(chi_rad);
+    // "Active" now means "producing at the midpoint", tied to the SAME
+    // sun-above-horizon test as is_day(), so the panel can no longer disagree
+    // with itself about day vs night (the old 85 deg / 90 deg split).
+    let d_region_active = solar.is_day() && d_region_peak_ne > 1e-3 * D_REGION_PEAK_NE_OVERHEAD;
+    let rise_km = d_disp.realised_peak_rise(chi_rad) / 1e3;
+    let d_region_peak_alt_km = if rise_km.is_finite() {
+        D_REGION_PEAK_ALT_KM + rise_km
     } else {
-        (
-            0.0,
-            D_REGION_PEAK_ALT_KM,
-            format!(
-                "omitted: chi = {chi_deg:.2} deg is past the {:.0} deg plane-parallel Chapman \
-                 limit (night side); D-region absorption treated as absent",
-                MAX_CHAPMAN_ZENITH_ANGLE.to_degrees()
-            ),
-        )
+        D_REGION_PEAK_ALT_KM
     };
+    let d_region_source = format!(
+        "alpha-Chapman with Chapman grazing function Ch(X, chi) at midpoint \
+         chi = {chi_deg:.2} deg: realised peak Nm/sqrt(Ch) at +H ln(Ch), staying finite \
+         through the terminator. Evaluated at the LOCAL zenith angle at every point on \
+         the ray, so a path crossing the terminator is absorbed only on its sunlit part. \
+         Overhead anchor {D_REGION_PEAK_NE_OVERHEAD:.1e} m^-3 at {D_REGION_PEAK_ALT_KM:.0} km \
+         (order-of-magnitude, not a fitted model)"
+    );
 
     let (fof2, fof2_source) = match inputs.fof2_override {
         Some(v) => (v, "manual override".to_string()),
@@ -415,17 +423,18 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     )
     .map_err(|e| format!("F2 Chapman layer rejected: {e}"))?;
 
-    let mut layers: Vec<Box<dyn ElectronDensity + Send + Sync>> = vec![Box::new(f2)];
-    if a.d_region_active {
-        let d = ChapmanLayer::with_zenith_angle(
-            PerCubicMeter::new(D_REGION_PEAK_NE_OVERHEAD),
-            Meters::new(EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3),
-            Meters::new(D_REGION_SCALE_HEIGHT_KM * 1e3),
-            Radians::from_degrees(a.solar.zenith_angle_deg),
-        )
-        .map_err(|e| format!("D-region layer rejected: {e}"))?;
-        layers.push(Box::new(d));
-    }
+    // The D region is always present and is day/night-aware: it evaluates the
+    // Chapman grazing function at the local solar zenith angle of each sampled
+    // point, self-zeroing smoothly on the night side rather than being switched
+    // off at a midpoint zenith-angle threshold (docs/derivations/chapman-grazing.md).
+    let d = SolarChapmanD::new(
+        D_REGION_PEAK_NE_OVERHEAD,
+        EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
+        D_REGION_SCALE_HEIGHT_KM * 1e3,
+        a.solar.declination_deg,
+        inputs.utc_hours,
+    );
+    let layers: Vec<Box<dyn ElectronDensity + Send + Sync>> = vec![Box::new(f2), Box::new(d)];
     let density = MultiLayer::new(layers);
 
     let field = if inputs.use_field {
