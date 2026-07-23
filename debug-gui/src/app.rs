@@ -7,7 +7,7 @@ use egui::{
 };
 use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreetMap};
 
-use crate::mapview::PathPlugin;
+use crate::mapview::{PathPlugin, TerminatorPlugin};
 use crate::panels::{self, BAD, FAIL, MUTED, OK};
 use crate::scenario::{self, Assumptions, Inputs, PlaceMode, ProfileRow};
 use crate::solve::{self, Solution, SolveOutcome};
@@ -31,6 +31,8 @@ pub struct DebugApp {
     build_error: Option<String>,
     needs_fit: bool,
     styled_for_width: f32,
+    /// Draw the live day/night terminator shading on the map.
+    show_terminator: bool,
 }
 
 impl DebugApp {
@@ -49,6 +51,7 @@ impl DebugApp {
             build_error: None,
             needs_fit: true,
             styled_for_width: 0.0,
+            show_terminator: true,
         }
     }
 
@@ -65,19 +68,19 @@ impl DebugApp {
         let mono = FontFamily::Monospace;
         let prop = FontFamily::Proportional;
         style.text_styles = [
-            (TextStyle::Heading,   FontId::new(17.0 * scale, prop.clone())),
-            (TextStyle::Body,      FontId::new(13.0 * scale, prop.clone())),
-            (TextStyle::Button,    FontId::new(13.0 * scale, prop.clone())),
-            (TextStyle::Small,     FontId::new(11.0 * scale, prop)),
+            (TextStyle::Heading, FontId::new(17.0 * scale, prop.clone())),
+            (TextStyle::Body, FontId::new(13.0 * scale, prop.clone())),
+            (TextStyle::Button, FontId::new(13.0 * scale, prop.clone())),
+            (TextStyle::Small, FontId::new(11.0 * scale, prop)),
             (TextStyle::Monospace, FontId::new(11.5 * scale, mono)),
-        ].into();
+        ]
+        .into();
 
-        style.spacing.item_spacing     = egui::vec2(6.0 * scale, 4.0 * scale);
-        style.spacing.button_padding   = egui::vec2(7.0 * scale, 4.0 * scale);
-        style.spacing.indent           = 14.0 * scale;
-        style.spacing.interact_size.y  = 20.0 * scale;
-        style.visuals.widgets.noninteractive.bg_stroke =
-            Stroke::new(1.0, Color32::from_gray(0x3A));
+        style.spacing.item_spacing = egui::vec2(6.0 * scale, 4.0 * scale);
+        style.spacing.button_padding = egui::vec2(7.0 * scale, 4.0 * scale);
+        style.spacing.indent = 14.0 * scale;
+        style.spacing.interact_size.y = 20.0 * scale;
+        style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_gray(0x3A));
     }
 
     fn fit_zoom(&self, size: egui::Vec2) -> f64 {
@@ -87,7 +90,7 @@ impl DebugApp {
         } else {
             raw_dlon
         }
-            .max(0.05);
+        .max(0.05);
         let dlat = (self.inputs.tx_lat - self.inputs.rx_lat).abs().max(0.05);
         let w = f64::from(size.x.max(200.0));
         let h = f64::from(size.y.max(200.0));
@@ -198,12 +201,7 @@ impl App for DebugApp {
                             Self::status_chip(ui, out);
                             ui.add_space(6.0);
                             panels::reference_panel(ui, out);
-                            panels::legend_panel(
-                                ui,
-                                out,
-                                &mut self.visible,
-                                &mut self.selected,
-                            );
+                            panels::legend_panel(ui, out, &mut self.visible, &mut self.selected);
                             if let Some(sol) = self.selected.and_then(|i| out.solutions.get(i)) {
                                 panels::solution_panel(ui, sol);
                             }
@@ -231,7 +229,7 @@ impl App for DebugApp {
                             PlaceMode::Rx => "RX",
                         }
                     ))
-                        .strong(),
+                    .strong(),
                 );
                 ui.separator();
                 if ui.button("Fit path").clicked() {
@@ -252,6 +250,8 @@ impl App for DebugApp {
                         .monospace()
                         .small(),
                 );
+                ui.separator();
+                ui.checkbox(&mut self.show_terminator, "Night shading");
                 ui.label(
                     RichText::new("drag to pan, scroll to zoom")
                         .small()
@@ -282,9 +282,23 @@ impl App for DebugApp {
                 tx: (self.inputs.tx_lat, self.inputs.tx_lon),
                 rx: (self.inputs.rx_lat, self.inputs.rx_lon),
             };
-            let map = Map::new(Some(&mut self.tiles), &mut self.map_memory, center_pos)
-                .zoom_with_ctrl(false)
-                .with_plugin(plugin);
+            // Terminator shading is added first so it sits under the ray paths.
+            // It reads the subsolar point derived from the current UTC/date, so
+            // it tracks the Time (UTC) control live without a re-solve.
+            let mut map = Map::new(Some(&mut self.tiles), &mut self.map_memory, center_pos)
+                .zoom_with_ctrl(false);
+            if self.show_terminator {
+                let (decl_deg, sub_lon_deg) = crate::solar::subsolar_point(
+                    self.inputs.month,
+                    self.inputs.day_of_month,
+                    self.inputs.utc_hours,
+                );
+                map = map.with_plugin(TerminatorPlugin {
+                    decl_deg,
+                    sub_lon_deg,
+                });
+            }
+            let map = map.with_plugin(plugin);
             let resp = ui.add(map);
 
             if resp.clicked() {

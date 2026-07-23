@@ -49,6 +49,19 @@ pub fn day_of_year(month: u32, day_of_month: u32) -> u32 {
     DAYS_BEFORE_MONTH[m] + day_of_month.clamp(1, 31)
 }
 
+/// Subsolar point (sun directly overhead) for a date and UTC time, as
+/// `(latitude_deg, longitude_deg)`. Latitude is the solar declination; the
+/// longitude is where the hour angle is zero (local solar noon): with
+/// `H = phi + (pi/12) utc - pi = 0` the subsolar longitude is
+/// `180 - 15 utc` degrees, wrapped to [-180, 180]. Same declination and hour
+/// conventions as `solar_geometry`, so the two agree pointwise.
+pub fn subsolar_point(month: u32, day_of_month: u32, utc_hours: f64) -> (f64, f64) {
+    let n = day_of_year(month, day_of_month);
+    let decl_deg = 23.45 * (360.0 * (284.0 + f64::from(n)) / 365.0).to_radians().sin();
+    let sub_lon = ((180.0 - 15.0 * utc_hours + 180.0).rem_euclid(360.0)) - 180.0;
+    (decl_deg, sub_lon)
+}
+
 /// Solar geometry at a geographic point for a date and UTC time.
 pub fn solar_geometry(
     lat_deg: f64,
@@ -146,6 +159,21 @@ mod tests {
                 g.hour_angle_deg.abs() < 1e-9,
                 "lon {lon}: hour angle {}",
                 g.hour_angle_deg
+            );
+        }
+    }
+
+    /// The subsolar point must see the sun overhead (chi ~ 0) at the same
+    /// instant, i.e. it agrees with the pointwise solar_geometry.
+    #[test]
+    fn subsolar_point_has_sun_overhead() {
+        for (month, day, utc) in [(3, 22, 0.0), (6, 21, 9.5), (12, 21, 18.0), (9, 23, 23.0)] {
+            let (lat, lon) = subsolar_point(month, day, utc);
+            let g = solar_geometry(lat, lon, month, day, utc);
+            assert!(
+                g.zenith_angle_deg < 0.5,
+                "subsolar chi = {} deg at {month}/{day} {utc}h",
+                g.zenith_angle_deg
             );
         }
     }
