@@ -27,8 +27,9 @@ use skipzone::homing::{Homing, HomingError};
 use skipzone::magnetoionic::Mode;
 use skipzone::units::Radians;
 
+use crate::noise::LinkSettings;
 use crate::scenario::{
-    Assumptions, EARTH_RADIUS_M, Inputs, Models, destination_point, ground_point,
+    self, Assumptions, EARTH_RADIUS_M, Inputs, Models, destination_point, ground_point,
 };
 
 use tracing::{assemble, homing_config, make_tracer, near_miss_sweep, propagate};
@@ -45,6 +46,16 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     let mut errors = Vec::new();
     let f_hz = inputs.freq_mhz * 1e6;
     let ground = inputs.ground_type.constants();
+
+    // The judgment layer's inputs, fixed for this solve. Computed at THIS
+    // frequency (not the tuned one) so the frequency sweep, which re-solves
+    // against one `Assumptions`, gets the right floor at every candidate.
+    let noise = scenario::noise_floor_at(inputs, a, inputs.freq_mhz);
+    let link_settings = LinkSettings {
+        tx_power_w: inputs.tx_power_w,
+        noise,
+        threshold_db: inputs.snr_threshold_db,
+    };
 
     // Without a field, O and X are bit-identical by construction, so tracing
     // both would just draw the same path twice.
@@ -87,6 +98,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                             ray.miss_m,
                             note,
                             inputs.freq_mhz,
+                            link_settings,
                         ));
                     }
                 }
@@ -123,6 +135,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
 
     SolveOutcome {
         solutions,
+        noise,
+        snr_threshold_db: inputs.snr_threshold_db,
         near_misses,
         sweep_notes,
         errors,

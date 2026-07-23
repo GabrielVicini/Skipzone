@@ -7,6 +7,7 @@ use egui::{
 };
 use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreetMap};
 
+use crate::noise::PathState;
 use crate::scenario::{Assumptions, Inputs, PlaceMode, ProfileRow};
 use crate::solve::{Solution, SolveOutcome};
 use crate::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
@@ -188,14 +189,36 @@ impl SkipzoneApp {
         }
     }
 
+    /// The headline verdict. This is the label the whole change exists to fix:
+    /// it used to say "CONNECTS" as soon as a ray closed, which claimed
+    /// audibility the tracer never established. It now reports the geometry and
+    /// the received-signal judgment as the two separate facts they are.
     fn status_chip(ui: &mut Ui, out: &SolveOutcome) {
-        let (colour, text) = if out.solutions.is_empty() {
-            (FAIL, "NO PATH CONNECTS at this frequency".to_string())
-        } else {
-            (
+        let best = out
+            .solutions
+            .iter()
+            .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db));
+        let (colour, text) = match best {
+            None => (FAIL, "NO PATH FOUND at this frequency".to_string()),
+            Some(s) if s.link.state() == PathState::Usable => (
                 OK,
-                format!("CONNECTS - {} mode(s) found", out.solutions.len()),
-            )
+                format!(
+                    "USABLE - path found, SNR {:.1} dB ({:+.1} dB over threshold), {} mode(s)",
+                    s.link.snr_db,
+                    s.link.margin_db(),
+                    out.solutions.len(),
+                ),
+            ),
+            Some(s) => (
+                WARN,
+                format!(
+                    "PATH FOUND, BELOW THRESHOLD - geometry closes, SNR {:.1} dB is {:.1} dB \
+                     short; {} mode(s)",
+                    s.link.snr_db,
+                    -s.link.margin_db(),
+                    out.solutions.len(),
+                ),
+            ),
         };
         egui::Frame::NONE
             .fill(colour.gamma_multiply(0.18))
@@ -294,8 +317,9 @@ impl App for SkipzoneApp {
                         )
                         .on_hover_text(
                             "Sweep 2-30 MHz at the current TX/RX and scenario; report the \
-                             frequency that connects with the lowest absorption (or the \
-                             smallest near-miss). Runs off-thread; the current solution stays.",
+                             frequency with the strongest SNR at the receiver (or, if no path \
+                             is found anywhere, the smallest near-miss). Runs off-thread; the \
+                             current solution stays.",
                         )
                         .clicked()
                     {
@@ -322,7 +346,11 @@ impl App for SkipzoneApp {
                         }
                     }
                     if let Some(best) = self.sweep_best {
-                        let colour = if best.point.connects { OK } else { WARN };
+                        let colour = match best.point.state {
+                            PathState::Usable => OK,
+                            PathState::BelowThreshold => WARN,
+                            PathState::NoPath => FAIL,
+                        };
                         ui.colored_label(
                             colour,
                             RichText::new(panels::sweep_verdict_text(best)).strong(),
@@ -337,14 +365,15 @@ impl App for SkipzoneApp {
                         self.inputs.freq_mhz,
                         self.sweep_best.map(|b| b.point),
                     );
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (colour, text) in panels::state_legend() {
+                            ui.colored_label(colour, RichText::new("\u{25A0}").small());
+                            ui.label(RichText::new(text).small().color(MUTED));
+                        }
                         ui.label(
-                            RichText::new(
-                                "band: green = connects (low absorption), red = no connect / \
-                                 large miss. White = tuned freq, cyan = best.",
-                            )
-                            .small()
-                            .color(MUTED),
+                            RichText::new("| white = tuned freq, cyan = best")
+                                .small()
+                                .color(MUTED),
                         );
                     });
                 }

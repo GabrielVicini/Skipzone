@@ -3,59 +3,88 @@
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 
+use crate::noise::PathState;
 use crate::solve::mode_label;
 use crate::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepBest, SweepPoint};
 
-/// Green (best) -> amber -> red (worst) ramp for a badness in [0, 1].
-fn grad_color(t: f32) -> Color32 {
-    let t = t.clamp(0.0, 1.0);
-    let lerp = |a: u8, b: u8, u: f32| -> u8 {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        {
-            (f32::from(a) + (f32::from(b) - f32::from(a)) * u).round() as u8
-        }
-    };
-    let mix = |a: [u8; 3], b: [u8; 3], u: f32| {
-        Color32::from_rgb(
-            lerp(a[0], b[0], u),
-            lerp(a[1], b[1], u),
-            lerp(a[2], b[2], u),
-        )
-    };
-    let green = [0x2E, 0x9D, 0x4F];
-    let amber = [0xE9, 0xC4, 0x4A];
-    let red = [0xC8, 0x3A, 0x1C];
-    if t < 0.5 {
-        mix(green, amber, t / 0.5)
-    } else {
-        mix(amber, red, (t - 0.5) / 0.5)
+fn lerp(a: u8, b: u8, u: f32) -> u8 {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        (f32::from(a) + (f32::from(b) - f32::from(a)) * u).round() as u8
     }
+}
+
+fn mix(a: [u8; 3], b: [u8; 3], u: f32) -> Color32 {
+    let u = u.clamp(0.0, 1.0);
+    Color32::from_rgb(lerp(a[0], b[0], u), lerp(a[1], b[1], u), lerp(a[2], b[2], u))
+}
+
+/// Colour band per verdict state, shaded within the band by `badness`:
+///   * usable            - green, darkening as the SNR margin shrinks
+///   * below threshold   - yellow, darkening as the shortfall grows
+///   * no path           - red, darkening as the near-miss grows
+///
+/// The three bands are deliberately different HUES, not points on one ramp:
+/// "geometry closes but nobody can hear it" is a different kind of answer from
+/// "there is no path", and the chart should not blend them into each other.
+fn state_color(p: SweepPoint) -> Color32 {
+    let t = p.badness();
+    match p.state {
+        PathState::Usable => mix([0x3F, 0xC7, 0x66], [0x1B, 0x63, 0x33], t),
+        PathState::BelowThreshold => mix([0xF2, 0xD3, 0x5C], [0x8A, 0x6E, 0x14], t),
+        PathState::NoPath => mix([0xD8, 0x53, 0x35], [0x6B, 0x1A, 0x0C], t),
+    }
+}
+
+/// Swatches for the chart legend, in the same order as the three states.
+#[must_use]
+pub fn state_legend() -> [(Color32, &'static str); 3] {
+    [
+        (
+            Color32::from_rgb(0x3F, 0xC7, 0x66),
+            "usable (SNR clears threshold)",
+        ),
+        (
+            Color32::from_rgb(0xF2, 0xD3, 0x5C),
+            "path found, below threshold",
+        ),
+        (Color32::from_rgb(0xD8, 0x53, 0x35), "no path"),
+    ]
 }
 
 /// One-line verdict for the best-frequency search.
 #[must_use]
 pub fn sweep_verdict_text(best: SweepBest) -> String {
     let p = best.point;
-    if p.connects {
-        format!(
-            "Best: {:.2} MHz - {}-mode, {} hop(s), {:.2} dB absorption",
+    match p.state {
+        PathState::Usable => format!(
+            "Best: {:.2} MHz - {}-mode, {} hop(s), SNR {:.1} dB ({:+.1} dB margin)",
             p.freq_mhz,
             p.mode.map_or("?", mode_label),
             p.hops,
-            p.absorption_db
-        )
-    } else {
-        format!(
-            "No frequency connects in {SWEEP_MIN_MHZ:.0}-{SWEEP_MAX_MHZ:.0} MHz. Closest: \
+            p.snr_db,
+            p.margin_db,
+        ),
+        PathState::BelowThreshold => format!(
+            "No frequency is usable in {SWEEP_MIN_MHZ:.0}-{SWEEP_MAX_MHZ:.0} MHz. Best geometry: \
+             {:.2} MHz, {}-mode, {} hop(s), SNR {:.1} dB - {:.1} dB short of the threshold",
+            p.freq_mhz,
+            p.mode.map_or("?", mode_label),
+            p.hops,
+            p.snr_db,
+            -p.margin_db,
+        ),
+        PathState::NoPath => format!(
+            "No path found in {SWEEP_MIN_MHZ:.0}-{SWEEP_MAX_MHZ:.0} MHz. Closest: \
              {:.2} MHz, near-miss {:.0} km ({} hop(s))",
             p.freq_mhz, p.miss_km, p.hops
-        )
+        ),
     }
 }
 
-/// The live frequency-sweep band: one coloured bar per tried frequency, green
-/// (connects, low absorption) through amber to red (no connection / large
-/// miss), with the current and best frequencies marked. Drawn from the cache,
+/// The live frequency-sweep band: one bar per tried frequency, coloured by the
+/// three-state verdict (green usable / yellow path-found-but-too-weak / red no
+/// path), with the current and best frequencies marked. Drawn from the cache,
 /// so it redraws every frame without re-running any solve.
 pub fn sweep_chart(
     ui: &mut Ui,
@@ -65,7 +94,7 @@ pub fn sweep_chart(
 ) {
     let width = ui.available_width();
     let height = 54.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, Color32::from_gray(0x1E));
 
@@ -99,7 +128,7 @@ pub fn sweep_chart(
         painter.rect_filled(
             Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom())),
             0.0,
-            grad_color(p.badness()),
+            state_color(**p),
         );
     }
 
@@ -116,6 +145,18 @@ pub fn sweep_chart(
         [pos2(xc, rect.top()), pos2(xc, rect.bottom())],
         Stroke::new(1.5, Color32::WHITE),
     );
+
+    // Hovering a bar gives that frequency's full readout - the same line the
+    // sweep logs to stderr, so the two never disagree.
+    if let Some(pos) = response.hover_pos()
+        && let Some(nearest) = sorted.iter().min_by(|a, b| {
+            (x_of(a.freq_mhz) - pos.x)
+                .abs()
+                .total_cmp(&(x_of(b.freq_mhz) - pos.x).abs())
+        })
+    {
+        response.clone().on_hover_text(nearest.debug_line());
+    }
 
     // Frequency axis labels along the bottom edge.
     for f in [SWEEP_MIN_MHZ, 10.0, 20.0, SWEEP_MAX_MHZ] {

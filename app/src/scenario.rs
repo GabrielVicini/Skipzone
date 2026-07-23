@@ -12,6 +12,7 @@ use skipzone::mag::{Igrf, IgrfModel, MagneticField};
 use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
 use crate::dregion::SolarChapmanD;
+use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
 use crate::solar::{self, SolarGeometry};
 
 /// Spherical Earth radius, matching the engine's validation suites.
@@ -144,6 +145,20 @@ pub struct Inputs {
     pub domain_top_km: f64,
     /// Surface at the intermediate ground reflections (link-budget ground loss).
     pub ground_type: GroundType,
+
+    // --- Received-signal judgment (see `crate::noise`) -------------------
+    /// Transmitter power, watts. Converted to dBm for the link budget.
+    pub tx_power_w: f64,
+    /// Receiving-site man-made noise category, ITU-R P.372 Table 1.
+    pub noise_env: NoiseEnvironment,
+    /// Operating-mode preset the bandwidth and threshold were last taken from.
+    /// Selecting one overwrites the two fields below; both stay editable, so
+    /// the threshold is a setting rather than a constant.
+    pub op_mode: OperatingMode,
+    /// Receiver noise bandwidth, Hz.
+    pub bandwidth_hz: f64,
+    /// SNR in `bandwidth_hz` required to call the path usable, dB.
+    pub snr_threshold_db: f64,
 }
 
 impl Default for Inputs {
@@ -169,6 +184,11 @@ impl Default for Inputs {
             max_hops: 4,
             domain_top_km: 800.0,
             ground_type: GroundType::MediumGround,
+            tx_power_w: 100.0,
+            noise_env: NoiseEnvironment::Rural,
+            op_mode: OperatingMode::Ssb,
+            bandwidth_hz: OperatingMode::Ssb.defaults().0,
+            snr_threshold_db: OperatingMode::Ssb.defaults().1,
         }
     }
 }
@@ -225,6 +245,31 @@ pub struct Assumptions {
     /// Realised D-region peak altitude at the midpoint, `+H ln(Ch)`, km.
     pub d_region_peak_alt_km: f64,
     pub d_region_source: String,
+    /// Sun above the horizon AT THE RECEIVER. The noise floor is a property of
+    /// the receiving site, so it uses this rather than the midpoint's `is_day`.
+    pub rx_is_day: bool,
+    /// Season at the receiver's latitude, for the atmospheric noise term.
+    pub rx_season: Season,
+}
+
+/// The noise floor for a scenario at one frequency.
+///
+/// Split out from [`resolve`] because the frequency sweep re-solves at many
+/// frequencies against a single `Assumptions`: the floor must follow the
+/// frequency actually being tried, not the tuned one.
+///
+/// Latitude, day/night and season are all taken at the RECEIVER: noise is what
+/// the listener's antenna hears, not a path-average quantity.
+#[must_use]
+pub fn noise_floor_at(inputs: &Inputs, a: &Assumptions, f_mhz: f64) -> NoiseFloor {
+    NoiseFloor::compute(
+        f_mhz,
+        inputs.bandwidth_hz,
+        inputs.noise_env,
+        a.rx_is_day,
+        a.rx_season,
+        inputs.rx_lat,
+    )
 }
 
 pub fn season_at(month: u32, latitude_deg: f64) -> Season {
@@ -343,6 +388,18 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     let lst = solar.local_solar_time_h;
     let season = season_at(inputs.month, mid_lat);
 
+    // Noise is heard at the receiver, so its day/night and season come from
+    // the receiver's own solar geometry, not the path midpoint's.
+    let rx_solar = solar::solar_geometry(
+        inputs.rx_lat,
+        inputs.rx_lon,
+        inputs.month,
+        inputs.day_of_month,
+        inputs.utc_hours,
+    );
+    let rx_is_day = rx_solar.is_day();
+    let rx_season = season_at(inputs.month, inputs.rx_lat);
+
     // D region: day/night-aware alpha-Chapman layer on the Chapman grazing
     // function (docs/derivations/chapman-grazing.md). The layer is ALWAYS built
     // (build_models) and is evaluated at the LOCAL solar zenith angle at every
@@ -440,6 +497,8 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         d_region_peak_ne,
         d_region_peak_alt_km,
         d_region_source,
+        rx_is_day,
+        rx_season,
     }
 }
 

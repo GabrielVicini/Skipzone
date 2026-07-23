@@ -2,6 +2,10 @@
 
 use egui::{ComboBox, DragValue, Grid, RichText, Ui};
 
+use crate::noise::{
+    MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
+    dbm_from_watts, man_made_range_is_valid,
+};
 use crate::scenario::{GroundType, Inputs, PlaceMode, fof2_from_ssn};
 use crate::ui::widgets::{card, hint, labelled_drag, section};
 
@@ -198,6 +202,99 @@ pub fn inputs_panel(ui: &mut Ui, inputs: &mut Inputs, place: &mut PlaceMode) -> 
                     );
                 });
         }
+    });
+
+    section(ui, "Station & noise (SNR verdict)");
+    card(ui, |ui| {
+        Grid::new("station")
+            .num_columns(2)
+            .spacing([10.0, 4.0])
+            .show(ui, |ui| {
+                labelled_drag(
+                    ui,
+                    "TX power",
+                    DragValue::new(&mut inputs.tx_power_w)
+                        .speed(5.0)
+                        .range(0.1..=10_000.0)
+                        .suffix(" W"),
+                );
+            });
+        hint(
+            ui,
+            &format!(
+                "= {:.1} dBm (P[dBm] = 30 + 10 log10 P[W]). Received power is this minus \
+                 the TOTAL system loss; there are no antenna gains in the budget.",
+                dbm_from_watts(inputs.tx_power_w)
+            ),
+        );
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("RX man-made noise environment").small());
+        ComboBox::from_id_salt("noise_env")
+            .selected_text(inputs.noise_env.label())
+            .show_ui(ui, |ui| {
+                for e in NoiseEnvironment::ALL {
+                    ui.selectable_value(&mut inputs.noise_env, e, e.label());
+                }
+            });
+        if !man_made_range_is_valid(inputs.freq_mhz) {
+            hint(
+                ui,
+                &format!(
+                    "{:.2} MHz is outside the {MAN_MADE_VALID_MIN_MHZ}-{MAN_MADE_VALID_MAX_MHZ} \
+                     MHz range ITU-R P.372 declares its man-made noise fit valid over; the \
+                     figure shown is an extrapolation.",
+                    inputs.freq_mhz
+                ),
+            );
+        }
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Mode preset (sets bandwidth + threshold)").small());
+        ComboBox::from_id_salt("op_mode")
+            .selected_text(inputs.op_mode.label())
+            .show_ui(ui, |ui| {
+                for m in OperatingMode::ALL {
+                    if ui
+                        .selectable_value(&mut inputs.op_mode, m, m.label())
+                        .clicked()
+                    {
+                        let (bw, thr) = m.defaults();
+                        inputs.bandwidth_hz = bw;
+                        inputs.snr_threshold_db = thr;
+                    }
+                }
+            });
+        ui.add_space(4.0);
+        Grid::new("snr")
+            .num_columns(2)
+            .spacing([10.0, 4.0])
+            .show(ui, |ui| {
+                labelled_drag(
+                    ui,
+                    "RX bandwidth",
+                    DragValue::new(&mut inputs.bandwidth_hz)
+                        .speed(10.0)
+                        .range(10.0..=20_000.0)
+                        .suffix(" Hz"),
+                );
+                labelled_drag(
+                    ui,
+                    "SNR threshold",
+                    DragValue::new(&mut inputs.snr_threshold_db)
+                        .speed(0.5)
+                        .range(-30.0..=60.0)
+                        .suffix(" dB"),
+                );
+            });
+        hint(
+            ui,
+            "A path is called USABLE only when its SNR clears this threshold; a path that \
+             closes geometrically but falls short is reported separately. The preset only \
+             seeds these two numbers - both stay editable, so the verdict is never decided \
+             by a constant baked into the code. Thresholds are operating-practice figures, \
+             not a cited standard.",
+        );
     });
 
     section(ui, "Magnetic field");

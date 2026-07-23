@@ -2,9 +2,10 @@
 
 use egui::{CollapsingHeader, RichText, Ui};
 
+use crate::noise::PathState;
 use crate::solve::{Solution, SolveOutcome, mode_label};
 use crate::ui::map::PALETTE;
-use crate::ui::theme::{FAIL, WARN};
+use crate::ui::theme::{FAIL, OK, WARN};
 use crate::ui::widgets::{data_grid, head_cells, hint, kv, num, sub_head, wide_table};
 
 /// Legend + per-solution visibility and selection.
@@ -18,7 +19,7 @@ pub fn legend_panel(
         .default_open(true)
         .show(ui, |ui| {
             if out.solutions.is_empty() {
-                ui.colored_label(FAIL, "No path connects.");
+                ui.colored_label(FAIL, "No path found.");
                 return;
             }
             for (i, sol) in out.solutions.iter().enumerate() {
@@ -28,11 +29,16 @@ pub fn legend_panel(
                     }
                     ui.colored_label(PALETTE[i % PALETTE.len()], "\u{25A0}");
                     let label = RichText::new(format!(
-                        "{}-mode, {} hop(s), {:.0} km group, {:.2} dB",
+                        "{}-mode, {} hop(s), {:.0} km group, SNR {:.1} dB{}",
                         mode_label(sol.mode),
                         sol.hops,
                         sol.total_group_km,
-                        sol.total_absorption_db
+                        sol.link.snr_db,
+                        if sol.link.state() == PathState::Usable {
+                            ""
+                        } else {
+                            " (below threshold)"
+                        },
                     ))
                     .small();
                     if ui.selectable_label(*selected == Some(i), label).clicked() {
@@ -118,13 +124,65 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                     "TOTAL system loss",
                     format!("{:.1} dB", sol.total_system_loss_db),
                 );
+
+                let lb = &sol.link;
+                sub_head(ui, "RECEIVED SIGNAL vs NOISE");
+                kv(ui, "TX power", format!("{:.1} dBm", lb.tx_power_dbm));
+                kv(ui, "Received power", format!("{:.1} dBm", lb.rx_power_dbm));
+                kv(
+                    ui,
+                    "  atmospheric Fa",
+                    format!("{:.1} dB", lb.noise.atmospheric_db),
+                );
+                kv(
+                    ui,
+                    "  man-made Fa",
+                    format!("{:.1} dB", lb.noise.man_made_db),
+                );
+                kv(
+                    ui,
+                    "  galactic Fa",
+                    format!("{:.1} dB", lb.noise.galactic_db),
+                );
+                kv(
+                    ui,
+                    "Total Fa (power sum)",
+                    format!("{:.1} dB above kT0b", lb.noise.total_fa_db),
+                );
+                kv(
+                    ui,
+                    &format!("Noise floor ({:.0} Hz)", lb.noise.bandwidth_hz),
+                    format!("{:.1} dBm", lb.noise.power_dbm),
+                );
+                kv(ui, "SNR", format!("{:.1} dB", lb.snr_db));
+                kv(
+                    ui,
+                    "SNR threshold",
+                    format!("{:.1} dB", lb.threshold_db),
+                );
+                kv(ui, "Margin", format!("{:+.1} dB", lb.margin_db()));
             });
+            let verdict = sol.link.state();
+            ui.colored_label(
+                if verdict == PathState::Usable { OK } else { WARN },
+                RichText::new(verdict.label()).strong().small(),
+            );
             hint(
                 ui,
                 "Basic transmission loss = free-space spreading (over the ray path) + \
                  ionospheric absorption + Fresnel ground-reflection loss. Excludes antenna \
                  gains and any statistical excess-loss term, so it sits a few dB below a \
                  full VOACAP path loss.",
+            );
+            hint(
+                ui,
+                "Received power = TX power - TOTAL system loss (isotropic ends, no antenna \
+                 gain). Noise floor = Fa + 10 log10(bandwidth) - 204 dBW, ITU-R P.372-9 \
+                 eq. (6); man-made and galactic Fa are P.372-9 Table 1. The ATMOSPHERIC term \
+                 is an approximation of this app's own, NOT P.372 map data - its trends with \
+                 frequency, day/night and season are meaningful, its absolute level is \
+                 indicative only. Noise is evaluated at the receiver's latitude and local \
+                 day/night.",
             );
             if let Some(note) = &sol.note {
                 ui.add_space(4.0);
