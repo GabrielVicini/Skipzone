@@ -14,11 +14,13 @@
 //!
 //! Module layout by concern:
 //!   * `scenario`, `solar`, `dregion` - turn UI inputs into engine models.
+//!   * `compute` - reusable parallel-execution layer over the engine (rayon).
 //!   * `solve`, `sweep` - drive the engine off the UI thread and summarise it.
 //!   * `ui` - the egui shell's panels, map plugins, and shared widgets.
 //!   * `app` - the eframe application shell that wires it all together.
 
 mod app;
+mod compute;
 mod dregion;
 mod scenario;
 mod solar;
