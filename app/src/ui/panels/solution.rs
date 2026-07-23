@@ -4,8 +4,7 @@ use egui::{CollapsingHeader, RichText, Ui};
 
 use crate::noise::PathState;
 use crate::solve::{Solution, SolveOutcome, mode_label};
-use crate::ui::map::PALETTE;
-use crate::ui::theme::{FAIL, OK, WARN};
+use crate::ui::theme::{self, FAIL, OK, WARN};
 use crate::ui::widgets::{data_grid, head_cells, hint, kv, num, sub_head, wide_table};
 
 /// Legend + per-solution visibility and selection.
@@ -27,7 +26,7 @@ pub fn legend_panel(
                     if let Some(v) = visible.get_mut(i) {
                         ui.checkbox(v, "");
                     }
-                    ui.colored_label(PALETTE[i % PALETTE.len()], "\u{25A0}");
+                    ui.colored_label(theme::solution_color(i), "\u{25A0}");
                     let label = RichText::new(format!(
                         "{}-mode, {} hop(s), {:.0} km group, SNR {:.1} dB{}",
                         mode_label(sol.mode),
@@ -155,16 +154,16 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                     format!("{:.1} dBm", lb.noise.power_dbm),
                 );
                 kv(ui, "SNR", format!("{:.1} dB", lb.snr_db));
-                kv(
-                    ui,
-                    "SNR threshold",
-                    format!("{:.1} dB", lb.threshold_db),
-                );
+                kv(ui, "SNR threshold", format!("{:.1} dB", lb.threshold_db));
                 kv(ui, "Margin", format!("{:+.1} dB", lb.margin_db()));
             });
             let verdict = sol.link.state();
             ui.colored_label(
-                if verdict == PathState::Usable { OK } else { WARN },
+                if verdict == PathState::Usable {
+                    OK
+                } else {
+                    WARN
+                },
                 RichText::new(verdict.label()).strong().small(),
             );
             hint(

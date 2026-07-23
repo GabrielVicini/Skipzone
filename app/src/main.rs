@@ -12,21 +12,29 @@
 //! (docs/derivations/chapman-grazing.md) and only ever feeds the engine tracer
 //! through the standard `ElectronDensity` trait.
 //!
-//! Module layout by concern:
-//!   * `scenario`, `solar`, `dregion` - turn UI inputs into engine models.
-//!   * `noise` - radio-noise floor (ITU-R P.372) and the SNR judgment layer.
-//!   * `compute` - reusable parallel-execution layer over the engine (rayon).
-//!   * `solve`, `sweep` - drive the engine off the UI thread and summarise it.
-//!   * `ui` - the egui shell's panels, map plugins, and shared widgets.
-//!   * `app` - the eframe application shell that wires it all together.
+//! Layered by concern, with each layer depending only on the ones above it:
+//!
+//! | layer       | modules                              | knows about        |
+//! |-------------|--------------------------------------|--------------------|
+//! | conversion  | `clock`, `grid`, `solar`             | nothing else       |
+//! | model       | `scenario`, `dregion`, `noise`       | the engine         |
+//! | computation | `compute`, `solve`, `sweep`          | the model          |
+//! | state       | `state`                              | the computation    |
+//! | view        | `ui`, `app`                          | the state          |
+//!
+//! Nothing in `ui` computes a physical quantity, and nothing below `state`
+//! mentions egui.
 
 mod app;
+mod clock;
 mod compute;
 mod dregion;
+mod grid;
 mod noise;
 mod scenario;
 mod solar;
 mod solve;
+mod state;
 mod sweep;
 mod ui;
 
