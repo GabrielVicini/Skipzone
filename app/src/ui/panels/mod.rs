@@ -17,4 +17,4 @@ pub use inputs::inputs_panel;
 pub use profile::profile_panel;
 pub use reference::reference_panel;
 pub use solution::{legend_panel, solution_panel};
-pub use sweep_chart::{sweep_chart, sweep_verdict_text};
+pub use sweep_chart::{state_legend, sweep_chart, sweep_verdict_text};

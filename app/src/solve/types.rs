@@ -4,6 +4,8 @@
 
 use skipzone::magnetoionic::Mode;
 
+use crate::noise::LinkBudget;
+
 #[must_use]
 pub fn mode_label(m: Mode) -> &'static str {
     match m {
@@ -60,6 +62,11 @@ pub struct Solution {
     /// Basic transmission loss = free-space + absorption + ground reflection, dB.
     /// Excludes antenna gains and any statistical excess-system-loss term.
     pub total_system_loss_db: f64,
+    /// Received power, noise floor and SNR for this path: the judgment layer
+    /// that decides whether a closing geometry is actually audible. Built from
+    /// `total_system_loss_db` plus the transmitter power and the noise floor;
+    /// it changes nothing about the loss terms above.
+    pub link: LinkBudget,
     pub total_ground_km: f64,
     /// Distance from the final landing point to the requested receiver.
     pub terminal_miss_km: f64,
@@ -86,6 +93,12 @@ pub struct NearMiss {
 
 pub struct SolveOutcome {
     pub solutions: Vec<Solution>,
+    /// The noise floor every solution above was judged against. Present even
+    /// when nothing was found, so the panel can still show what the receiver
+    /// would have been listening through.
+    pub noise: crate::noise::NoiseFloor,
+    /// SNR threshold in force for this solve, dB.
+    pub snr_threshold_db: f64,
     pub near_misses: Vec<NearMiss>,
     /// Plain-language outcome of the elevation sweep when nothing homed -
     /// notably the case where no elevation reflects at all, which produces no

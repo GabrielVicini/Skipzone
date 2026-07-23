@@ -21,6 +21,7 @@ use egui::Context;
 use skipzone::magnetoionic::Mode;
 
 use crate::compute::{ComputePool, Execution, PoolConfig, Timing};
+use crate::noise::PathState;
 use crate::scenario::{self, Assumptions, Inputs, Models, ProfileRow};
 use crate::solve::{self, SolveOutcome};
 
@@ -59,35 +60,97 @@ pub fn fine_freqs(center: f64) -> Vec<f64> {
 }
 
 /// One frequency's outcome, cached for the chart and the best-frequency pick.
+///
+/// `state` is the three-way verdict that replaced the old `connects` boolean:
+/// a path that closes geometrically is not the same claim as a path anyone can
+/// hear, and the sweep now distinguishes them.
 #[derive(Clone, Copy)]
 pub struct SweepPoint {
     pub freq_mhz: f64,
-    pub connects: bool,
-    /// Lowest total absorption [dB] among connecting modes; `+inf` if none.
+    pub state: PathState,
+    /// Lowest total absorption [dB] among the modes found; `+inf` if none.
     pub absorption_db: f64,
-    /// Smallest near-miss [km] when nothing connects; 0 when it connects.
+    /// Total system loss [dB] of the picked mode; `+inf` if no path.
+    pub system_loss_db: f64,
+    /// Received power [dBm] of the picked mode; `-inf` if no path.
+    pub rx_power_dbm: f64,
+    /// Noise floor [dBm] at this frequency. Defined even with no path.
+    pub noise_dbm: f64,
+    /// SNR [dB] of the picked mode; `-inf` if no path.
+    pub snr_db: f64,
+    /// `snr_db - threshold`; `-inf` if no path.
+    pub margin_db: f64,
+    /// Smallest near-miss [km] when no path was found; 0 when one was.
     pub miss_km: f64,
     pub hops: u32,
     pub mode: Option<Mode>,
 }
 
 impl SweepPoint {
-    /// 0 (best) to 1 (worst), for the green->red chart: connecting points are
-    /// graded by absorption over [0, `ABS_RED`] dB and kept in the green->amber
-    /// half; non-connecting points fill the amber->red half by near-miss.
+    /// 0 (best) to 1 (worst), used for the shade WITHIN a state's colour band.
+    /// Usable points are graded by how far above the threshold they sit,
+    /// below-threshold points by how far under it, and no-path points by
+    /// near-miss - so the chart still shows structure inside each of the three
+    /// bands rather than three flat colours.
     #[must_use]
     pub fn badness(self) -> f32 {
-        const ABS_RED_DB: f64 = 24.0;
+        const MARGIN_FULL_DB: f64 = 20.0;
+        const SHORTFALL_FULL_DB: f64 = 25.0;
         const MISS_RED_KM: f64 = 4000.0;
-        if self.connects {
-            #[allow(clippy::cast_possible_truncation)]
-            let t = (self.absorption_db / ABS_RED_DB).clamp(0.0, 1.0) as f32;
-            0.5 * t
-        } else {
-            #[allow(clippy::cast_possible_truncation)]
-            let t = (self.miss_km / MISS_RED_KM).clamp(0.0, 1.0) as f32;
-            0.5 + 0.5 * t
+        #[allow(clippy::cast_possible_truncation)]
+        match self.state {
+            // Best (0.0) at >= MARGIN_FULL_DB of margin, worst (1.0) at 0 dB.
+            PathState::Usable => {
+                (1.0 - (self.margin_db / MARGIN_FULL_DB).clamp(0.0, 1.0)) as f32
+            }
+            // 0.0 just under the threshold, 1.0 hopelessly under it.
+            PathState::BelowThreshold => {
+                ((-self.margin_db) / SHORTFALL_FULL_DB).clamp(0.0, 1.0) as f32
+            }
+            PathState::NoPath => (self.miss_km / MISS_RED_KM).clamp(0.0, 1.0) as f32,
         }
+    }
+
+    /// Did ray tracing find a path at all, whatever its strength?
+    #[must_use]
+    pub fn found_path(self) -> bool {
+        self.state.found_path()
+    }
+
+    /// Full per-frequency readout: the existing link-budget numbers plus the
+    /// received power, noise floor and SNR that now decide the verdict. Used
+    /// both for the sweep's stderr log and the chart's hover tooltip, so the
+    /// two can never drift apart.
+    #[must_use]
+    pub fn debug_line(self) -> String {
+        if !self.found_path() {
+            return format!(
+                "{:>5.2} MHz  NO PATH        near-miss {:>7.0} km  {} hop(s)  \
+                 noise {:>7.1} dBm",
+                self.freq_mhz,
+                self.miss_km,
+                self.hops,
+                self.noise_dbm,
+            );
+        }
+        format!(
+            "{:>5.2} MHz  {:<14} {}-mode {} hop(s)  abs {:>6.2} dB  loss {:>6.1} dB  \
+             Prx {:>7.1} dBm  noise {:>7.1} dBm  SNR {:>6.1} dB  margin {:>+6.1} dB",
+            self.freq_mhz,
+            if self.state == PathState::Usable {
+                "USABLE"
+            } else {
+                "BELOW THRESH"
+            },
+            self.mode.map_or("?", crate::solve::mode_label),
+            self.hops,
+            self.absorption_db,
+            self.system_loss_db,
+            self.rx_power_dbm,
+            self.noise_dbm,
+            self.snr_db,
+            self.margin_db,
+        )
     }
 }
 
@@ -127,16 +190,25 @@ pub enum Msg {
 }
 
 /// Reduce a full solve to the cached summary for one frequency.
+///
+/// Among the modes found, the one with the strongest SNR is kept: that is the
+/// signal an operator would actually hear, and it is what the three-state
+/// verdict must be based on.
 fn summarize(freq_mhz: f64, out: &SolveOutcome) -> SweepPoint {
     if let Some(best) = out
         .solutions
         .iter()
-        .min_by(|a, b| a.total_absorption_db.total_cmp(&b.total_absorption_db))
+        .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
     {
         SweepPoint {
             freq_mhz,
-            connects: true,
+            state: best.link.state(),
             absorption_db: best.total_absorption_db,
+            system_loss_db: best.total_system_loss_db,
+            rx_power_dbm: best.link.rx_power_dbm,
+            noise_dbm: best.link.noise.power_dbm,
+            snr_db: best.link.snr_db,
+            margin_db: best.link.margin_db(),
             miss_km: 0.0,
             hops: best.hops,
             mode: Some(best.mode),
@@ -146,8 +218,13 @@ fn summarize(freq_mhz: f64, out: &SolveOutcome) -> SweepPoint {
         let nm = out.near_misses.first();
         SweepPoint {
             freq_mhz,
-            connects: false,
+            state: PathState::NoPath,
             absorption_db: f64::INFINITY,
+            system_loss_db: f64::INFINITY,
+            rx_power_dbm: f64::NEG_INFINITY,
+            noise_dbm: out.noise.power_dbm,
+            snr_db: f64::NEG_INFINITY,
+            margin_db: f64::NEG_INFINITY,
             miss_km: nm.map_or(f64::INFINITY, |m| m.miss_km),
             hops: nm.map_or(0, |m| m.hops),
             mode: nm.map(|m| m.mode),
@@ -155,15 +232,19 @@ fn summarize(freq_mhz: f64, out: &SolveOutcome) -> SweepPoint {
     }
 }
 
-/// Best-frequency rule: any connecting frequency beats any non-connecting one;
-/// among connectors the lowest absorption wins; among misses the smallest miss.
+/// Best-frequency rule: any frequency with a path beats any without one; among
+/// those with a path the strongest SNR wins; among the rest the smallest miss.
+///
+/// SNR replaced absorption as the ranking key here because absorption is only
+/// one term of the loss and says nothing about the noise the signal has to beat
+/// - ranking by it could name a "best" frequency that is inaudible.
 #[must_use]
 pub fn better(a: SweepPoint, b: SweepPoint) -> SweepPoint {
-    match (a.connects, b.connects) {
+    match (a.found_path(), b.found_path()) {
         (true, false) => a,
         (false, true) => b,
         (true, true) => {
-            if a.absorption_db <= b.absorption_db {
+            if a.snr_db >= b.snr_db {
                 a
             } else {
                 b
@@ -350,7 +431,9 @@ fn solve_point(
     }
     let mut fi = inputs.clone();
     fi.freq_mhz = freq_mhz;
-    Some(summarize(freq_mhz, &solve::solve(&fi, a, models)))
+    let point = summarize(freq_mhz, &solve::solve(&fi, a, models));
+    eprintln!("[sweep] {}", point.debug_line());
+    Some(point)
 }
 
 /// Fold `better` over a batch of already-computed points, continuing from
@@ -563,8 +646,12 @@ mod tests {
     /// reproduce the sequential path exactly - not just approximately.
     fn same_point(a: SweepPoint, b: SweepPoint) -> bool {
         a.freq_mhz.to_bits() == b.freq_mhz.to_bits()
-            && a.connects == b.connects
+            && a.state == b.state
             && a.absorption_db.to_bits() == b.absorption_db.to_bits()
+            && a.system_loss_db.to_bits() == b.system_loss_db.to_bits()
+            && a.rx_power_dbm.to_bits() == b.rx_power_dbm.to_bits()
+            && a.noise_dbm.to_bits() == b.noise_dbm.to_bits()
+            && a.snr_db.to_bits() == b.snr_db.to_bits()
             && a.miss_km.to_bits() == b.miss_km.to_bits()
             && a.hops == b.hops
             && a.mode == b.mode
@@ -617,14 +704,14 @@ mod tests {
             if !same_point(*s, *p) {
                 mismatches += 1;
                 eprintln!(
-                    "  MISMATCH @ {:.2} MHz: seq(connects={}, abs={:.6}, miss={:.3}) \
-                     vs par(connects={}, abs={:.6}, miss={:.3})",
+                    "  MISMATCH @ {:.2} MHz: seq(state={}, snr={:.6}, miss={:.3}) \
+                     vs par(state={}, snr={:.6}, miss={:.3})",
                     s.freq_mhz,
-                    s.connects,
-                    s.absorption_db,
+                    s.state.label(),
+                    s.snr_db,
                     s.miss_km,
-                    p.connects,
-                    p.absorption_db,
+                    p.state.label(),
+                    p.snr_db,
                     p.miss_km,
                 );
             }
@@ -680,11 +767,39 @@ mod tests {
         assert!(fine_freqs(SWEEP_MAX_MHZ).last().copied().unwrap() <= SWEEP_MAX_MHZ + 1e-9);
     }
 
-    fn pt(freq: f64, connects: bool, abs: f64, miss: f64) -> SweepPoint {
+    /// A point with a found path, described by its SNR against a 10 dB
+    /// threshold (so `snr - 10` is the margin that decides the state).
+    fn found(freq: f64, snr: f64) -> SweepPoint {
+        let margin = snr - 10.0;
         SweepPoint {
             freq_mhz: freq,
-            connects,
-            absorption_db: abs,
+            state: if margin >= 0.0 {
+                PathState::Usable
+            } else {
+                PathState::BelowThreshold
+            },
+            absorption_db: 6.0,
+            system_loss_db: 140.0,
+            rx_power_dbm: -90.0,
+            noise_dbm: -90.0 - snr,
+            snr_db: snr,
+            margin_db: margin,
+            miss_km: 0.0,
+            hops: 1,
+            mode: None,
+        }
+    }
+
+    fn no_path(freq: f64, miss: f64) -> SweepPoint {
+        SweepPoint {
+            freq_mhz: freq,
+            state: PathState::NoPath,
+            absorption_db: f64::INFINITY,
+            system_loss_db: f64::INFINITY,
+            rx_power_dbm: f64::NEG_INFINITY,
+            noise_dbm: -100.0,
+            snr_db: f64::NEG_INFINITY,
+            margin_db: f64::NEG_INFINITY,
             miss_km: miss,
             hops: 1,
             mode: None,
@@ -692,44 +807,112 @@ mod tests {
     }
 
     #[test]
-    fn better_prefers_connecting_then_lowest_absorption() {
-        let connect_hi = pt(14.0, true, 12.0, 0.0);
-        let connect_lo = pt(10.0, true, 3.0, 0.0);
-        let miss_small = pt(28.0, false, f64::INFINITY, 200.0);
-        // Connecting beats missing regardless of the miss size.
-        assert!(better(connect_hi, miss_small).connects);
-        assert!(better(miss_small, connect_hi).connects);
-        // Among connectors, lowest absorption wins.
-        assert!((better(connect_hi, connect_lo).absorption_db - 3.0).abs() < 1e-12);
-        // Among misses, smallest miss wins.
-        let miss_big = pt(29.0, false, f64::INFINITY, 900.0);
+    fn better_prefers_a_found_path_then_the_strongest_snr() {
+        let weak = found(14.0, 2.0);
+        let strong = found(10.0, 18.0);
+        let miss_small = no_path(28.0, 200.0);
+        // Any found path beats a miss regardless of how near the miss was.
+        assert!(better(weak, miss_small).found_path());
+        assert!(better(miss_small, weak).found_path());
+        // Among found paths, the strongest SNR wins - even though the weak one
+        // would have tied on absorption under the old rule.
+        assert!((better(weak, strong).snr_db - 18.0).abs() < 1e-12);
+        assert!((better(strong, weak).snr_db - 18.0).abs() < 1e-12);
+        // Among misses, the smallest miss wins.
+        let miss_big = no_path(29.0, 900.0);
         assert!((better(miss_small, miss_big).miss_km - 200.0).abs() < 1e-12);
     }
 
+    /// The point of the whole change: a path that closes but sits under the
+    /// threshold must not be ranked as if it were a usable one.
     #[test]
-    fn badness_orders_best_to_worst() {
-        let clean = pt(10.0, true, 0.0, 0.0);
-        let lossy = pt(10.0, true, 24.0, 0.0);
-        let missed = pt(28.0, false, f64::INFINITY, 3000.0);
-        assert!(clean.badness() < lossy.badness());
-        assert!(lossy.badness() <= missed.badness());
-        assert!((0.0..=1.0).contains(&clean.badness()));
-        assert!((0.0..=1.0).contains(&missed.badness()));
+    fn below_threshold_is_a_distinct_state_from_usable() {
+        let usable = found(14.0, 11.0);
+        let below = found(14.2, 9.0);
+        assert_eq!(usable.state, PathState::Usable);
+        assert_eq!(below.state, PathState::BelowThreshold);
+        // Both found a path, so both beat a no-path point...
+        assert!(below.found_path());
+        assert!(better(below, no_path(21.0, 50.0)).found_path());
+        // ...but the usable one still wins between them.
+        assert_eq!(better(below, usable).state, PathState::Usable);
     }
 
-    /// summarize reads a real solve: the default scenario connects (finite
-    /// absorption), and a 45 MHz solve does not (a finite near-miss instead).
+    #[test]
+    fn badness_orders_best_to_worst_within_each_state() {
+        // Inside "usable": a big margin is better than a bare one.
+        assert!(found(10.0, 35.0).badness() < found(10.0, 11.0).badness());
+        // Inside "below threshold": just under is better than hopeless.
+        assert!(found(10.0, 9.0).badness() < found(10.0, -40.0).badness());
+        // Inside "no path": a near miss is better than a huge one.
+        assert!(no_path(28.0, 100.0).badness() < no_path(28.0, 3000.0).badness());
+        for p in [
+            found(10.0, 35.0),
+            found(10.0, 9.0),
+            no_path(28.0, 3000.0),
+            no_path(28.0, f64::INFINITY),
+        ] {
+            assert!((0.0..=1.0).contains(&p.badness()), "{}", p.badness());
+        }
+    }
+
+    /// summarize reads a real solve: the default scenario finds a path (finite
+    /// absorption and a real SNR), and a 45 MHz solve does not.
     #[test]
     fn summarize_reads_real_solves() {
         let inputs = Inputs::default();
         let a = scenario::resolve(&inputs);
         let models = scenario::build_models(&inputs, &a).expect("models");
-        let connect = summarize(inputs.freq_mhz, &solve::solve(&inputs, &a, &models));
-        assert!(connect.connects && connect.absorption_db.is_finite());
+        let hit = summarize(inputs.freq_mhz, &solve::solve(&inputs, &a, &models));
+        assert!(hit.found_path() && hit.absorption_db.is_finite());
+        assert!(
+            hit.snr_db.is_finite() && hit.noise_dbm.is_finite(),
+            "a found path must carry a real SNR and noise floor"
+        );
+        assert!(
+            (hit.snr_db - (hit.rx_power_dbm - hit.noise_dbm)).abs() < 1e-9,
+            "SNR must be Prx - Pnoise"
+        );
 
         let mut hi = inputs;
         hi.freq_mhz = 45.0;
         let missed = summarize(45.0, &solve::solve(&hi, &a, &models));
-        assert!(!missed.connects);
+        assert_eq!(missed.state, PathState::NoPath);
+        // Even with no path the noise floor is real - it is a property of the
+        // receiver, not of whether anything arrived.
+        assert!(missed.noise_dbm.is_finite());
+    }
+
+    /// Raising the SNR threshold can only ever move frequencies from usable to
+    /// below-threshold, never the reverse, and never invents or destroys paths.
+    #[test]
+    fn raising_the_threshold_only_demotes_points() {
+        let base = Inputs::default();
+        let a = scenario::resolve(&base);
+        let models = scenario::build_models(&base, &a).expect("models");
+
+        let mut strict = base.clone();
+        strict.snr_threshold_db = base.snr_threshold_db + 40.0;
+
+        for f in [7.0, 10.0, 14.1, 21.0] {
+            let mut lenient_i = base.clone();
+            lenient_i.freq_mhz = f;
+            let mut strict_i = strict.clone();
+            strict_i.freq_mhz = f;
+            let lenient = summarize(f, &solve::solve(&lenient_i, &a, &models));
+            let harsh = summarize(f, &solve::solve(&strict_i, &a, &models));
+            assert_eq!(
+                lenient.found_path(),
+                harsh.found_path(),
+                "the threshold must not change whether a path exists at {f} MHz"
+            );
+            if harsh.state == PathState::Usable {
+                assert_eq!(
+                    lenient.state,
+                    PathState::Usable,
+                    "usable under a strict threshold implies usable under a lenient one"
+                );
+            }
+        }
     }
 }

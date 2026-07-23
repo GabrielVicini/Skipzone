@@ -14,6 +14,7 @@
 //!
 //! Module layout by concern:
 //!   * `scenario`, `solar`, `dregion` - turn UI inputs into engine models.
+//!   * `noise` - radio-noise floor (ITU-R P.372) and the SNR judgment layer.
 //!   * `compute` - reusable parallel-execution layer over the engine (rayon).
 //!   * `solve`, `sweep` - drive the engine off the UI thread and summarise it.
 //!   * `ui` - the egui shell's panels, map plugins, and shared widgets.
@@ -22,6 +23,7 @@
 mod app;
 mod compute;
 mod dregion;
+mod noise;
 mod scenario;
 mod solar;
 mod solve;

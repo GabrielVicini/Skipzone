@@ -12,6 +12,7 @@ use skipzone::magnetoionic::Mode;
 use skipzone::trace::{Outcome, TraceConfig, Tracer};
 use skipzone::units::{Hertz, Meters, Radians};
 
+use crate::noise::{LinkBudget, LinkSettings};
 use crate::scenario::{Assumptions, EARTH_RADIUS_M, Models, to_lat_lon};
 
 use super::link_budget::{NEPERS_TO_DB, free_space_loss_db, ground_reflection_loss_db};
@@ -246,6 +247,7 @@ pub(super) fn assemble(
     homing_miss_m: f64,
     note: Option<String>,
     f_mhz: f64,
+    link_settings: LinkSettings,
 ) -> Solution {
     let total_group_km: f64 = details.iter().map(|h| h.group_km).sum();
     let total_phase_km: f64 = details.iter().map(|h| h.phase_km).sum();
@@ -269,6 +271,10 @@ pub(super) fn assemble(
         u32::try_from(details.iter().filter(|h| h.ground_loss_db > 0.0).count()).unwrap_or(0);
     let total_system_loss_db = free_space_loss_db + total_absorption_db + ground_reflection_loss_db;
 
+    // Judgment layer only: transmitter power and noise floor applied to the
+    // loss just computed. Nothing above this line is affected by it.
+    let link = LinkBudget::from_settings(link_settings, total_system_loss_db);
+
     Solution {
         mode,
         hops,
@@ -281,6 +287,7 @@ pub(super) fn assemble(
         ground_reflection_loss_db,
         num_ground_reflections,
         total_system_loss_db,
+        link,
         total_ground_km,
         terminal_miss_km,
         homing_miss_m,
