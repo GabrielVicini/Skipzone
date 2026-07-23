@@ -1,0 +1,72 @@
+NeQuick G complementary data files: CCIR foF2/M(3000)F2 coefficient maps and MODIP grid
+=======================================================================================
+
+Files
+-----
+  ccir11.txt .. ccir22.txt   12 monthly CCIR coefficient files (file NN = month + 10;
+                             ccir11 = January .. ccir22 = December). Each file holds
+                             exactly 2858 free-format Fortran E-format values:
+                               F2[2][76][13]  = 1976 values (foF2 spherical-Legendre/
+                                                Fourier coefficients; index 1 = low
+                                                solar activity R12=0, index 2 = high
+                                                solar activity R12=100)
+                               Fm3[2][49][9]  =  882 values (M(3000)F2 coefficients,
+                                                same solar-activity pairing)
+                             Ordering is defined in section 2.5.5.3.1 and Annex C of
+                             the reference document below.
+  modipNeQG_wrapped.txt      MODIP (modified dip latitude, deg) grid, 39 lines x 39
+                             values = 1521 values. Core grid: latitude 90S..90N step
+                             5 deg (rows south to north), longitude 180W..180E step
+                             10 deg; wrapped with one extra row beyond each pole
+                             (phased 180 deg in longitude) and one extra column on
+                             each side (170E / 170W) for 4x4 third-order
+                             interpolation. Row 1 (2nd line) is all -90.00 (south
+                             pole), row 37 is all +90.00 (north pole). Grid derived
+                             from IGRF, epoch ~2001 (the same data is distributed by
+                             the EC JRC as "modip2001_wrapped.asc").
+
+Origin (verified 2026-07-22)
+----------------------------
+These exact files were extracted from the PDF file attachments embedded in Annex C of
+the officially published European Commission document:
+
+  "European GNSS (Galileo) Open Service - Ionospheric Correction Algorithm for
+   Galileo Single Frequency Users", Issue 1.2, September 2016.
+  https://www.gsc-europa.eu/sites/default/files/sites/all/files/Galileo_Ionospheric_Model.pdf
+  (PDF attachment names preserved. Annex C: "These files are only provided in the
+   electronic version of this document".)
+
+Verification performed:
+  - Each ccirNN.txt parses to exactly 2858 numeric values (1976 F2 + 882 Fm3).
+  - modipNeQG_wrapped.txt parses to exactly 39 x 39 = 1521 values in [-90, 90].
+  - All 13 files are byte-identical (modulo CRLF/LF line endings) to the files
+    ccir/ccir11.txt..ccir22.txt and modip/modip2001_wrapped.asc of the European
+    Commission JRC reference implementation "NeQuickG JRC" (GitHub mirror
+    https://github.com/odrisci/NeQuickJRC, master branch, checked 2026-07-22).
+  - The CCIR coefficient values also agree with the ccirNN.asc files distributed by
+    ITU-R inside Recommendation ITU-R P.531-16 (NeQuick2 P.531-15 package,
+    https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.531-16-202509-I!!ZIP-E.zip)
+    to within last-printed-digit rounding (max relative difference 5.6e-7); both
+    lineages encode the same underlying CCIR (Oslo 1966) numerical map coefficients.
+
+License
+-------
+The identical data files are distributed by the European Union as part of the
+NeQuickG JRC reference implementation, whose README states verbatim:
+
+  "@copyright European Union, 2019
+   This software has been released as free and open source software under the terms
+   of the European Union Public Licence (EUPL), version 1.2,
+   https://joinup.ec.europa.eu/sites/default/files/custom-page/attachment/eupl_v1.2_en.pdf
+   Questions? Submit your query at https://www.gsc-europa.eu"
+
+EUPL v1.2 grants (Article 2) "a worldwide, royalty-free, non-exclusive,
+sublicensable licence" to use, reproduce, modify, communicate, and distribute the
+Work. Distribution must retain notices (Article 5) - keep this file with the data.
+The EU announcement of the release states the code "can be used on a global scale
+without limitation under the EUPL"
+(https://www.gsc-europa.eu/news/nequick-g-code-available-for-download).
+
+The source ICD PDF itself is (c) European Commission, 2016, published for
+implementation by Galileo receiver developers; its Terms of Use page contains
+warranty disclaimers only.
