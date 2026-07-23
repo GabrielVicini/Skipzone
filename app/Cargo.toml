@@ -12,6 +12,10 @@ egui = "0.35"
 walkers = "0.56"
 # Complex Fresnel reflection coefficients for the ground-reflection loss term.
 num-complex = "0.4"
+# Data-parallel execution for the compute layer (frequency sweep and any other
+# embarrassingly-parallel batch of independent engine solves). The engine crate
+# stays single-threaded; parallelism lives entirely in this app layer.
+rayon = "1"
 
 # Deliberately NOT clippy-pedantic, unlike the engine crate: this is an
 # egui application crate, and pedantic lint churn on UI layout code buys

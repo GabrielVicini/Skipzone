@@ -11,14 +11,17 @@
 //! Nothing here implements physics: it clones the `Inputs`, rebuilds the engine
 //! models once per job, and calls the existing `scenario`/`solve` API.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
+use std::time::Duration;
 
 use egui::Context;
 use skipzone::magnetoionic::Mode;
 
-use crate::scenario::{self, Assumptions, Inputs, ProfileRow};
+use crate::compute::{ComputePool, Execution, PoolConfig, Timing};
+use crate::scenario::{self, Assumptions, Inputs, Models, ProfileRow};
 use crate::solve::{self, SolveOutcome};
 
 /// HF band swept by FIND BEST FREQUENCY. The scan is coarse-to-fine: a cheap
@@ -234,12 +237,49 @@ fn worker(
     msg_tx: &Sender<(u64, Msg)>,
     ctx: &Context,
 ) {
+    // One pool for the worker's whole lifetime: sizing a rayon pool costs a
+    // thread spawn per worker, so we pay it once and reuse it for every sweep.
+    let pool = build_sweep_pool();
     while let Ok((epoch, job, cancel)) = job_rx.recv() {
         match job {
             Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, ctx),
-            Job::Sweep(inputs) => run_sweep(epoch, &inputs, &cancel, msg_tx, ctx),
+            Job::Sweep(inputs) => run_sweep(epoch, &inputs, &pool, &cancel, msg_tx, ctx),
         }
     }
+}
+
+/// Execution config for the sweep's compute pool, overridable by environment so
+/// the parallel layer can be capped or switched off entirely without a rebuild
+/// (for A/B timing or debugging a suspected parallelism bug):
+///   * `SKIPZONE_COMPUTE=sequential` - single-threaded fallback (the old path).
+///   * `SKIPZONE_COMPUTE_THREADS=N`   - cap worker threads at N.
+///
+/// Default: parallel across every logical core.
+fn sweep_pool_config() -> PoolConfig {
+    let execution = match std::env::var("SKIPZONE_COMPUTE").as_deref() {
+        Ok("sequential" | "seq" | "off" | "0") => Execution::Sequential,
+        _ => Execution::Parallel,
+    };
+    let max_threads = std::env::var("SKIPZONE_COMPUTE_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    PoolConfig {
+        execution,
+        max_threads,
+    }
+}
+
+/// Build the sweep pool, degrading to the single-threaded fallback if the
+/// thread pool cannot be created (which must never take the app down).
+fn build_sweep_pool() -> ComputePool {
+    ComputePool::new(sweep_pool_config()).unwrap_or_else(|e| {
+        eprintln!("[sweep] compute pool build failed ({e}); using sequential fallback");
+        ComputePool::new(PoolConfig {
+            execution: Execution::Sequential,
+            max_threads: None,
+        })
+        .expect("sequential pool construction is infallible")
+    })
 }
 
 fn run_main(epoch: u64, inputs: &Inputs, msg_tx: &Sender<(u64, Msg)>, ctx: &Context) {
@@ -264,9 +304,13 @@ fn run_main(epoch: u64, inputs: &Inputs, msg_tx: &Sender<(u64, Msg)>, ctx: &Cont
     ctx.request_repaint();
 }
 
+/// Build the scenario models once, then run the sweep on the chosen execution
+/// path. Model construction and the coarse-then-fine search structure are shared
+/// by both paths; only *where* each frequency's `solve()` runs differs.
 fn run_sweep(
     epoch: u64,
     inputs: &Inputs,
+    pool: &ComputePool,
     cancel: &AtomicBool,
     msg_tx: &Sender<(u64, Msg)>,
     ctx: &Context,
@@ -280,6 +324,141 @@ fn run_sweep(
             return;
         }
     };
+    match pool.execution() {
+        Execution::Parallel => {
+            run_sweep_parallel(epoch, inputs, &a, &models, pool, cancel, msg_tx, ctx);
+        }
+        Execution::Sequential => {
+            run_sweep_sequential(epoch, inputs, &a, &models, cancel, msg_tx, ctx);
+        }
+    }
+}
+
+/// One candidate frequency -> its cached `SweepPoint`. Returns `None` only when
+/// the job has been cancelled, so a superseded sweep stops doing engine work as
+/// soon as each in-flight task next checks the flag. This is the single unit of
+/// work both the parallel and sequential paths dispatch.
+fn solve_point(
+    freq_mhz: f64,
+    inputs: &Inputs,
+    a: &Assumptions,
+    models: &Models,
+    cancel: &AtomicBool,
+) -> Option<SweepPoint> {
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
+    let mut fi = inputs.clone();
+    fi.freq_mhz = freq_mhz;
+    Some(summarize(freq_mhz, &solve::solve(&fi, a, models)))
+}
+
+/// Fold `better` over a batch of already-computed points, continuing from
+/// `seed`. Order-independent in the values it selects (absorption / miss), so it
+/// agrees with the sequential fold over the same points.
+fn fold_best(seed: Option<SweepPoint>, points: &[SweepPoint]) -> Option<SweepPoint> {
+    let mut best = seed;
+    for &p in points {
+        best = Some(best.map_or(p, |b| better(b, p)));
+    }
+    best
+}
+
+/// Parallel path: evaluate each phase's whole frequency grid at once across the
+/// pool. Because every candidate is dispatched together there is no uphill
+/// early-stop (that was purely a way to save *sequential* time); the parallel
+/// path instead evaluates the complete coarse grid, which is a superset of what
+/// the sequential path would, so the per-frequency results are identical and the
+/// winner is never worse.
+#[allow(clippy::too_many_arguments)]
+fn run_sweep_parallel(
+    epoch: u64,
+    inputs: &Inputs,
+    a: &Assumptions,
+    models: &Models,
+    pool: &ComputePool,
+    cancel: &AtomicBool,
+    msg_tx: &Sender<(u64, Msg)>,
+    ctx: &Context,
+) {
+    let coarse = coarse_freqs();
+    // Optimistic total for the bar: whole coarse grid plus one fine window.
+    let total_estimate = coarse.len() + fine_freqs(0.5 * (SWEEP_MIN_MHZ + SWEEP_MAX_MHZ)).len();
+    let _ = msg_tx.send((epoch, Msg::SweepStart {
+        total: total_estimate,
+    }));
+    ctx.request_repaint();
+
+    // Shared, lock-free progress counter; the mpsc Sender is !Sync so a clone is
+    // wrapped in a Mutex (progress is one message per solve, so contention is
+    // nil). Both are captured by the per-phase progress callbacks below.
+    let done = AtomicUsize::new(0);
+    let prog = Mutex::new(msg_tx.clone());
+
+    let evaluate = |f: &f64| solve_point(*f, inputs, a, models, cancel);
+
+    // Run one grid in parallel, streaming a SweepProgress per solved frequency.
+    let run_phase = |freqs: &[f64], total: usize| -> (Vec<SweepPoint>, Timing) {
+        let (opt_points, timing) =
+            pool.map_reporting(freqs, evaluate, |_, point: &Option<SweepPoint>| {
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(point) = point {
+                    if let Ok(tx) = prog.lock() {
+                        let _ = tx.send((epoch, Msg::SweepProgress {
+                            done: n,
+                            total,
+                            point: *point,
+                        }));
+                    }
+                    ctx.request_repaint();
+                }
+            });
+        (opt_points.into_iter().flatten().collect(), timing)
+    };
+
+    // Phase 1: the full coarse grid.
+    let (coarse_points, coarse_timing) = run_phase(&coarse, total_estimate);
+    let mut best = fold_best(None, &coarse_points);
+
+    // Phase 2: fine refinement around the coarse best.
+    let fine_timing = if let Some(seed) = best {
+        let fine = fine_freqs(seed.freq_mhz);
+        let total = done.load(Ordering::Relaxed) + fine.len();
+        let (fine_points, timing) = run_phase(&fine, total);
+        best = fold_best(best, &fine_points);
+        timing
+    } else {
+        Timing {
+            total: Duration::ZERO,
+            per_item: Vec::new(),
+            threads: pool.threads(),
+        }
+    };
+
+    log_sweep_timing("parallel", &coarse_timing, &fine_timing);
+
+    let _ = msg_tx.send((epoch, Msg::SweepDone {
+        best: best.map(|point| SweepBest { point }),
+    }));
+    ctx.request_repaint();
+}
+
+/// Single-threaded path: the original coarse-with-uphill-early-stop then fine
+/// scan, preserved verbatim as the swappable fallback and the equivalence
+/// baseline. Kept here so turning parallelism off reproduces the old behaviour
+/// exactly, including which frequencies the early-stop skips.
+fn run_sweep_sequential(
+    epoch: u64,
+    inputs: &Inputs,
+    a: &Assumptions,
+    models: &Models,
+    cancel: &AtomicBool,
+    msg_tx: &Sender<(u64, Msg)>,
+    ctx: &Context,
+) {
+    let sweep_started = std::time::Instant::now();
+    let mut per_item: Vec<Duration> = Vec::new();
+
     let coarse = coarse_freqs();
     // Optimistic total for the bar: coarse pass plus one fine window. Each
     // progress message carries its own (possibly revised) total.
@@ -287,16 +466,13 @@ fn run_sweep(
     let _ = msg_tx.send((epoch, Msg::SweepStart { total }));
     ctx.request_repaint();
 
-    // A point is "better" exactly when its badness is lower (badness is built
-    // to agree with `better`), so badness alone drives both the winner and the
-    // uphill early-stop.
-    let solve_point = |f: f64| -> Option<SweepPoint> {
-        if cancel.load(Ordering::Relaxed) {
-            return None;
+    let mut timed_solve = |f: f64| -> Option<SweepPoint> {
+        let started = std::time::Instant::now();
+        let point = solve_point(f, inputs, a, models, cancel);
+        if point.is_some() {
+            per_item.push(started.elapsed());
         }
-        let mut fi = inputs.clone();
-        fi.freq_mhz = f;
-        Some(summarize(f, &solve::solve(&fi, &a, &models)))
+        point
     };
 
     // The winner uses the exact `better` rule (which resolves ties badness
@@ -309,7 +485,7 @@ fn run_sweep(
 
     // Phase 1: coarse scan, low to high, stopping once clearly past the optimum.
     for &f in &coarse {
-        let Some(point) = solve_point(f) else { return };
+        let Some(point) = timed_solve(f) else { return };
         done += 1;
         best = Some(best.map_or(point, |b| better(b, point)));
         if point.badness() < best_badness - 1e-4 {
@@ -330,7 +506,7 @@ fn run_sweep(
         let fine = fine_freqs(seed.freq_mhz);
         total = done + fine.len();
         for &f in &fine {
-            let Some(point) = solve_point(f) else { return };
+            let Some(point) = timed_solve(f) else { return };
             done += 1;
             best = Some(best.map_or(point, |b| better(b, point)));
             let _ = msg_tx.send((epoch, Msg::SweepProgress { done, total, point }));
@@ -338,18 +514,146 @@ fn run_sweep(
         }
     }
 
-    let _ = msg_tx.send((
-        epoch,
-        Msg::SweepDone {
-            best: best.map(|point| SweepBest { point }),
-        },
-    ));
+    let timing = Timing {
+        total: sweep_started.elapsed(),
+        per_item,
+        threads: 1,
+    };
+    log_sweep_timing_single("sequential", &timing);
+
+    let _ = msg_tx.send((epoch, Msg::SweepDone {
+        best: best.map(|point| SweepBest { point }),
+    }));
     ctx.request_repaint();
+}
+
+/// One-line timing summary combining the coarse and fine phases. This is the
+/// instrumentation that confirms where sweep time actually goes and lets the
+/// measured speedup be checked, rather than assumed.
+fn log_sweep_timing(label: &str, coarse: &Timing, fine: &Timing) {
+    let mut per_item = coarse.per_item.clone();
+    per_item.extend_from_slice(&fine.per_item);
+    let combined = Timing {
+        total: coarse.total + fine.total,
+        per_item,
+        threads: coarse.threads,
+    };
+    log_sweep_timing_single(label, &combined);
+}
+
+fn log_sweep_timing_single(label: &str, timing: &Timing) {
+    let n = timing.per_item.len();
+    eprintln!(
+        "[sweep] {label}: {n} freqs on {} thread(s) in {:.3} s \
+         (serial work {:.3} s, {:.1}x, mean {:.1} ms/freq)",
+        timing.threads,
+        timing.total.as_secs_f64(),
+        timing.work().as_secs_f64(),
+        timing.speedup(),
+        timing.mean_item().as_secs_f64() * 1e3,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two `SweepPoint`s are the same result when every field is bit-identical.
+    /// The per-frequency solve is a pure function, so the parallel path must
+    /// reproduce the sequential path exactly - not just approximately.
+    fn same_point(a: SweepPoint, b: SweepPoint) -> bool {
+        a.freq_mhz.to_bits() == b.freq_mhz.to_bits()
+            && a.connects == b.connects
+            && a.absorption_db.to_bits() == b.absorption_db.to_bits()
+            && a.miss_km.to_bits() == b.miss_km.to_bits()
+            && a.hops == b.hops
+            && a.mode == b.mode
+    }
+
+    /// The load-bearing check for this whole change: running the *same* set of
+    /// candidate frequencies across all cores must produce bit-identical
+    /// per-frequency results to running them one at a time, and it prints the
+    /// before/after timing and the thread count so the speedup is measured, not
+    /// assumed. Run with:
+    ///   cargo test -p skipzone-app --release parallel_matches_sequential -- --nocapture
+    #[test]
+    fn parallel_matches_sequential_and_reports_timing() {
+        use crate::compute::{ComputePool, Execution, PoolConfig, available_cores};
+        use std::sync::atomic::AtomicBool;
+
+        let inputs = Inputs::default();
+        let a = scenario::resolve(&inputs);
+        let models = scenario::build_models(&inputs, &a).expect("models build");
+
+        // The exact frequencies the app's parallel sweep would touch: the whole
+        // coarse grid plus a fine window around a plausible optimum. Both paths
+        // evaluate this identical list, isolating the execution layer from the
+        // search heuristic (early-stop) that differs between them.
+        let mut freqs = coarse_freqs();
+        freqs.extend(fine_freqs(14.0));
+
+        let never_cancel = AtomicBool::new(false);
+        let evaluate = |f: &f64| {
+            solve_point(*f, &inputs, &a, &models, &never_cancel).expect("not cancelled")
+        };
+
+        let seq = ComputePool::new(PoolConfig {
+            execution: Execution::Sequential,
+            max_threads: None,
+        })
+        .unwrap();
+        let par = ComputePool::new(PoolConfig {
+            execution: Execution::Parallel,
+            max_threads: None,
+        })
+        .unwrap();
+
+        let (seq_points, seq_timing) = seq.map(&freqs, evaluate);
+        let (par_points, par_timing) = par.map(&freqs, evaluate);
+
+        assert_eq!(seq_points.len(), par_points.len());
+        let mut mismatches = 0usize;
+        for (s, p) in seq_points.iter().zip(&par_points) {
+            if !same_point(*s, *p) {
+                mismatches += 1;
+                eprintln!(
+                    "  MISMATCH @ {:.2} MHz: seq(connects={}, abs={:.6}, miss={:.3}) \
+                     vs par(connects={}, abs={:.6}, miss={:.3})",
+                    s.freq_mhz,
+                    s.connects,
+                    s.absorption_db,
+                    s.miss_km,
+                    p.connects,
+                    p.absorption_db,
+                    p.miss_km,
+                );
+            }
+        }
+
+        eprintln!("=== frequency sweep: parallel vs single-threaded ===");
+        eprintln!("cores detected            : {}", available_cores());
+        eprintln!(
+            "frequencies evaluated     : {} (coarse {} + fine {})",
+            freqs.len(),
+            coarse_freqs().len(),
+            freqs.len() - coarse_freqs().len(),
+        );
+        eprintln!(
+            "single-threaded (1 thread): {:.3} s total, {:.1} ms/freq",
+            seq_timing.total.as_secs_f64(),
+            seq_timing.mean_item().as_secs_f64() * 1e3,
+        );
+        eprintln!(
+            "parallel ({:>2} threads)     : {:.3} s total, {:.1} ms/freq, {:.1}x speedup",
+            par_timing.threads,
+            par_timing.total.as_secs_f64(),
+            par_timing.mean_item().as_secs_f64() * 1e3,
+            seq_timing.total.as_secs_f64() / par_timing.total.as_secs_f64().max(1e-9),
+        );
+        eprintln!("frequencies differing     : {mismatches}");
+
+        assert_eq!(mismatches, 0, "parallel results diverged from single-threaded");
+    }
 
     #[test]
     fn coarse_grid_spans_hf() {

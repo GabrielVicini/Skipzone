@@ -3932,6 +3932,7 @@ dependencies = [
  "eframe",
  "egui",
  "num-complex",
+ "rayon",
  "skipzone",
  "walkers",
 ]
