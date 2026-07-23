@@ -8,9 +8,10 @@ use egui::{
 use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreetMap};
 
 use crate::mapview::{PathPlugin, TerminatorPlugin};
-use crate::panels::{self, BAD, FAIL, MUTED, OK};
-use crate::scenario::{self, Assumptions, Inputs, PlaceMode, ProfileRow};
-use crate::solve::{self, Solution, SolveOutcome};
+use crate::panels::{self, BAD, FAIL, MUTED, OK, WARN};
+use crate::scenario::{Assumptions, Inputs, PlaceMode, ProfileRow};
+use crate::solve::{Solution, SolveOutcome};
+use crate::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
 
 const INPUTS_MIN: f32 = 240.0;
 const INPUTS_MAX: f32 = 420.0;
@@ -33,6 +34,21 @@ pub struct DebugApp {
     styled_for_width: f32,
     /// Draw the live day/night terminator shading on the map.
     show_terminator: bool,
+    /// Off-thread solver: keeps RUN and the frequency sweep from freezing the UI.
+    solver: SolverService,
+    busy: Busy,
+    /// Every frequency the current/last sweep has tried, for the band chart.
+    sweep_cache: Vec<SweepPoint>,
+    /// Winner of the last completed sweep, shown alongside the main solution.
+    sweep_best: Option<SweepBest>,
+}
+
+/// What the background solver is currently doing, for the progress readout.
+#[derive(Clone, Copy)]
+enum Busy {
+    Idle,
+    Solving,
+    Sweeping { done: usize, total: usize },
 }
 
 impl DebugApp {
@@ -52,6 +68,10 @@ impl DebugApp {
             needs_fit: true,
             styled_for_width: 0.0,
             show_terminator: true,
+            solver: SolverService::new(cc.egui_ctx.clone()),
+            busy: Busy::Idle,
+            sweep_cache: Vec::new(),
+            sweep_best: None,
         }
     }
 
@@ -106,26 +126,65 @@ impl DebugApp {
         )
     }
 
-    fn run_solve(&mut self) {
+    /// Kick off the point-to-point solve on the worker thread.
+    fn dispatch_main(&mut self) {
         self.build_error = None;
-        let a = scenario::resolve(&self.inputs);
-        match scenario::build_models(&self.inputs, &a) {
-            Ok(models) => {
-                self.profile = scenario::sample_profile(&models, &a);
-                let out = solve::solve(&self.inputs, &a, &models);
-                self.visible = vec![true; out.solutions.len()];
-                self.selected = (!out.solutions.is_empty()).then_some(0);
-                self.outcome = Some(out);
-            }
-            Err(e) => {
-                self.build_error = Some(e);
-                self.outcome = None;
-                self.profile.clear();
-                self.visible.clear();
-                self.selected = None;
+        self.busy = Busy::Solving;
+        self.solver.dispatch(Job::Main(self.inputs.clone()));
+    }
+
+    /// Kick off the frequency sweep on the worker thread. Leaves the current
+    /// main solution on screen; this is a separate query alongside it.
+    fn dispatch_sweep(&mut self) {
+        self.build_error = None;
+        self.sweep_cache.clear();
+        self.sweep_best = None;
+        self.busy = Busy::Sweeping { done: 0, total: 0 };
+        self.solver.dispatch(Job::Sweep(self.inputs.clone()));
+    }
+
+    /// Absorb any results the worker has posted since the last frame.
+    fn pump_solver(&mut self) {
+        for msg in self.solver.drain() {
+            match msg {
+                Msg::MainDone(result) => {
+                    let r = *result;
+                    self.visible = vec![true; r.outcome.solutions.len()];
+                    self.selected = (!r.outcome.solutions.is_empty()).then_some(0);
+                    self.outcome = Some(r.outcome);
+                    self.assumptions = Some(r.assumptions);
+                    self.profile = r.profile;
+                    self.build_error = None;
+                    self.busy = Busy::Idle;
+                }
+                Msg::MainFailed(e) => {
+                    self.build_error = Some(e);
+                    self.outcome = None;
+                    self.profile.clear();
+                    self.visible.clear();
+                    self.selected = None;
+                    self.busy = Busy::Idle;
+                }
+                Msg::SweepStart { total } => {
+                    self.sweep_cache.clear();
+                    self.sweep_cache.reserve(total);
+                    self.sweep_best = None;
+                    self.busy = Busy::Sweeping { done: 0, total };
+                }
+                Msg::SweepProgress { done, total, point } => {
+                    self.sweep_cache.push(point);
+                    self.busy = Busy::Sweeping { done, total };
+                }
+                Msg::SweepDone { best } => {
+                    self.sweep_best = best;
+                    self.busy = Busy::Idle;
+                }
+                Msg::SweepFailed(e) => {
+                    self.build_error = Some(e);
+                    self.busy = Busy::Idle;
+                }
             }
         }
-        self.assumptions = Some(a);
     }
 
     fn status_chip(ui: &mut Ui, out: &SolveOutcome) {
@@ -152,6 +211,7 @@ impl App for DebugApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         let total_w = ui.available_width();
         self.apply_scale(ui, total_w);
+        self.pump_solver();
 
         let mut run = false;
 
@@ -218,6 +278,80 @@ impl App for DebugApp {
                         ui.add_space(8.0);
                     });
             });
+
+        let mut find_best = false;
+        Panel::bottom("sweep_panel")
+            .resizable(false)
+            .show(ui, |ui| {
+                ui.add_space(3.0);
+                ui.horizontal(|ui| {
+                    let busy = !matches!(self.busy, Busy::Idle);
+                    if ui
+                        .add_enabled(
+                            !busy,
+                            egui::Button::new(RichText::new("FIND BEST FREQUENCY").strong()),
+                        )
+                        .on_hover_text(
+                            "Sweep 2-30 MHz at the current TX/RX and scenario; report the \
+                             frequency that connects with the lowest absorption (or the \
+                             smallest near-miss). Runs off-thread; the current solution stays.",
+                        )
+                        .clicked()
+                    {
+                        find_best = true;
+                    }
+                    match self.busy {
+                        Busy::Idle => {}
+                        Busy::Solving => {
+                            ui.add(egui::Spinner::new());
+                            ui.label(RichText::new("solving...").small().color(MUTED));
+                        }
+                        Busy::Sweeping { done, total } => {
+                            #[allow(clippy::cast_precision_loss)]
+                            let frac = if total == 0 {
+                                0.0
+                            } else {
+                                done as f32 / total as f32
+                            };
+                            ui.add(
+                                egui::ProgressBar::new(frac)
+                                    .desired_width(220.0)
+                                    .text(format!("sweep {done}/{total}")),
+                            );
+                        }
+                    }
+                    if let Some(best) = self.sweep_best {
+                        let colour = if best.point.connects { OK } else { WARN };
+                        ui.colored_label(
+                            colour,
+                            RichText::new(panels::sweep_verdict_text(best)).strong(),
+                        );
+                    }
+                });
+                if !self.sweep_cache.is_empty() {
+                    ui.add_space(2.0);
+                    panels::sweep_chart(
+                        ui,
+                        &self.sweep_cache,
+                        self.inputs.freq_mhz,
+                        self.sweep_best.map(|b| b.point),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(
+                                "band: green = connects (low absorption), red = no connect / \
+                                 large miss. White = tuned freq, cyan = best.",
+                            )
+                            .small()
+                            .color(MUTED),
+                        );
+                    });
+                }
+                ui.add_space(3.0);
+            });
+        if find_best {
+            self.dispatch_sweep();
+        }
 
         CentralPanel::default().show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -323,7 +457,7 @@ impl App for DebugApp {
         });
 
         if run {
-            self.run_solve();
+            self.dispatch_main();
         }
     }
 }

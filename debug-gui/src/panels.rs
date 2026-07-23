@@ -2,13 +2,14 @@
 //! this is an instrument panel, not a product screen.
 
 use egui::{
-    CollapsingHeader, Color32, CornerRadius, DragValue, Frame, Grid, Layout, Margin, RichText,
-    ScrollArea, Stroke, Ui,
+    Align2, CollapsingHeader, Color32, ComboBox, CornerRadius, DragValue, FontId, Frame, Grid,
+    Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui, pos2, vec2,
 };
 
 use crate::mapview::PALETTE;
-use crate::scenario::{Assumptions, Inputs, PlaceMode, ProfileRow};
+use crate::scenario::{Assumptions, GroundType, Inputs, PlaceMode, ProfileRow};
 use crate::solve::{Solution, SolveOutcome, mode_label};
+use crate::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepBest, SweepPoint};
 
 pub const OK: Color32 = Color32::from_rgb(0x1B, 0x7F, 0x3B);
 pub const WARN: Color32 = Color32::from_rgb(0xC8, 0x7A, 0x00);
@@ -189,39 +190,25 @@ pub fn inputs_panel(ui: &mut Ui, inputs: &mut Inputs, place: &mut PlaceMode) -> 
 
     section(ui, "Ionosphere");
     card(ui, |ui| {
-        ui.checkbox(&mut inputs.solar_high, "Solar maximum (else minimum)");
-
-        let mut fof2_on = inputs.fof2_override.is_some();
-        if ui.checkbox(&mut fof2_on, "Override foF2").changed() {
-            inputs.fof2_override = fof2_on.then_some(7.0);
-        }
-        if let Some(v) = inputs.fof2_override.as_mut() {
-            ui.add(
-                DragValue::new(v)
-                    .speed(0.1)
-                    .range(0.5..=30.0)
-                    .suffix(" MHz"),
-            );
-        }
-
-        let mut hmf2_on = inputs.hmf2_override.is_some();
-        if ui.checkbox(&mut hmf2_on, "Override hmF2").changed() {
-            inputs.hmf2_override = hmf2_on.then_some(300.0);
-        }
-        if let Some(v) = inputs.hmf2_override.as_mut() {
-            ui.add(
-                DragValue::new(v)
-                    .speed(1.0)
-                    .range(90.0..=600.0)
-                    .suffix(" km"),
-            );
-        }
-
-        ui.add_space(4.0);
-        Grid::new("iono2")
+        Grid::new("iono")
             .num_columns(2)
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
+                labelled_drag(
+                    ui,
+                    "Sunspot number",
+                    DragValue::new(&mut inputs.ssn)
+                        .speed(1.0)
+                        .range(0.0..=300.0),
+                );
+                labelled_drag(
+                    ui,
+                    "hmF2 (peak height)",
+                    DragValue::new(&mut inputs.hmf2_km)
+                        .speed(1.0)
+                        .range(90.0..=600.0)
+                        .suffix(" km"),
+                );
                 labelled_drag(
                     ui,
                     "Chapman scale H",
@@ -239,6 +226,15 @@ pub fn inputs_panel(ui: &mut Ui, inputs: &mut Inputs, place: &mut PlaceMode) -> 
                         .suffix(" km"),
                 );
             });
+        hint(
+            ui,
+            &format!(
+                "foF2 = {:.2} MHz, derived from SSN (NmF2 linear in SSN, coarse midlat \
+                 anchor - not a path/season/time prediction). hmF2 and scale H are yours \
+                 directly; there is no climatology table underneath.",
+                crate::scenario::fof2_from_ssn(inputs.ssn)
+            ),
+        );
     });
 
     section(ui, "Absorption inputs");
@@ -304,6 +300,27 @@ pub fn inputs_panel(ui: &mut Ui, inputs: &mut Inputs, place: &mut PlaceMode) -> 
                     .prefix("epoch "),
             );
         }
+    });
+
+    section(ui, "Surface (ground reflections)");
+    card(ui, |ui| {
+        ComboBox::from_id_salt("ground_type")
+            .selected_text(inputs.ground_type.label())
+            .show_ui(ui, |ui| {
+                for g in GroundType::ALL {
+                    ui.selectable_value(&mut inputs.ground_type, g, g.label());
+                }
+            });
+        let (eps_r, sigma) = inputs.ground_type.constants();
+        hint(
+            ui,
+            &format!(
+                "Surface at the intermediate ground bounces, used for the Fresnel \
+                 reflection loss in the link budget. eps_r = {eps_r:.0}, sigma = {sigma} S/m \
+                 (ITU-R P.527 / P.368 HF-band values). One choice approximates the whole \
+                 path - there is no coastline database here.",
+            ),
+        );
     });
 
     ui.add_space(8.0);
@@ -508,7 +525,36 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                     format!("{:.3e}", sol.max_hamiltonian_drift),
                 );
                 kv(ui, "Total solver steps", sol.total_steps.to_string());
+
+                sub_head(ui, "LINK BUDGET (BASIC TRANSMISSION LOSS)");
+                kv(
+                    ui,
+                    "Free-space spreading",
+                    format!("{:.1} dB", sol.free_space_loss_db),
+                );
+                kv(
+                    ui,
+                    "Ionospheric absorption",
+                    format!("{:.3} dB", sol.total_absorption_db),
+                );
+                kv(
+                    ui,
+                    &format!("Ground reflections ({}x)", sol.num_ground_reflections),
+                    format!("{:.2} dB", sol.ground_reflection_loss_db),
+                );
+                kv(
+                    ui,
+                    "TOTAL system loss",
+                    format!("{:.1} dB", sol.total_system_loss_db),
+                );
             });
+            hint(
+                ui,
+                "Basic transmission loss = free-space spreading (over the ray path) + \
+                 ionospheric absorption + Fresnel ground-reflection loss. Excludes antenna \
+                 gains and any statistical excess-loss term, so it sits a few dB below a \
+                 full VOACAP path loss.",
+            );
             if let Some(note) = &sol.note {
                 ui.add_space(4.0);
                 ui.colored_label(WARN, RichText::new(format!("note: {note}")).small());
@@ -665,4 +711,127 @@ pub fn errors_panel(ui: &mut Ui, out: &SolveOutcome) {
                 ui.colored_label(BAD, RichText::new(e).monospace().small());
             }
         });
+}
+
+/// Green (best) -> amber -> red (worst) ramp for a badness in [0, 1].
+fn grad_color(t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let lerp = |a: u8, b: u8, u: f32| -> u8 {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        {
+            (f32::from(a) + (f32::from(b) - f32::from(a)) * u).round() as u8
+        }
+    };
+    let mix = |a: [u8; 3], b: [u8; 3], u: f32| {
+        Color32::from_rgb(
+            lerp(a[0], b[0], u),
+            lerp(a[1], b[1], u),
+            lerp(a[2], b[2], u),
+        )
+    };
+    let green = [0x2E, 0x9D, 0x4F];
+    let amber = [0xE9, 0xC4, 0x4A];
+    let red = [0xC8, 0x3A, 0x1C];
+    if t < 0.5 {
+        mix(green, amber, t / 0.5)
+    } else {
+        mix(amber, red, (t - 0.5) / 0.5)
+    }
+}
+
+/// One-line verdict for the best-frequency search.
+#[must_use]
+pub fn sweep_verdict_text(best: SweepBest) -> String {
+    let p = best.point;
+    if p.connects {
+        format!(
+            "Best: {:.2} MHz - {}-mode, {} hop(s), {:.2} dB absorption",
+            p.freq_mhz,
+            p.mode.map_or("?", mode_label),
+            p.hops,
+            p.absorption_db
+        )
+    } else {
+        format!(
+            "No frequency connects in {SWEEP_MIN_MHZ:.0}-{SWEEP_MAX_MHZ:.0} MHz. Closest: \
+             {:.2} MHz, near-miss {:.0} km ({} hop(s))",
+            p.freq_mhz, p.miss_km, p.hops
+        )
+    }
+}
+
+/// The live frequency-sweep band: one coloured bar per tried frequency, green
+/// (connects, low absorption) through amber to red (no connection / large
+/// miss), with the current and best frequencies marked. Drawn from the cache,
+/// so it redraws every frame without re-running any solve.
+pub fn sweep_chart(
+    ui: &mut Ui,
+    points: &[SweepPoint],
+    current_freq: f64,
+    best: Option<SweepPoint>,
+) {
+    let width = ui.available_width();
+    let height = 54.0;
+    let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4.0, Color32::from_gray(0x1E));
+
+    let span = (SWEEP_MAX_MHZ - SWEEP_MIN_MHZ).max(1e-9);
+    #[allow(clippy::cast_possible_truncation)]
+    let x_of =
+        |f: f64| rect.left() + rect.width() * ((f - SWEEP_MIN_MHZ) / span).clamp(0.0, 1.0) as f32;
+
+    // Sampling is non-uniform (a coarse pass plus a dense cluster near the
+    // best), so draw each point as a bar spanning halfway to its sorted
+    // neighbours. Unswept frequencies stay background - which is exactly where
+    // the early-stop decided not to look.
+    let mut sorted: Vec<&SweepPoint> = points.iter().collect();
+    sorted.sort_by(|a, b| a.freq_mhz.total_cmp(&b.freq_mhz));
+    for (i, p) in sorted.iter().enumerate() {
+        let x = x_of(p.freq_mhz);
+        let prev_x = i.checked_sub(1).map(|j| x_of(sorted[j].freq_mhz));
+        let next_x = sorted.get(i + 1).map(|q| x_of(q.freq_mhz));
+        // Span halfway to each neighbour; at an end, mirror the near gap (or a
+        // small default when this is the only point so far).
+        let left = match (prev_x, next_x) {
+            (Some(px), _) => 0.5 * (x + px),
+            (None, Some(nx)) => x - 0.5 * (nx - x),
+            (None, None) => x - 3.0,
+        };
+        let right = match (next_x, prev_x) {
+            (Some(nx), _) => 0.5 * (x + nx),
+            (None, Some(px)) => x + 0.5 * (x - px),
+            (None, None) => x + 3.0,
+        };
+        painter.rect_filled(
+            Rect::from_min_max(pos2(left, rect.top()), pos2(right, rect.bottom())),
+            0.0,
+            grad_color(p.badness()),
+        );
+    }
+
+    // Best frequency (cyan) and current tuned frequency (white) markers.
+    if let Some(b) = best {
+        let xb = x_of(b.freq_mhz);
+        painter.line_segment(
+            [pos2(xb, rect.top()), pos2(xb, rect.bottom())],
+            Stroke::new(2.5, Color32::from_rgb(0x4C, 0xC9, 0xF0)),
+        );
+    }
+    let xc = x_of(current_freq);
+    painter.line_segment(
+        [pos2(xc, rect.top()), pos2(xc, rect.bottom())],
+        Stroke::new(1.5, Color32::WHITE),
+    );
+
+    // Frequency axis labels along the bottom edge.
+    for f in [SWEEP_MIN_MHZ, 10.0, 20.0, SWEEP_MAX_MHZ] {
+        painter.text(
+            pos2(x_of(f), rect.bottom() - 1.0),
+            Align2::CENTER_BOTTOM,
+            format!("{f:.0}"),
+            FontId::proportional(9.0),
+            Color32::from_gray(0xE0),
+        );
+    }
 }

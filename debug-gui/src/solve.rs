@@ -20,12 +20,47 @@ use skipzone::magnetoionic::Mode;
 use skipzone::trace::{Outcome, TraceConfig, Tracer};
 use skipzone::units::{Hertz, Meters, Radians};
 
+use num_complex::Complex64;
+use std::f64::consts::PI;
+
 use crate::scenario::{
     Assumptions, EARTH_RADIUS_M, Inputs, Models, destination_point, ground_point, to_lat_lon,
 };
 
 /// Nepers -> dB for field amplitude: 20/ln(10).
 pub const NEPERS_TO_DB: f64 = 8.685_889_638_065_035;
+
+/// Basic free-space (spreading) loss [dB] over a path length `dist_km` at
+/// `f_mhz`: the standard Friis form `32.44 + 20 log10(f_MHz) + 20 log10(d_km)`.
+/// The distance used is the total ray arc length (the physical path the energy
+/// travels), not the great-circle range.
+#[must_use]
+pub fn free_space_loss_db(dist_km: f64, f_mhz: f64) -> f64 {
+    32.44 + 20.0 * f_mhz.log10() + 20.0 * dist_km.log10()
+}
+
+/// Loss [dB] at one ground reflection, from the Fresnel power reflection
+/// coefficient of a lossy dielectric half-space.
+///
+/// The complex relative permittivity is `eps_r - j sigma/(omega eps0)`
+/// (ITU-R P.527 form). Horizontal and vertical coefficients are
+///   R_h = (sin g - w)/(sin g + w),  R_v = (eps_c sin g - w)/(eps_c sin g + w),
+///   w = sqrt(eps_c - cos^2 g),
+/// with `g` the grazing (elevation) angle. A sky wave is elliptically polarised
+/// after its ionospheric reflection, so we use the average power coefficient
+/// `(|R_h|^2 + |R_v|^2)/2`; the loss is `-10 log10` of it.
+#[must_use]
+pub fn ground_reflection_loss_db(grazing_rad: f64, f_hz: f64, eps_r: f64, sigma: f64) -> f64 {
+    const EPS0: f64 = 8.854_187_8e-12;
+    let eps_c = Complex64::new(eps_r, -sigma / (2.0 * PI * f_hz * EPS0));
+    let (sin_g, cos_g) = grazing_rad.sin_cos();
+    let s = Complex64::new(sin_g, 0.0);
+    let w = (eps_c - cos_g * cos_g).sqrt();
+    let r_h = (s - w) / (s + w);
+    let r_v = (eps_c * s - w) / (eps_c * s + w);
+    let power = 0.5 * (r_h.norm_sqr() + r_v.norm_sqr());
+    -10.0 * power.clamp(1e-12, 1.0).log10()
+}
 /// Cap on drawn points per hop; the ray polyline is decimated to this.
 const MAX_POLY_POINTS: usize = 400;
 
@@ -54,6 +89,9 @@ pub struct HopDetail {
     pub phase_km: f64,
     pub arc_km: f64,
     pub absorption_db: f64,
+    /// Ground-reflection loss [dB] incurred where this hop lands, when another
+    /// hop follows (0 for the final hop, which arrives at the receiver).
+    pub ground_loss_db: f64,
     pub steps: usize,
     pub hamiltonian_drift: f64,
     pub outcome: &'static str,
@@ -72,6 +110,15 @@ pub struct Solution {
     pub total_phase_km: f64,
     pub total_arc_km: f64,
     pub total_absorption_db: f64,
+    /// Free-space spreading loss over the total ray path, dB.
+    pub free_space_loss_db: f64,
+    /// Summed Fresnel loss over the intermediate ground reflections, dB.
+    pub ground_reflection_loss_db: f64,
+    /// Number of intermediate ground reflections (hops - 1 for a landed path).
+    pub num_ground_reflections: u32,
+    /// Basic transmission loss = free-space + absorption + ground reflection, dB.
+    /// Excludes antenna gains and any statistical excess-system-loss term.
+    pub total_system_loss_db: f64,
     pub total_ground_km: f64,
     /// Distance from the final landing point to the requested receiver.
     pub terminal_miss_km: f64,
@@ -222,8 +269,17 @@ fn make_tracer<'a>(
     )
 }
 
+/// Practical homing miss tolerance for interactive HF prediction, m. The
+/// engine default (30 m) is set for its own validation and, near a skip-zone
+/// edge / caustic, the bisection legitimately stalls at a few hundred metres
+/// after the iteration budget - a miss that is already a match for any HF use
+/// (< ~0.1 % of path length). Accepting it here turns those "practically a
+/// match" cases into the connections they are, instead of reporting no path.
+const PRACTICAL_MISS_TOLERANCE_M: f64 = 2000.0;
+
 fn homing_config(use_field: bool) -> HomingConfig {
     let mut c = HomingConfig::default();
+    c.miss_tolerance_m = PRACTICAL_MISS_TOLERANCE_M;
     // Without a field the near-vertical Spitze cannot occur, so the scan can
     // reach NVIS geometries. With a field, keep the engine's default cap.
     if !use_field {
@@ -240,12 +296,15 @@ fn propagate<D, B, C>(
     elev: Radians,
     az: Radians,
     hops: u32,
+    f_hz: f64,
+    ground: (f64, f64),
 ) -> (Vec<HopDetail>, Vec<SphericalPoint>, Option<String>)
 where
     D: ElectronDensity + ?Sized,
     B: MagneticField + ?Sized,
     C: CollisionFrequency + ?Sized,
 {
+    let (eps_r, sigma) = ground;
     let mut details = Vec::new();
     let mut ends = Vec::new();
     let mut point = *tx;
@@ -260,6 +319,13 @@ where
         };
         let res = &cap.result;
         let (arr_elev, arr_az) = arrival_angles(res.end_m);
+        // A ground reflection happens where this hop lands only if another hop
+        // follows; the final hop arrives at the receiver with no reflection.
+        let ground_loss_db = if res.outcome == Outcome::Landed && i + 1 < hops {
+            ground_reflection_loss_db(arr_elev.to_radians(), f_hz, eps_r, sigma)
+        } else {
+            0.0
+        };
         let range_km = central_angle(&point, &res.end).get() * EARTH_RADIUS_M / 1e3;
         let apex_x = res.apexes.first().map_or(f64::NAN, |ap| ap.x);
         let apex_from_engine = res
@@ -281,6 +347,7 @@ where
             phase_km: res.phase_path.get() / 1e3,
             arc_km: res.arc_length.get() / 1e3,
             absorption_db: res.absorption.get() * NEPERS_TO_DB,
+            ground_loss_db,
             steps: res.steps,
             hamiltonian_drift: res.hamiltonian_drift,
             outcome: outcome_label(res.outcome),
@@ -312,6 +379,7 @@ fn assemble(
     rx: &SphericalPoint,
     homing_miss_m: f64,
     note: Option<String>,
+    f_mhz: f64,
 ) -> Solution {
     let total_group_km: f64 = details.iter().map(|h| h.group_km).sum();
     let total_phase_km: f64 = details.iter().map(|h| h.phase_km).sum();
@@ -327,6 +395,14 @@ fn assemble(
         central_angle(e, rx).get() * EARTH_RADIUS_M / 1e3
     });
 
+    // Link budget: spreading over the whole ray path + ionospheric absorption +
+    // Fresnel loss at each intermediate ground reflection.
+    let free_space_loss_db = free_space_loss_db(total_arc_km.max(1e-3), f_mhz);
+    let ground_reflection_loss_db: f64 = details.iter().map(|h| h.ground_loss_db).sum();
+    let num_ground_reflections =
+        u32::try_from(details.iter().filter(|h| h.ground_loss_db > 0.0).count()).unwrap_or(0);
+    let total_system_loss_db = free_space_loss_db + total_absorption_db + ground_reflection_loss_db;
+
     Solution {
         mode,
         hops,
@@ -335,6 +411,10 @@ fn assemble(
         total_phase_km,
         total_arc_km,
         total_absorption_db,
+        free_space_loss_db,
+        ground_reflection_loss_db,
+        num_ground_reflections,
+        total_system_loss_db,
         total_ground_km,
         terminal_miss_km,
         homing_miss_m,
@@ -433,6 +513,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
 
     let mut solutions = Vec::new();
     let mut errors = Vec::new();
+    let f_hz = inputs.freq_mhz * 1e6;
+    let ground = inputs.ground_type.constants();
 
     // Without a field, O and X are bit-identical by construction, so tracing
     // both would just draw the same path twice.
@@ -458,7 +540,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                 Ok(rays) => {
                     for ray in rays {
                         let (details, ends, note) =
-                            propagate(&tracer, &tx, ray.elevation, ray.azimuth, hops);
+                            propagate(&tracer, &tx, ray.elevation, ray.azimuth, hops, f_hz, ground);
                         if details.is_empty() {
                             if let Some(n) = note {
                                 errors
@@ -466,7 +548,16 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                             }
                             continue;
                         }
-                        solutions.push(assemble(mode, hops, details, &ends, &rx, ray.miss_m, note));
+                        solutions.push(assemble(
+                            mode,
+                            hops,
+                            details,
+                            &ends,
+                            &rx,
+                            ray.miss_m,
+                            note,
+                            inputs.freq_mhz,
+                        ));
                     }
                 }
                 Err(HomingError::NoBracket { .. }) => {}
@@ -572,6 +663,50 @@ mod tests {
                 assert!(!h.polyline.is_empty(), "no polyline captured for drawing");
             }
         }
+    }
+
+    /// Free-space loss matches the textbook Friis value, and ground-reflection
+    /// loss behaves physically: non-negative, sea water (highly conducting) loses
+    /// far less than dry ground at the same grazing angle, and (for lossy ground)
+    /// a near-grazing bounce reflects better than a steeper one.
+    #[test]
+    fn link_budget_terms_are_physical() {
+        // Friis: 20 MHz over 8000 km = 32.44 + 26.02 + 78.06 = 136.5 dB.
+        assert!((free_space_loss_db(8000.0, 20.0) - 136.52).abs() < 0.1);
+
+        let f = 14e6;
+        let grazing = 8.0_f64.to_radians();
+        let sea = ground_reflection_loss_db(grazing, f, 80.0, 5.0);
+        let dry = ground_reflection_loss_db(grazing, f, 5.0, 0.001);
+        assert!(sea >= 0.0 && dry >= 0.0);
+        assert!(sea < 0.6, "sea reflects well, got {sea} dB");
+        assert!(
+            dry > sea + 1.0,
+            "dry ground {dry} should lose more than sea {sea}"
+        );
+        // Over lossy ground the reflection coefficient falls away from grazing
+        // (the vertical-polarisation Brewster dip), so a steeper bounce loses more.
+        let steep = ground_reflection_loss_db(45.0_f64.to_radians(), f, 5.0, 0.001);
+        assert!(
+            steep > dry,
+            "steeper bounce {steep} should lose more than grazing {dry}"
+        );
+    }
+
+    /// The assembled Solution's total system loss is exactly the sum of its
+    /// three parts, spreading dominates, and there are hops-1 ground reflections.
+    #[test]
+    fn total_system_loss_is_sum_of_parts() {
+        let out = run(&Inputs::default());
+        let s = out.solutions.first().expect("a solution");
+        let sum = s.free_space_loss_db + s.total_absorption_db + s.ground_reflection_loss_db;
+        assert!((s.total_system_loss_db - sum).abs() < 1e-9);
+        assert!(
+            s.free_space_loss_db > 120.0,
+            "spreading {}",
+            s.free_space_loss_db
+        );
+        assert_eq!(s.num_ground_reflections, s.hops - 1);
     }
 
     /// Absorption must be genuinely non-zero: the collision wiring is real,

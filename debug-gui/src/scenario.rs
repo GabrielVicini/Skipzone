@@ -65,6 +65,56 @@ pub enum PlaceMode {
     Rx,
 }
 
+/// Surface type at the intermediate ground reflections, for the ground-loss
+/// term of the link budget.
+///
+/// The `(relative permittivity, conductivity [S/m])` pairs are the standard
+/// HF-band (low-frequency-limit) representative constants tabulated in
+/// ITU-R P.527 / P.368 and the classic radio-propagation literature (they are
+/// the values NEC/antenna tools ship as ground presets). They are surfaced in
+/// the UI and user-selectable; a real path crosses several surface types, which
+/// this single choice deliberately approximates (no coastline database here).
+#[derive(Clone, Copy, PartialEq)]
+pub enum GroundType {
+    SeaWater,
+    FreshWater,
+    WetGround,
+    MediumGround,
+    DryGround,
+}
+
+impl GroundType {
+    pub const ALL: [Self; 5] = [
+        Self::SeaWater,
+        Self::FreshWater,
+        Self::WetGround,
+        Self::MediumGround,
+        Self::DryGround,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SeaWater => "sea water",
+            Self::FreshWater => "fresh water",
+            Self::WetGround => "wet / good ground",
+            Self::MediumGround => "medium ground",
+            Self::DryGround => "dry / poor ground",
+        }
+    }
+
+    /// `(relative permittivity eps_r, conductivity sigma [S/m])`, HF band.
+    #[must_use]
+    pub fn constants(self) -> (f64, f64) {
+        match self {
+            Self::SeaWater => (80.0, 5.0),
+            Self::FreshWater => (80.0, 0.003),
+            Self::WetGround => (30.0, 0.01),
+            Self::MediumGround => (15.0, 0.003),
+            Self::DryGround => (5.0, 0.001),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Inputs {
     pub tx_lat: f64,
@@ -74,10 +124,11 @@ pub struct Inputs {
     pub freq_mhz: f64,
     pub utc_hours: f64,
     pub month: u32,
-    pub solar_high: bool,
-    /// Manual overrides; when set, climatology is bypassed entirely.
-    pub fof2_override: Option<f64>,
-    pub hmf2_override: Option<f64>,
+    /// Sunspot number. foF2 is derived from this (see `fof2_from_ssn`); it is
+    /// the solar-activity input, replacing the old day/season/solar-high table.
+    pub ssn: f64,
+    /// F2 peak height, km. A direct user input (no climatology table).
+    pub hmf2_km: f64,
     pub scale_height_km: f64,
     pub day_of_month: u32,
     /// When false (the default) the collision profile comes from the module
@@ -91,6 +142,8 @@ pub struct Inputs {
     pub igrf_epoch: f64,
     pub max_hops: u32,
     pub domain_top_km: f64,
+    /// Surface at the intermediate ground reflections (link-budget ground loss).
+    pub ground_type: GroundType,
 }
 
 impl Default for Inputs {
@@ -103,9 +156,8 @@ impl Default for Inputs {
             freq_mhz: 14.1,
             utc_hours: 18.0,
             month: 1,
-            solar_high: false,
-            fof2_override: None,
-            hmf2_override: None,
+            ssn: 70.0,
+            hmf2_km: 300.0,
             scale_height_km: 50.0,
             day_of_month: 15,
             collision_manual: false,
@@ -116,6 +168,7 @@ impl Default for Inputs {
             igrf_epoch: 2026.5,
             max_hops: 4,
             domain_top_km: 800.0,
+            ground_type: GroundType::MediumGround,
         }
     }
 }
@@ -162,12 +215,14 @@ pub struct Assumptions {
     pub freq_mhz: f64,
     /// Solar geometry at the path midpoint.
     pub solar: SolarGeometry,
-    /// False past `MAX_CHAPMAN_ZENITH_ANGLE`: no photochemical production, so
-    /// the D layer is omitted entirely rather than extrapolated.
+    /// Display flag: the D region is producing at the path midpoint (sun up and
+    /// non-negligible). The layer itself is always built and varies along the
+    /// path; this only drives the panel label.
     pub d_region_active: bool,
-    /// Realised D-region peak after the sqrt(cos chi) reduction, m^-3.
+    /// Realised D-region peak at the midpoint, `Nm / sqrt(Ch)` from the Chapman
+    /// grazing function, m^-3.
     pub d_region_peak_ne: f64,
-    /// Realised D-region peak altitude after the H ln(sec chi) rise, km.
+    /// Realised D-region peak altitude at the midpoint, `+H ln(Ch)`, km.
     pub d_region_peak_alt_km: f64,
     pub d_region_source: String,
 }
@@ -189,36 +244,21 @@ pub fn season_at(month: u32, latitude_deg: f64) -> Season {
     }
 }
 
-/// Coarse representative midlatitude foF2 [MHz]. Order-of-magnitude values
-/// consistent with published climatology (night drop, solar-cycle scaling,
-/// midlatitude winter anomaly). NOT a path-specific prediction; always shown
-/// in the UI and overridable.
-pub fn representative_fof2_mhz(day: bool, season: Season, solar_high: bool) -> f64 {
-    match (day, solar_high) {
-        (true, true) => match season {
-            Season::Winter => 12.0,
-            Season::Equinox => 11.0,
-            Season::Summer => 8.0,
-        },
-        (true, false) => match season {
-            Season::Winter => 7.0,
-            Season::Equinox => 7.0,
-            Season::Summer => 5.0,
-        },
-        // Night foF2 is much less season-dependent at midlatitudes.
-        (false, true) => 4.5,
-        (false, false) => 2.8,
-    }
-}
-
-/// Coarse representative F2 peak height [km]: higher at night and solar max.
-pub fn representative_hmf2_km(day: bool, solar_high: bool) -> f64 {
-    match (day, solar_high) {
-        (true, true) => 300.0,
-        (true, false) => 280.0,
-        (false, true) => 350.0,
-        (false, false) => 330.0,
-    }
+/// foF2 [MHz] derived from sunspot number. The peak plasma density NmF2 (and
+/// hence foF2^2, since NmF2 proportional to foF2^2) is taken linear in SSN -
+/// the standard first-order statement that peak ionisation scales with solar
+/// activity - calibrated to representative midlatitude anchors: foF2 ~ 4.5 MHz
+/// at SSN 0 and ~10 MHz at SSN 150.
+///
+/// This is a coarse climatological anchor, NOT a path-, season-, or
+/// time-specific prediction (that is the job of the CCIR maps, which are not
+/// implemented here), and it is always surfaced in the UI. There is
+/// deliberately no hidden day/night branch: SSN is the only driver, so the
+/// operator sees exactly the foF2 the engine is given.
+#[must_use]
+pub fn fof2_from_ssn(ssn: f64) -> f64 {
+    // foF2(0)^2 = 4.5^2 = 20.25; slope (10^2 - 20.25)/150 = 0.5317.
+    (20.25 + 0.531_666_7 * ssn.max(0.0)).sqrt()
 }
 
 pub fn ground_point(lat_deg: f64, lon_deg: f64) -> SphericalPoint {
@@ -301,7 +341,6 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         inputs.utc_hours,
     );
     let lst = solar.local_solar_time_h;
-    let day = solar.is_day();
     let season = season_at(inputs.month, mid_lat);
 
     // D region: day/night-aware alpha-Chapman layer on the Chapman grazing
@@ -338,25 +377,14 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
          (order-of-magnitude, not a fitted model)"
     );
 
-    let (fof2, fof2_source) = match inputs.fof2_override {
-        Some(v) => (v, "manual override".to_string()),
-        None => (
-            representative_fof2_mhz(day, season, inputs.solar_high),
-            format!(
-                "coarse midlat climatology [{}, {}, solar {}] @ path midpoint",
-                if day { "day" } else { "night" },
-                season.label(),
-                if inputs.solar_high { "high" } else { "low" }
-            ),
-        ),
-    };
-    let (hmf2, hmf2_source) = match inputs.hmf2_override {
-        Some(v) => (v, "manual override".to_string()),
-        None => (
-            representative_hmf2_km(day, inputs.solar_high),
-            "coarse midlat climatology".to_string(),
-        ),
-    };
+    let fof2 = fof2_from_ssn(inputs.ssn);
+    let fof2_source = format!(
+        "derived from SSN = {:.0} (NmF2 linear in SSN, coarse midlat anchor; \
+         no day/night branch)",
+        inputs.ssn
+    );
+    let hmf2 = inputs.hmf2_km;
+    let hmf2_source = "direct user input".to_string();
     let nm = density_at_critical_frequency(Hertz::new(fof2 * 1e6));
 
     let (nu0_per_s, nu_ref_alt_km, nu_scale_height_km, collision_source) = if inputs
@@ -397,7 +425,7 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         midpoint_lat: mid_lat,
         midpoint_lon: mid_lon,
         lst_hours: lst,
-        is_day: day,
+        is_day: solar.is_day(),
         season,
         nu0_per_s,
         nu_ref_alt_km,
@@ -505,4 +533,33 @@ pub fn sample_profile(models: &Models, a: &Assumptions) -> Vec<ProfileRow> {
         alt += 20.0;
     }
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// foF2(SSN) hits its calibration anchors, rises monotonically with solar
+    /// activity, and clamps negative SSN rather than producing NaN.
+    #[test]
+    fn fof2_from_ssn_monotonic_and_anchored() {
+        assert!(
+            (fof2_from_ssn(0.0) - 4.5).abs() < 0.02,
+            "{}",
+            fof2_from_ssn(0.0)
+        );
+        assert!(
+            (fof2_from_ssn(150.0) - 10.0).abs() < 0.05,
+            "{}",
+            fof2_from_ssn(150.0)
+        );
+        let mut prev = fof2_from_ssn(0.0);
+        for s in 1..=300 {
+            let v = fof2_from_ssn(f64::from(s));
+            assert!(v > prev, "not monotonic at SSN {s}: {v} <= {prev}");
+            prev = v;
+        }
+        // Negative SSN is clamped to the SSN = 0 value (never NaN).
+        assert_eq!(fof2_from_ssn(-40.0), fof2_from_ssn(0.0));
+    }
 }

@@ -19,6 +19,7 @@ mod panels;
 mod scenario;
 mod solar;
 mod solve;
+mod sweep;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {

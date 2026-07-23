@@ -10,6 +10,8 @@ skipzone = { path = ".." }
 eframe = "0.35"
 egui = "0.35"
 walkers = "0.56"
+# Complex Fresnel reflection coefficients for the ground-reflection loss term.
+num-complex = "0.4"
 
 # Deliberately NOT clippy-pedantic, unlike the engine crate: this is a
 # throwaway-grade debug harness, and pedantic lint churn on UI layout code
