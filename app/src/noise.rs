@@ -15,10 +15,10 @@
 //!     `k = 1.38e-23 J/K`, `t0` the reference temperature "taken as 290 K", and
 //!     `b` the noise power bandwidth (Hz). Note 1: `Fa = 10 log10(fa)` dB.
 //!   * Eq. (6): the available noise power
-//!         `Pn = Fa + B - 204   dBW`
+//!     `Pn = Fa + B - 204   dBW`
 //!     where `B = 10 log10(b)` and `-204 = 10 log10(k t0)`.
 //!   * Eq. (11) + Table 1: man-made noise median
-//!         `Fam = c - d log10(f)`,  f in MHz,
+//!     `Fam = c - d log10(f)`,  f in MHz,
 //!     valid 0.3-250 MHz, with (c, d) = City (76.8, 27.7), Residential
 //!     (72.5, 27.7), Rural (67.2, 27.7), Quiet rural (53.6, 28.6), Galactic
 //!     noise (52.0, 23.0).
@@ -463,7 +463,9 @@ mod tests {
             assert!((man_made_noise_figure_db(env, 1.0) - c).abs() < 1e-12);
         }
         // Residential at 10 MHz: 72.5 - 27.7 * 1 = 44.8 dB.
-        assert!((man_made_noise_figure_db(NoiseEnvironment::Residential, 10.0) - 44.8).abs() < 1e-9);
+        assert!(
+            (man_made_noise_figure_db(NoiseEnvironment::Residential, 10.0) - 44.8).abs() < 1e-9
+        );
         // City at 10 MHz: 76.8 - 27.7 = 49.1 dB.
         assert!((man_made_noise_figure_db(NoiseEnvironment::City, 10.0) - 49.1).abs() < 1e-9);
         // Rural at 3 MHz: 67.2 - 27.7 * 0.4771213 = 67.2 - 13.2163 = 53.9837 dB.
@@ -525,7 +527,7 @@ mod tests {
         // The total is never below the loudest contributor.
         let parts = [12.0, 31.5, 8.0];
         let total = combine_noise_figures_db(&parts);
-        assert!(total >= 31.5 && total < 32.0, "{total}");
+        assert!((31.5..32.0).contains(&total), "{total}");
     }
 
     /// The atmospheric surrogate has no reference value to check against, so
@@ -635,7 +637,11 @@ mod tests {
         let exact_loss = dbm_from_watts(100.0) - noise.power_dbm - 10.0;
         let on = LinkBudget::new(100.0, exact_loss, noise, 10.0);
         assert!((on.snr_db - 10.0).abs() < 1e-9);
-        assert_eq!(on.state(), PathState::Usable, "at threshold counts as usable");
+        assert_eq!(
+            on.state(),
+            PathState::Usable,
+            "at threshold counts as usable"
+        );
         let under = LinkBudget::new(100.0, exact_loss + 0.5, noise, 10.0);
         assert_eq!(under.state(), PathState::BelowThreshold);
         assert!(under.margin_db() < 0.0);

@@ -6,6 +6,7 @@ use egui::{Align2, Color32, FontId, Mesh, Pos2, Response, Shape, Stroke, Ui, pos
 use walkers::{MapMemory, Plugin, Projector, lat_lon};
 
 use crate::solve::Solution;
+use crate::ui::theme;
 
 /// Night-side shading that tracks the sun. Draws a smooth twilight gradient
 /// (day clear, night tinted) over the visible map, plus a marker at the
@@ -133,18 +134,6 @@ impl Plugin for TerminatorPlugin {
     }
 }
 
-/// Palette for distinguishing solutions; index wraps.
-pub const PALETTE: [Color32; 8] = [
-    Color32::from_rgb(0xE6, 0x39, 0x46),
-    Color32::from_rgb(0x2A, 0x9D, 0x8F),
-    Color32::from_rgb(0xE9, 0xC4, 0x6A),
-    Color32::from_rgb(0x8E, 0x7D, 0xBE),
-    Color32::from_rgb(0xF4, 0xA2, 0x61),
-    Color32::from_rgb(0x4C, 0xC9, 0xF0),
-    Color32::from_rgb(0x90, 0xBE, 0x6D),
-    Color32::from_rgb(0xFF, 0x6F, 0xB5),
-];
-
 pub struct PathPlugin<'a> {
     pub solutions: &'a [Solution],
     pub visible: &'a [bool],
@@ -172,7 +161,7 @@ impl Plugin for PathPlugin<'_> {
             if !self.visible.get(i).copied().unwrap_or(true) {
                 continue;
             }
-            let color = PALETTE[i % PALETTE.len()];
+            let color = theme::solution_color(i);
             let width = if self.selected == Some(i) { 3.5 } else { 2.0 };
 
             for hop in &sol.hop_details {

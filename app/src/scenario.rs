@@ -124,6 +124,11 @@ pub struct Inputs {
     pub rx_lon: f64,
     pub freq_mhz: f64,
     pub utc_hours: f64,
+    /// Calendar year. Carried so the UI can show and edit a real date; the
+    /// solar geometry deliberately ignores it (see [`crate::solar`]: Cooper's
+    /// declination takes only the day of year, and leap years shift that by
+    /// under 0.4 deg of declination - far below this model's accuracy).
+    pub year: i32,
     pub month: u32,
     /// Sunspot number. foF2 is derived from this (see `fof2_from_ssn`); it is
     /// the solar-activity input, replacing the old day/season/solar-high table.
@@ -170,6 +175,7 @@ impl Default for Inputs {
             rx_lon: -0.13,
             freq_mhz: 14.1,
             utc_hours: 18.0,
+            year: 2026,
             month: 1,
             ssn: 70.0,
             hmf2_km: 300.0,

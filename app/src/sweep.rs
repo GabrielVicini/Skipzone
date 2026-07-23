@@ -11,10 +11,10 @@
 //! Nothing here implements physics: it clones the `Inputs`, rebuilds the engine
 //! models once per job, and calls the existing `scenario`/`solve` API.
 
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::time::Duration;
 
 use egui::Context;
@@ -100,9 +100,7 @@ impl SweepPoint {
         #[allow(clippy::cast_possible_truncation)]
         match self.state {
             // Best (0.0) at >= MARGIN_FULL_DB of margin, worst (1.0) at 0 dB.
-            PathState::Usable => {
-                (1.0 - (self.margin_db / MARGIN_FULL_DB).clamp(0.0, 1.0)) as f32
-            }
+            PathState::Usable => (1.0 - (self.margin_db / MARGIN_FULL_DB).clamp(0.0, 1.0)) as f32,
             // 0.0 just under the threshold, 1.0 hopelessly under it.
             PathState::BelowThreshold => {
                 ((-self.margin_db) / SHORTFALL_FULL_DB).clamp(0.0, 1.0) as f32
@@ -127,10 +125,7 @@ impl SweepPoint {
             return format!(
                 "{:>5.2} MHz  NO PATH        near-miss {:>7.0} km  {} hop(s)  \
                  noise {:>7.1} dBm",
-                self.freq_mhz,
-                self.miss_km,
-                self.hops,
-                self.noise_dbm,
+                self.freq_mhz, self.miss_km, self.hops, self.noise_dbm,
             );
         }
         format!(
@@ -467,9 +462,12 @@ fn run_sweep_parallel(
     let coarse = coarse_freqs();
     // Optimistic total for the bar: whole coarse grid plus one fine window.
     let total_estimate = coarse.len() + fine_freqs(0.5 * (SWEEP_MIN_MHZ + SWEEP_MAX_MHZ)).len();
-    let _ = msg_tx.send((epoch, Msg::SweepStart {
-        total: total_estimate,
-    }));
+    let _ = msg_tx.send((
+        epoch,
+        Msg::SweepStart {
+            total: total_estimate,
+        },
+    ));
     ctx.request_repaint();
 
     // Shared, lock-free progress counter; the mpsc Sender is !Sync so a clone is
@@ -487,11 +485,14 @@ fn run_sweep_parallel(
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Some(point) = point {
                     if let Ok(tx) = prog.lock() {
-                        let _ = tx.send((epoch, Msg::SweepProgress {
-                            done: n,
-                            total,
-                            point: *point,
-                        }));
+                        let _ = tx.send((
+                            epoch,
+                            Msg::SweepProgress {
+                                done: n,
+                                total,
+                                point: *point,
+                            },
+                        ));
                     }
                     ctx.request_repaint();
                 }
@@ -520,9 +521,12 @@ fn run_sweep_parallel(
 
     log_sweep_timing("parallel", &coarse_timing, &fine_timing);
 
-    let _ = msg_tx.send((epoch, Msg::SweepDone {
-        best: best.map(|point| SweepBest { point }),
-    }));
+    let _ = msg_tx.send((
+        epoch,
+        Msg::SweepDone {
+            best: best.map(|point| SweepBest { point }),
+        },
+    ));
     ctx.request_repaint();
 }
 
@@ -604,9 +608,12 @@ fn run_sweep_sequential(
     };
     log_sweep_timing_single("sequential", &timing);
 
-    let _ = msg_tx.send((epoch, Msg::SweepDone {
-        best: best.map(|point| SweepBest { point }),
-    }));
+    let _ = msg_tx.send((
+        epoch,
+        Msg::SweepDone {
+            best: best.map(|point| SweepBest { point }),
+        },
+    ));
     ctx.request_repaint();
 }
 
@@ -680,9 +687,8 @@ mod tests {
         freqs.extend(fine_freqs(14.0));
 
         let never_cancel = AtomicBool::new(false);
-        let evaluate = |f: &f64| {
-            solve_point(*f, &inputs, &a, &models, &never_cancel).expect("not cancelled")
-        };
+        let evaluate =
+            |f: &f64| solve_point(*f, &inputs, &a, &models, &never_cancel).expect("not cancelled");
 
         let seq = ComputePool::new(PoolConfig {
             execution: Execution::Sequential,
@@ -739,7 +745,10 @@ mod tests {
         );
         eprintln!("frequencies differing     : {mismatches}");
 
-        assert_eq!(mismatches, 0, "parallel results diverged from single-threaded");
+        assert_eq!(
+            mismatches, 0,
+            "parallel results diverged from single-threaded"
+        );
     }
 
     #[test]
