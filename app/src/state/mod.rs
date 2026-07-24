@@ -15,5 +15,5 @@ mod session;
 mod ui;
 
 pub use location::{LocationEntry, LocationMode};
-pub use session::{Session, SolveResults};
+pub use session::{Busy, Session, SolveResults};
 pub use ui::{CalendarState, Menu, UiState};

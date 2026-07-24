@@ -30,6 +30,7 @@ mod app;
 mod clock;
 mod coastline;
 mod compute;
+mod coverage;
 mod dregion;
 mod grid;
 mod noise;

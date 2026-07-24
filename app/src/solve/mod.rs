@@ -22,6 +22,19 @@ mod types;
 
 pub use types::{Solution, SolveOutcome, mode_label};
 
+/// The mode a listener would actually hear: the strongest SNR among the
+/// solutions found, or `None` when nothing connected.
+///
+/// Shared by every caller that has to reduce a whole solve to one number - the
+/// frequency sweep and the coverage grid - so the two can never disagree about
+/// which mode a scenario is being judged by.
+#[must_use]
+pub fn best_by_snr(out: &SolveOutcome) -> Option<&Solution> {
+    out.solutions
+        .iter()
+        .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
+}
+
 use skipzone::geo::{bearing, central_angle};
 use skipzone::homing::{Homing, HomingError};
 use skipzone::magnetoionic::Mode;

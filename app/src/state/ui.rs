@@ -25,6 +25,8 @@ pub enum Menu {
 pub struct Modals {
     /// Point-to-Point > Best FREQ: the sweep charts.
     pub best_freq: bool,
+    /// Coverage Maps > Area coverage: the grid controls and legend.
+    pub coverage: bool,
     /// Help > About.
     pub about: bool,
     pub settings: bool,
@@ -88,6 +90,9 @@ pub struct UiState {
     /// outlines the classifier actually tests against, so a hop's verdict can be
     /// checked against the data by eye instead of taken on trust.
     pub show_coastlines: bool,
+    /// Fill opacity of the area coverage tiles, 0-255. A display control only:
+    /// it changes how much basemap shows through, never a computed value.
+    pub coverage_alpha: u8,
     /// Window width the text styles were last scaled for.
     pub styled_for_width: f32,
     /// Height of the solid header, measured last frame. The floating overlays
@@ -113,6 +118,7 @@ impl UiState {
             right_inset: 0.0,
             show_terminator: true,
             show_coastlines: false,
+            coverage_alpha: 0xC0,
             styled_for_width: 0.0,
             header_height: 0.0,
         }

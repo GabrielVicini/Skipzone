@@ -12,7 +12,7 @@ use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreet
 use crate::solar;
 use crate::state::{Session, UiState};
 
-use super::plugins::{CoastlinePlugin, PathPlugin, TerminatorPlugin};
+use super::plugins::{CoastlinePlugin, CoveragePlugin, PathPlugin, TerminatorPlugin};
 
 pub struct MapView {
     tiles: HttpTiles,
@@ -85,6 +85,16 @@ impl MapView {
                     map = map.with_plugin(TerminatorPlugin {
                         decl_deg,
                         sub_lon_deg,
+                    });
+                }
+
+                // Coverage tiles sit above the night shading (they are the
+                // answer being read) but below the coastlines and ray paths,
+                // which have to stay legible on top of them.
+                if !session.coverage.cells.is_empty() {
+                    map = map.with_plugin(CoveragePlugin {
+                        cells: &session.coverage.cells,
+                        alpha: ui_state.coverage_alpha,
                     });
                 }
 
