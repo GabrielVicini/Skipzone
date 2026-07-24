@@ -19,12 +19,10 @@ pub enum Menu {
     Help,
 }
 
-/// Which modal dialogs are open. Several can be open at once; egui stacks them
-/// and only the topmost takes Escape.
+/// Which dialogs are open. They are ordinary windows, not modals: several can
+/// be open at once and the rest of the interface stays live behind them.
 #[derive(Default)]
 pub struct Modals {
-    /// Point-to-Point > Calculate: the full trace readout.
-    pub trace: bool,
     /// Point-to-Point > Best FREQ: the sweep charts.
     pub best_freq: bool,
     /// Help > About.
@@ -77,6 +75,13 @@ pub struct UiState {
     /// Which top-bar menu is open, if any.
     pub menu: Option<Menu>,
     pub modals: Modals,
+    /// Point-to-Point > Calculate: the trace readout, shown as a docked side
+    /// panel rather than a window so it never covers the map.
+    pub trace_open: bool,
+    /// Width the trace panel took last frame, or 0 when it is closed. The
+    /// floating overlays inset their right edge by it so the panel pushes them
+    /// aside instead of covering them.
+    pub right_inset: f32,
     /// Draw the live day/night terminator shading on the map.
     pub show_terminator: bool,
     /// Window width the text styles were last scaled for.
@@ -100,6 +105,8 @@ impl UiState {
             calendar: CalendarState::new(date),
             menu: None,
             modals: Modals::default(),
+            trace_open: false,
+            right_inset: 0.0,
             show_terminator: true,
             styled_for_width: 0.0,
             header_height: 0.0,

@@ -37,7 +37,9 @@ pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) -> Opt
         "best_freq_dialog",
         "Best frequency",
         &mut ui_state.modals.best_freq,
-        vec2(720.0, 660.0),
+        // Roomy by default: three stacked charts plus the readout only tell
+        // their story when they are wide enough to separate the samples.
+        vec2(1000.0, 820.0),
         |ui| {
             body(
                 ui,
