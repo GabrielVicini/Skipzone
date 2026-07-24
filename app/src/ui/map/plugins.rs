@@ -6,6 +6,7 @@ use egui::{Align2, Color32, FontId, Mesh, Pos2, Response, Shape, Stroke, Ui, pos
 use walkers::{MapMemory, Plugin, Projector, lat_lon};
 
 use crate::coastline::Outline;
+use crate::coverage::CoverageCell;
 use crate::solve::Solution;
 use crate::ui::theme;
 
@@ -214,6 +215,67 @@ impl Plugin for CoastlinePlugin {
             coast.lake_outlines(),
             LAKE_OUTLINE,
         );
+    }
+}
+
+/// Area coverage tiles: one filled rectangle per *computed* grid point.
+///
+/// There is no interpolation, no smoothing and no fill between points. Each
+/// rectangle covers exactly the grid cell its solve stands for, so at a coarse
+/// resolution the map is visibly blocky - which is the truth about how much was
+/// computed. The cure for blockiness is raising the resolution setting, which
+/// runs more solves.
+///
+/// The plugin simply draws whatever cells exist right now, so a run in progress
+/// paints itself in progressively as the worker streams results.
+pub struct CoveragePlugin<'a> {
+    pub cells: &'a [CoverageCell],
+    /// 0-255 fill alpha, so the basemap stays readable underneath.
+    pub alpha: u8,
+}
+
+impl Plugin for CoveragePlugin<'_> {
+    fn run(
+        self: Box<Self>,
+        ui: &mut Ui,
+        response: &Response,
+        projector: &Projector,
+        _m: &MapMemory,
+    ) {
+        if self.cells.is_empty() {
+            return;
+        }
+        let painter = ui.painter();
+        let view = response.rect;
+        for cell in self.cells {
+            let half = 0.5 * cell.step_deg;
+            let (sw, ne) = (
+                screen(projector, cell.lat - half, cell.lon - half),
+                screen(projector, cell.lat + half, cell.lon + half),
+            );
+            // A cell straddling the antimeridian projects to a rectangle the
+            // width of the world; skip it rather than smear it across the map.
+            if (ne.x - sw.x).abs() > view.width() {
+                continue;
+            }
+            let rect = egui::Rect::from_two_pos(sw, ne);
+            if !rect.intersects(view) {
+                continue;
+            }
+            let base = if cell.found_path() {
+                theme::coverage_color(cell.snr_db)
+            } else {
+                theme::COVERAGE_NO_PATH
+            };
+            // Expand by half a pixel: adjacent cells then meet exactly, so the
+            // grid reads as tiles rather than as a dotted lattice with seams.
+            // This changes no value - only whether neighbours touch.
+            painter.rect_filled(
+                rect.expand(0.5),
+                0.0,
+                base.gamma_multiply(f32::from(self.alpha) / 255.0),
+            );
+        }
     }
 }
 

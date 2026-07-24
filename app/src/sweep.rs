@@ -20,7 +20,8 @@ use std::time::Duration;
 use egui::Context;
 use skipzone::magnetoionic::Mode;
 
-use crate::compute::{ComputePool, Execution, PoolConfig, Timing};
+use crate::compute::{ComputePool, Execution, PoolConfig, Timing, available_cores};
+use crate::coverage::{CoverageCell, CoverageConfig};
 use crate::noise::PathState;
 use crate::scenario::{self, Assumptions, Inputs, Models, ProfileRow};
 use crate::solve::{self, SolveOutcome};
@@ -165,6 +166,7 @@ pub struct MainResult {
 pub enum Job {
     Main(Inputs),
     Sweep(Inputs),
+    Coverage(Inputs, CoverageConfig),
 }
 
 pub enum Msg {
@@ -182,6 +184,24 @@ pub enum Msg {
         best: Option<SweepBest>,
     },
     SweepFailed(String),
+    CoverageStart {
+        total: usize,
+        threads: usize,
+    },
+    /// One finished grid point, streamed the instant it is computed so the map
+    /// fills in progressively rather than appearing at the end.
+    CoverageProgress {
+        done: usize,
+        total: usize,
+        threads: usize,
+        cell: Box<CoverageCell>,
+    },
+    CoverageDone {
+        /// True when the run stopped early because CANCEL was pressed. The
+        /// cells already streamed stay on the map either way.
+        cancelled: bool,
+    },
+    CoverageFailed(String),
 }
 
 /// Reduce a full solve to the cached summary for one frequency.
@@ -190,11 +210,7 @@ pub enum Msg {
 /// signal an operator would actually hear, and it is what the three-state
 /// verdict must be based on.
 fn summarize(freq_mhz: f64, out: &SolveOutcome) -> SweepPoint {
-    if let Some(best) = out
-        .solutions
-        .iter()
-        .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
-    {
+    if let Some(best) = solve::best_by_snr(out) {
         SweepPoint {
             freq_mhz,
             state: best.link.state(),
@@ -297,6 +313,18 @@ impl SolverService {
         self.current_cancel = Some(cancel);
     }
 
+    /// Ask the in-flight job to stop without queuing anything in its place.
+    ///
+    /// The epoch is deliberately NOT bumped: work already finished has been
+    /// delivered under the current epoch, and the job's own closing message must
+    /// still arrive so the UI learns the run ended. Remaining items stop at the
+    /// next flag check, which for a coverage grid is before each grid point.
+    pub fn cancel(&mut self) {
+        if let Some(c) = self.current_cancel.take() {
+            c.store(true, Ordering::Relaxed);
+        }
+    }
+
     /// Current-epoch messages that have arrived since the last call
     /// (non-blocking); stale messages from superseded jobs are discarded.
     pub fn drain(&self) -> Vec<Msg> {
@@ -313,13 +341,19 @@ fn worker(
     msg_tx: &Sender<(u64, Msg)>,
     ctx: &Context,
 ) {
-    // One pool for the worker's whole lifetime: sizing a rayon pool costs a
-    // thread spawn per worker, so we pay it once and reuse it for every sweep.
-    let pool = build_sweep_pool();
+    // One pool per job kind for the worker's whole lifetime: sizing a rayon pool
+    // costs a thread spawn per worker, so we pay it once and reuse it. The two
+    // are separate because they are deliberately sized differently (see
+    // `sweep_pool_config` and `coverage_pool_config`).
+    let pool = build_pool("sweep", sweep_pool_config());
+    let coverage_pool = build_pool("coverage", coverage_pool_config());
     while let Ok((epoch, job, cancel)) = job_rx.recv() {
         match job {
             Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, ctx),
             Job::Sweep(inputs) => run_sweep(epoch, &inputs, &pool, &cancel, msg_tx, ctx),
+            Job::Coverage(inputs, config) => {
+                run_coverage(epoch, &inputs, config, &coverage_pool, &cancel, msg_tx, ctx);
+            }
         }
     }
 }
@@ -330,26 +364,55 @@ fn worker(
 ///   * `SKIPZONE_COMPUTE=sequential` - single-threaded fallback (the old path).
 ///   * `SKIPZONE_COMPUTE_THREADS=N`   - cap worker threads at N.
 ///
-/// Default: parallel across every logical core.
+/// Default: parallel, but holding two cores back.
+///
+/// The sweep is the *incidental* background job - it runs while the operator
+/// carries on panning the map, dragging stations and reading panels, and the
+/// tile fetcher and the UI thread both want CPU while it does. Reserving two
+/// cores keeps the interface responsive for the whole minute-plus it takes. The
+/// coverage grid is the opposite case and is sized accordingly.
 fn sweep_pool_config() -> PoolConfig {
-    let execution = match std::env::var("SKIPZONE_COMPUTE").as_deref() {
-        Ok("sequential" | "seq" | "off" | "0") => Execution::Sequential,
-        _ => Execution::Parallel,
-    };
-    let max_threads = std::env::var("SKIPZONE_COMPUTE_THREADS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok());
+    let cores = available_cores();
     PoolConfig {
-        execution,
-        max_threads,
+        execution: execution_from_env(),
+        max_threads: Some(threads_from_env().unwrap_or(cores.saturating_sub(2).max(1))),
     }
 }
 
-/// Build the sweep pool, degrading to the single-threaded fallback if the
-/// thread pool cannot be created (which must never take the app down).
-fn build_sweep_pool() -> ComputePool {
-    ComputePool::new(sweep_pool_config()).unwrap_or_else(|e| {
-        eprintln!("[sweep] compute pool build failed ({e}); using sequential fallback");
+/// The coverage grid gets every core.
+///
+/// It is a deliberate, bounded, one-off run the operator starts and then
+/// watches fill in - there is no other work competing for the machine, and the
+/// only thing they are waiting on is this. So unlike the sweep it holds nothing
+/// back.
+fn coverage_pool_config() -> PoolConfig {
+    PoolConfig {
+        execution: execution_from_env(),
+        max_threads: Some(threads_from_env().unwrap_or_else(available_cores)),
+    }
+}
+
+/// `SKIPZONE_COMPUTE=sequential` switches the parallel layer off entirely, so a
+/// suspected parallelism bug can be A/B'd without a rebuild.
+fn execution_from_env() -> Execution {
+    match std::env::var("SKIPZONE_COMPUTE").as_deref() {
+        Ok("sequential" | "seq" | "off" | "0") => Execution::Sequential,
+        _ => Execution::Parallel,
+    }
+}
+
+/// `SKIPZONE_COMPUTE_THREADS=N` caps both pools at N threads.
+fn threads_from_env() -> Option<usize> {
+    std::env::var("SKIPZONE_COMPUTE_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+}
+
+/// Build a pool, degrading to the single-threaded fallback if the thread pool
+/// cannot be created (which must never take the app down).
+fn build_pool(label: &str, config: PoolConfig) -> ComputePool {
+    ComputePool::new(config).unwrap_or_else(|e| {
+        eprintln!("[{label}] compute pool build failed ({e}); using sequential fallback");
         ComputePool::new(PoolConfig {
             execution: Execution::Sequential,
             max_threads: None,
@@ -617,6 +680,90 @@ fn run_sweep_sequential(
     ctx.request_repaint();
 }
 
+/// Area coverage: build the models once, then run the existing point-to-point
+/// solve at every grid point across the coverage pool, streaming each finished
+/// cell the moment it lands.
+///
+/// This is a loop of traces and nothing more - there is no coverage-specific
+/// physics anywhere in it. `crate::coverage::solve_cell` is the whole unit of
+/// work; see that module for why one `Models` is valid for every grid point.
+#[allow(clippy::too_many_arguments)]
+fn run_coverage(
+    epoch: u64,
+    inputs: &Inputs,
+    config: CoverageConfig,
+    pool: &ComputePool,
+    cancel: &AtomicBool,
+    msg_tx: &Sender<(u64, Msg)>,
+    ctx: &Context,
+) {
+    let a = scenario::resolve(inputs);
+    let models = match scenario::build_models(inputs, &a) {
+        Ok(m) => m,
+        Err(e) => {
+            let _ = msg_tx.send((epoch, Msg::CoverageFailed(e)));
+            ctx.request_repaint();
+            return;
+        }
+    };
+
+    let step_deg = config.step_deg();
+    let points = config.grid(inputs.tx_lat, inputs.tx_lon);
+    let total = points.len();
+    let threads = pool.threads();
+    let _ = msg_tx.send((epoch, Msg::CoverageStart { total, threads }));
+    ctx.request_repaint();
+
+    let done = AtomicUsize::new(0);
+    let prog = Mutex::new(msg_tx.clone());
+
+    let (_cells, timing) = pool.map_reporting(
+        &points,
+        |&(lat, lon)| {
+            // Checked per grid point, so pressing CANCEL stops the remaining
+            // calculations rather than letting the whole grid drain.
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            Some(crate::coverage::solve_cell(
+                lat, lon, step_deg, inputs, &models,
+            ))
+        },
+        |_, cell: &Option<CoverageCell>| {
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(cell) = cell
+                && let Ok(tx) = prog.lock()
+            {
+                let _ = tx.send((
+                    epoch,
+                    Msg::CoverageProgress {
+                        done: n,
+                        total,
+                        threads,
+                        cell: Box::new(*cell),
+                    },
+                ));
+                ctx.request_repaint();
+            }
+        },
+    );
+
+    let cancelled = cancel.load(Ordering::Relaxed);
+    eprintln!(
+        "[coverage] {} of {total} grid point(s) on {threads} thread(s) in {:.3} s \
+         (serial work {:.3} s, {:.1}x, mean {:.0} ms/point){}",
+        timing.per_item.len(),
+        timing.total.as_secs_f64(),
+        timing.work().as_secs_f64(),
+        timing.speedup(),
+        timing.mean_item().as_secs_f64() * 1e3,
+        if cancelled { " [CANCELLED]" } else { "" },
+    );
+
+    let _ = msg_tx.send((epoch, Msg::CoverageDone { cancelled }));
+    ctx.request_repaint();
+}
+
 /// One-line timing summary combining the coarse and fine phases. This is the
 /// instrumentation that confirms where sweep time actually goes and lets the
 /// measured speedup be checked, rather than assumed.
@@ -749,6 +896,83 @@ mod tests {
             mismatches, 0,
             "parallel results diverged from single-threaded"
         );
+    }
+
+    /// The coverage run's three behavioural promises, checked without a window:
+    /// every grid point is streamed as its own message (that is what makes the
+    /// map fill in progressively rather than appearing at the end), the run
+    /// reports the thread count it is using, and a cancel mid-run stops the
+    /// remaining calculations while keeping everything already delivered.
+    #[test]
+    fn coverage_streams_each_point_and_cancel_keeps_what_was_computed() {
+        use crate::coverage::CoverageConfig;
+
+        // A small grid: enough points to cancel part-way through.
+        let config = CoverageConfig {
+            half_span_deg: 12.0,
+            points_per_deg: 0.25, // 4 deg steps => 7 x 7 minus the centre
+        };
+        let inputs = Inputs::default();
+        let expected = config.grid(inputs.tx_lat, inputs.tx_lon).len();
+        assert!(expected > 8, "need a grid worth cancelling, got {expected}");
+
+        let pool = build_pool("coverage-test", coverage_pool_config());
+        let ctx = Context::default();
+
+        // Run 1: to completion. One message per grid point, in the order they
+        // finished, each carrying the pool's thread count.
+        let (tx, rx) = mpsc::channel();
+        let never = AtomicBool::new(false);
+        run_coverage(1, &inputs, config, &pool, &never, &tx, &ctx);
+        drop(tx);
+        let msgs: Vec<Msg> = rx.into_iter().map(|(_, m)| m).collect();
+
+        let mut streamed = 0usize;
+        let mut started = None;
+        let mut finished = None;
+        for m in &msgs {
+            match m {
+                Msg::CoverageStart { total, threads } => started = Some((*total, *threads)),
+                Msg::CoverageProgress { threads, .. } => {
+                    streamed += 1;
+                    assert_eq!(*threads, pool.threads());
+                }
+                Msg::CoverageDone { cancelled } => finished = Some(*cancelled),
+                _ => panic!("unexpected message kind from a coverage run"),
+            }
+        }
+        assert_eq!(started, Some((expected, pool.threads())));
+        assert_eq!(streamed, expected, "one message per computed grid point");
+        assert_eq!(finished, Some(false));
+
+        // The coverage pool must be the more aggressive of the two: the sweep
+        // deliberately holds cores back, this run does not.
+        let sweep_threads = build_pool("sweep-test", sweep_pool_config()).threads();
+        if available_cores() > 2 && threads_from_env().is_none() {
+            assert!(
+                pool.threads() > sweep_threads,
+                "coverage ({}) should use more threads than the sweep ({sweep_threads})",
+                pool.threads(),
+            );
+        }
+
+        // Run 2: cancelled before it starts. Nothing further is computed, the
+        // run still closes itself out, and it says it was cancelled.
+        let (tx, rx) = mpsc::channel();
+        let cancelled_flag = AtomicBool::new(true);
+        run_coverage(2, &inputs, config, &pool, &cancelled_flag, &tx, &ctx);
+        drop(tx);
+        let msgs: Vec<Msg> = rx.into_iter().map(|(_, m)| m).collect();
+        assert!(
+            !msgs
+                .iter()
+                .any(|m| matches!(m, Msg::CoverageProgress { .. })),
+            "a cancelled run must not solve any more grid points"
+        );
+        assert!(matches!(
+            msgs.last(),
+            Some(Msg::CoverageDone { cancelled: true })
+        ));
     }
 
     #[test]

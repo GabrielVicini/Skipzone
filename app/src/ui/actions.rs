@@ -22,6 +22,13 @@ pub enum Action {
     ZoomOut,
     /// Adopt a frequency found by the sweep as the tuned frequency.
     TuneTo(f64),
+    /// Start the area coverage grid.
+    RunCoverage,
+    /// Stop the running grid, keeping every tile computed so far.
+    CancelCoverage,
+    /// Clear the coverage tiles off the map.
+    ResetCoverage,
+    ShowCoverage,
     ShowSettings,
     ShowAntennas,
     ShowAbout,
@@ -43,6 +50,13 @@ pub fn apply(action: Action, session: &mut Session, ui_state: &mut UiState, map:
         Action::ZoomIn => map.zoom_in(),
         Action::ZoomOut => map.zoom_out(),
         Action::TuneTo(freq_mhz) => session.inputs.freq_mhz = freq_mhz,
+        Action::RunCoverage => {
+            session.run_coverage();
+            ui_state.modals.coverage = true;
+        }
+        Action::CancelCoverage => session.cancel_coverage(),
+        Action::ResetCoverage => session.reset_coverage(),
+        Action::ShowCoverage => ui_state.modals.coverage = true,
         Action::ShowSettings => ui_state.modals.settings = true,
         Action::ShowAntennas => ui_state.modals.antennas = true,
         Action::ShowAbout => ui_state.modals.about = true,

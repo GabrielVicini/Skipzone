@@ -71,10 +71,3 @@ pub fn item(ui: &mut Ui, label: &str) -> bool {
     ui.add(Button::new(label).fill(Color32::TRANSPARENT))
         .clicked()
 }
-
-/// A dropdown line that is shown but cannot be chosen (a placeholder), with the
-/// reason as its hover text.
-pub fn disabled_item(ui: &mut Ui, label: &str, why: &str) {
-    ui.add_enabled(false, Button::new(label).fill(Color32::TRANSPARENT))
-        .on_disabled_hover_text(why);
-}

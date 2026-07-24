@@ -31,10 +31,7 @@ pub fn menu_bar(ui: &mut Ui, ui_state: &mut UiState) -> Option<Action> {
         open,
         Menu::CoverageMaps,
         "Coverage Maps",
-        |ui| {
-            menu::disabled_item(ui, "Test", "Coverage maps are not implemented yet.");
-            None
-        },
+        |ui| menu::item(ui, "Area coverage").then_some(Action::ShowCoverage),
     ));
 
     action.or(menu::dropdown(ui, open, Menu::Help, "Help", |ui| {

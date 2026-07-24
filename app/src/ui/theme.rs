@@ -192,9 +192,103 @@ pub fn state_legend() -> [(Color32, &'static str); 3] {
     ]
 }
 
+// --- Area coverage gradient ----------------------------------------------
+
+/// SNR-to-colour breakpoints for the area coverage map, in the VOACAP idiom:
+/// blues for weak, greens for moderate, yellow/orange for strong, red for very
+/// strong. Between two stops the colour is interpolated linearly in RGB; below
+/// the first and above the last it saturates.
+///
+/// This is a colour ramp over ONE computed number. It never interpolates
+/// between grid points - each tile is painted the colour of its own solve.
+pub const COVERAGE_STOPS: [(f64, [u8; 3]); 7] = [
+    (-10.0, [0x0D, 0x1B, 0x4A]), // deep navy: nothing usable
+    (0.0, [0x1F, 0x4F, 0xD8]),   // blue: signal equals the noise
+    (10.0, [0x00, 0xB7, 0xD8]),  // cyan
+    (20.0, [0x2F, 0xBF, 0x4F]),  // green: comfortably readable
+    (30.0, [0xE8, 0xDA, 0x2A]),  // yellow
+    (40.0, [0xF0, 0x8A, 0x22]),  // orange
+    (50.0, [0xD8, 0x23, 0x1C]),  // red: very strong
+];
+
+/// Colour for a grid point where ray tracing found no path at all. Grey, and
+/// deliberately outside the ramp: "nothing arrives" is a different kind of
+/// answer from "something weak arrives", and the two must not blend.
+pub const COVERAGE_NO_PATH: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
+
+/// Colour for one computed SNR, following [`COVERAGE_STOPS`].
+#[must_use]
+pub fn coverage_color(snr_db: f64) -> Color32 {
+    if !snr_db.is_finite() {
+        return COVERAGE_NO_PATH;
+    }
+    let first = COVERAGE_STOPS[0];
+    let last = COVERAGE_STOPS[COVERAGE_STOPS.len() - 1];
+    if snr_db <= first.0 {
+        return Color32::from_rgb(first.1[0], first.1[1], first.1[2]);
+    }
+    if snr_db >= last.0 {
+        return Color32::from_rgb(last.1[0], last.1[1], last.1[2]);
+    }
+    for w in COVERAGE_STOPS.windows(2) {
+        let ((lo_db, lo), (hi_db, hi)) = (w[0], w[1]);
+        if snr_db <= hi_db {
+            #[allow(clippy::cast_possible_truncation)]
+            let t = ((snr_db - lo_db) / (hi_db - lo_db)) as f32;
+            return mix(lo, hi, t);
+        }
+    }
+    COVERAGE_NO_PATH
+}
+
 fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let lerp = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
     Color32::from_rgb(lerp(a[0], b[0]), lerp(a[1], b[1]), lerp(a[2], b[2]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The published breakpoints are what the map actually paints, the ramp
+    /// saturates outside them, and a value with no path never lands anywhere on
+    /// the ramp.
+    #[test]
+    fn coverage_ramp_hits_its_stated_breakpoints() {
+        for (db, rgb) in COVERAGE_STOPS {
+            let (r, g, b, _) = coverage_color(db).to_tuple();
+            assert_eq!([r, g, b], rgb, "stop at {db} dB");
+        }
+        // Saturating, not wrapping, outside the table.
+        assert_eq!(coverage_color(-999.0), coverage_color(COVERAGE_STOPS[0].0));
+        assert_eq!(coverage_color(999.0), coverage_color(50.0));
+        // No path is off the ramp entirely.
+        assert_eq!(coverage_color(f64::NEG_INFINITY), COVERAGE_NO_PATH);
+        assert!(COVERAGE_STOPS.iter().all(|&(db, rgb)| {
+            let (r, g, b, _) = COVERAGE_NO_PATH.to_tuple();
+            let _ = db;
+            [r, g, b] != rgb
+        }));
+    }
+
+    /// Between two stops the colour moves monotonically from one to the other,
+    /// so a brighter tile really does mean a stronger computed SNR.
+    #[test]
+    fn coverage_ramp_interpolates_between_stops() {
+        let mid = coverage_color(5.0).to_tuple();
+        let (lo, hi) = (
+            coverage_color(0.0).to_tuple(),
+            coverage_color(10.0).to_tuple(),
+        );
+        for c in 0..3 {
+            let (a, m, b) = (
+                i32::from([lo.0, lo.1, lo.2][c]),
+                i32::from([mid.0, mid.1, mid.2][c]),
+                i32::from([hi.0, hi.1, hi.2][c]),
+            );
+            assert!(m >= a.min(b) && m <= a.max(b), "channel {c}: {a} {m} {b}");
+        }
+    }
 }

@@ -8,6 +8,7 @@ mod about;
 mod antennas;
 mod best_freq;
 mod chrome;
+mod coverage;
 mod settings;
 
 use egui::Context;
@@ -19,8 +20,9 @@ use crate::ui::actions::Action;
 /// produced.
 pub fn draw(ctx: &Context, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
     let best = best_freq::show(ctx, session, ui_state);
+    let cover = coverage::show(ctx, session, ui_state);
     settings::show(ctx, session, ui_state);
     antennas::show(ctx, session, ui_state);
     about::show(ctx, ui_state);
-    best
+    best.or(cover)
 }

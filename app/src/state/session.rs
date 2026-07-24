@@ -10,6 +10,7 @@
 use egui::Context;
 
 use crate::clock::{self, CivilDate};
+use crate::coverage::{CoverageCell, CoverageConfig};
 use crate::scenario::{Assumptions, Inputs, ProfileRow};
 use crate::solve::{Solution, SolveOutcome};
 use crate::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
@@ -19,7 +20,17 @@ use crate::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
 pub enum Busy {
     Idle,
     Solving,
-    Sweeping { done: usize, total: usize },
+    Sweeping {
+        done: usize,
+        total: usize,
+    },
+    /// The area coverage grid. `threads` is carried so the progress readout can
+    /// state how much of the machine the run is using.
+    Covering {
+        done: usize,
+        total: usize,
+        threads: usize,
+    },
 }
 
 impl Busy {
@@ -33,7 +44,7 @@ impl Busy {
     #[must_use]
     pub fn fraction(self) -> Option<f32> {
         match self {
-            Self::Sweeping { done, total } if total > 0 =>
+            Self::Sweeping { done, total } | Self::Covering { done, total, .. } if total > 0 =>
             {
                 #[allow(clippy::cast_precision_loss)]
                 Some((done as f32 / total as f32).clamp(0.0, 1.0))
@@ -48,6 +59,11 @@ impl Busy {
             Self::Idle => None,
             Self::Solving => Some("calculating".to_string()),
             Self::Sweeping { done, total } => Some(format!("sweeping {done}/{total}")),
+            Self::Covering {
+                done,
+                total,
+                threads,
+            } => Some(format!("coverage {done}/{total} on {threads} threads")),
         }
     }
 }
@@ -112,10 +128,40 @@ impl SweepResults {
     }
 }
 
+/// Everything the area coverage run has produced so far.
+///
+/// `cells` is append-only while a run streams in, which is what makes the map
+/// fill in progressively: the plugin draws whatever is in here each frame. A
+/// cancelled run simply stops appending, so its cells stay put.
+#[derive(Default)]
+pub struct CoverageResults {
+    pub cells: Vec<CoverageCell>,
+    /// The last run ended early because CANCEL was pressed.
+    pub cancelled: bool,
+}
+
+impl CoverageResults {
+    /// Is there anything on the map to clear? This is what puts the RESET
+    /// button on screen - true after a finished run and after a cancelled one.
+    #[must_use]
+    pub fn has_tiles(&self) -> bool {
+        !self.cells.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.cells.clear();
+        self.cancelled = false;
+    }
+}
+
 pub struct Session {
     pub inputs: Inputs,
     pub solve: SolveResults,
     pub sweep: SweepResults,
+    /// Grid settings for the area coverage map. A run parameter rather than
+    /// part of the scenario, so it lives here and not in `Inputs`.
+    pub coverage_config: CoverageConfig,
+    pub coverage: CoverageResults,
     pub busy: Busy,
     /// Model-build or solver failure from the last dispatched job.
     pub error: Option<String>,
@@ -140,6 +186,8 @@ impl Session {
             inputs,
             solve: SolveResults::default(),
             sweep: SweepResults::default(),
+            coverage_config: CoverageConfig::default(),
+            coverage: CoverageResults::default(),
             busy: Busy::Idle,
             error: None,
             solver: SolverService::new(ctx),
@@ -182,6 +230,31 @@ impl Session {
         self.solver.dispatch(Job::Sweep(self.inputs.clone()));
     }
 
+    /// Kick off the area coverage grid. Any tiles from a previous run are
+    /// cleared first: a new grid is a new answer, not an overlay on the old one.
+    pub fn run_coverage(&mut self) {
+        self.error = None;
+        self.coverage.clear();
+        self.busy = Busy::Covering {
+            done: 0,
+            total: 0,
+            threads: 0,
+        };
+        self.solver
+            .dispatch(Job::Coverage(self.inputs.clone(), self.coverage_config));
+    }
+
+    /// Stop the running coverage grid. Everything already computed stays on the
+    /// map; only the calculations still queued are abandoned.
+    pub fn cancel_coverage(&mut self) {
+        self.solver.cancel();
+    }
+
+    /// Clear the coverage tiles from the map.
+    pub fn reset_coverage(&mut self) {
+        self.coverage.clear();
+    }
+
     /// Absorb any results the worker has posted since the last frame.
     pub fn pump(&mut self) {
         for msg in self.solver.drain() {
@@ -220,6 +293,36 @@ impl Session {
                 self.busy = Busy::Idle;
             }
             Msg::SweepFailed(e) => {
+                self.error = Some(e);
+                self.busy = Busy::Idle;
+            }
+            Msg::CoverageStart { total, threads } => {
+                self.coverage.clear();
+                self.coverage.cells.reserve(total);
+                self.busy = Busy::Covering {
+                    done: 0,
+                    total,
+                    threads,
+                };
+            }
+            Msg::CoverageProgress {
+                done,
+                total,
+                threads,
+                cell,
+            } => {
+                self.coverage.cells.push(*cell);
+                self.busy = Busy::Covering {
+                    done,
+                    total,
+                    threads,
+                };
+            }
+            Msg::CoverageDone { cancelled } => {
+                self.coverage.cancelled = cancelled;
+                self.busy = Busy::Idle;
+            }
+            Msg::CoverageFailed(e) => {
                 self.error = Some(e);
                 self.busy = Busy::Idle;
             }
