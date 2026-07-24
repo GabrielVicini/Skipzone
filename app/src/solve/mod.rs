@@ -51,10 +51,21 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     // frequency (not the tuned one) so the frequency sweep, which re-solves
     // against one `Assumptions`, gets the right floor at every candidate.
     let noise = scenario::noise_floor_at(inputs, a, inputs.freq_mhz);
+
+    // Antenna patterns, built once per solve. Each curve costs a hemispherical
+    // power integral (see `crate::antenna::image`), so it is computed here and
+    // sampled per solution rather than recomputed per angle. Both ends stand
+    // over the scenario's ground type.
+    let antenna_ground = inputs.ground_type.as_antenna_ground();
+    let tx_antenna = inputs.tx_antenna.curve(antenna_ground, f_hz);
+    let rx_antenna = inputs.rx_antenna.curve(antenna_ground, f_hz);
+
     let link_settings = LinkSettings {
         tx_power_w: inputs.tx_power_w,
         noise,
         threshold_db: inputs.snr_threshold_db,
+        tx_antenna: &tx_antenna,
+        rx_antenna: &rx_antenna,
     };
 
     // Without a field, O and X are bit-identical by construction, so tracing

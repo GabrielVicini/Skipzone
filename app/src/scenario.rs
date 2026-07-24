@@ -12,6 +12,7 @@ use skipzone::mag::{Igrf, IgrfModel, MagneticField};
 use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
 use crate::dregion::SolarChapmanD;
+use crate::antenna::{AntennaConfig, Ground};
 use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
 use crate::solar::{self, SolarGeometry};
 
@@ -114,6 +115,18 @@ impl GroundType {
             Self::DryGround => (5.0, 0.001),
         }
     }
+
+    /// The same surface as the antenna models see it. One selection drives both
+    /// the mid-path bounce loss and the image-theory ground under each antenna,
+    /// so the two can never disagree about what the ground is made of.
+    #[must_use]
+    pub fn as_antenna_ground(self) -> Ground {
+        let (eps_r, sigma_s_per_m) = self.constants();
+        Ground::Lossy {
+            eps_r,
+            sigma_s_per_m,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -148,8 +161,17 @@ pub struct Inputs {
     pub igrf_epoch: f64,
     pub max_hops: u32,
     pub domain_top_km: f64,
-    /// Surface at the intermediate ground reflections (link-budget ground loss).
+    /// Surface at the intermediate ground reflections (link-budget ground loss),
+    /// and under both antennas (their image-theory ground reflection).
     pub ground_type: GroundType,
+
+    // --- Antennas (see `crate::antenna`) ---------------------------------
+    /// Transmitting antenna. Its gain at the launch elevation of the first hop
+    /// enters the link budget.
+    pub tx_antenna: AntennaConfig,
+    /// Receiving antenna. Its gain at the arrival elevation of the last hop
+    /// enters the link budget.
+    pub rx_antenna: AntennaConfig,
 
     // --- Received-signal judgment (see `crate::noise`) -------------------
     /// Transmitter power, watts. Converted to dBm for the link budget.
@@ -190,6 +212,8 @@ impl Default for Inputs {
             max_hops: 4,
             domain_top_km: 800.0,
             ground_type: GroundType::MediumGround,
+            tx_antenna: AntennaConfig::default(),
+            rx_antenna: AntennaConfig::default(),
             tx_power_w: 100.0,
             noise_env: NoiseEnvironment::Rural,
             op_mode: OperatingMode::Ssb,

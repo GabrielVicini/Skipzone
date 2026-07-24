@@ -25,6 +25,7 @@
 //! Nothing in `ui` computes a physical quantity, and nothing below `state`
 //! mentions egui.
 
+mod antenna;
 mod app;
 mod clock;
 mod compute;

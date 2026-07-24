@@ -60,12 +60,26 @@ pub struct Solution {
     /// Number of intermediate ground reflections (hops - 1 for a landed path).
     pub num_ground_reflections: u32,
     /// Basic transmission loss = free-space + absorption + ground reflection, dB.
-    /// Excludes antenna gains and any statistical excess-system-loss term.
+    /// PROPAGATION only: deliberately excludes antenna gains (carried separately
+    /// below) and any statistical excess-system-loss term.
     pub total_system_loss_db: f64,
+    /// Transmitting antenna gain [dBi] at this solution's launch elevation.
+    pub tx_gain_dbi: f64,
+    /// Receiving antenna gain [dBi] at this solution's arrival elevation.
+    pub rx_gain_dbi: f64,
+    /// Launch elevation of the first hop [deg] - the angle `tx_gain_dbi` was
+    /// read at. Duplicated out of `hop_details` so the UI can show the pairing
+    /// without digging.
+    pub tx_elev_deg: f64,
+    /// Arrival elevation of the last hop [deg], where `rx_gain_dbi` was read.
+    pub rx_elev_deg: f64,
+    /// `tx_gain_dbi + rx_gain_dbi` [dB]: what the antennas add back to (or take
+    /// off) the propagation loss.
+    pub total_gain_db: f64,
     /// Received power, noise floor and SNR for this path: the judgment layer
     /// that decides whether a closing geometry is actually audible. Built from
-    /// `total_system_loss_db` plus the transmitter power and the noise floor;
-    /// it changes nothing about the loss terms above.
+    /// `total_system_loss_db - total_gain_db` plus the transmitter power and the
+    /// noise floor; it changes nothing about the loss terms above.
     pub link: LinkBudget,
     pub total_ground_km: f64,
     /// Distance from the final landing point to the requested receiver.

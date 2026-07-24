@@ -120,9 +120,22 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                 );
                 kv(
                     ui,
-                    "TOTAL system loss",
+                    "TOTAL propagation loss",
                     format!("{:.1} dB", sol.total_system_loss_db),
                 );
+
+                sub_head(ui, "ANTENNA GAIN");
+                kv(
+                    ui,
+                    &format!("TX at {:.1} deg launch", sol.tx_elev_deg),
+                    format!("{:+.2} dBi", sol.tx_gain_dbi),
+                );
+                kv(
+                    ui,
+                    &format!("RX at {:.1} deg arrival", sol.rx_elev_deg),
+                    format!("{:+.2} dBi", sol.rx_gain_dbi),
+                );
+                kv(ui, "TOTAL gain", format!("{:+.2} dB", sol.total_gain_db));
 
                 let lb = &sol.link;
                 sub_head(ui, "RECEIVED SIGNAL vs NOISE");
