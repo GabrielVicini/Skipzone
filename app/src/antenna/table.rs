@@ -181,7 +181,13 @@ mod tests {
             blocks: vec![block(
                 14.1e6,
                 15.0,
-                &[(0.0, -10.0), (10.0, 8.0), (20.0, 11.0), (45.0, 4.0), (90.0, -6.0)],
+                &[
+                    (0.0, -10.0),
+                    (10.0, 8.0),
+                    (20.0, 11.0),
+                    (45.0, 4.0),
+                    (90.0, -6.0),
+                ],
             )],
         };
         let dynamic: &dyn ElevationPattern = &ant;
@@ -220,9 +226,21 @@ mod tests {
     #[test]
     fn block_interpolation_clamps_and_handles_uneven_spacing() {
         let b = block(7.0e6, 10.0, &[(5.0, 0.0), (7.0, 4.0), (50.0, 4.0)]);
-        assert!((b.gain_dbi(0.0) - 0.0).abs() < 1e-9, "below the range clamps");
-        assert!((b.gain_dbi(90.0) - 4.0).abs() < 1e-9, "above the range clamps");
-        assert!((b.gain_dbi(6.0) - 2.0).abs() < 1e-9, "midway in a short interval");
-        assert!((b.gain_dbi(28.5) - 4.0).abs() < 1e-9, "flat interval stays flat");
+        assert!(
+            (b.gain_dbi(0.0) - 0.0).abs() < 1e-9,
+            "below the range clamps"
+        );
+        assert!(
+            (b.gain_dbi(90.0) - 4.0).abs() < 1e-9,
+            "above the range clamps"
+        );
+        assert!(
+            (b.gain_dbi(6.0) - 2.0).abs() < 1e-9,
+            "midway in a short interval"
+        );
+        assert!(
+            (b.gain_dbi(28.5) - 4.0).abs() < 1e-9,
+            "flat interval stays flat"
+        );
     }
 }

@@ -11,8 +11,8 @@ use skipzone::geo::SphericalPoint;
 use skipzone::mag::{Igrf, IgrfModel, MagneticField};
 use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
-use crate::dregion::SolarChapmanD;
 use crate::antenna::{AntennaConfig, Ground};
+use crate::dregion::SolarChapmanD;
 use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
 use crate::solar::{self, SolarGeometry};
 
@@ -74,8 +74,14 @@ pub enum PlaceMode {
 /// HF-band (low-frequency-limit) representative constants tabulated in
 /// ITU-R P.527 / P.368 and the classic radio-propagation literature (they are
 /// the values NEC/antenna tools ship as ground presets). They are surfaced in
-/// the UI and user-selectable; a real path crosses several surface types, which
-/// this single choice deliberately approximates (no coastline database here).
+/// the UI and user-selectable; one manual choice approximates a whole path that
+/// really crosses several surface types.
+///
+/// [`GroundType::AutoDetect`] is the alternative to that approximation: it
+/// picks one of the manual presets *per hop* from the reflection point's
+/// position against the Natural Earth coastline data (see
+/// [`crate::coastline`]). It never introduces new electrical constants - it
+/// only chooses among the ones below.
 #[derive(Clone, Copy, PartialEq)]
 pub enum GroundType {
     SeaWater,
@@ -83,16 +89,26 @@ pub enum GroundType {
     WetGround,
     MediumGround,
     DryGround,
+    /// Water vs. land decided per hop from the coastline datasets; land hops
+    /// take [`Inputs::ground_land_fallback`].
+    AutoDetect,
 }
 
 impl GroundType {
-    pub const ALL: [Self; 5] = [
+    /// Everything the surface dropdown offers: the five manual presets, in the
+    /// order they have always been listed, plus auto-detection.
+    pub const ALL_SELECTABLE: [Self; 6] = [
         Self::SeaWater,
         Self::FreshWater,
         Self::WetGround,
         Self::MediumGround,
         Self::DryGround,
+        Self::AutoDetect,
     ];
+
+    /// The land types auto-detection can fall back to. Water is decided from
+    /// the data; how wet the soil is is not in the data, so it stays a choice.
+    pub const LAND_TYPES: [Self; 3] = [Self::WetGround, Self::MediumGround, Self::DryGround];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -101,17 +117,30 @@ impl GroundType {
             Self::WetGround => "wet / good ground",
             Self::MediumGround => "medium ground",
             Self::DryGround => "dry / poor ground",
+            Self::AutoDetect => "auto-detect (coastline)",
         }
     }
 
+    /// True for the coastline-driven selection, which has no single constant
+    /// pair of its own.
+    #[must_use]
+    pub fn is_auto(self) -> bool {
+        self == Self::AutoDetect
+    }
+
     /// `(relative permittivity eps_r, conductivity sigma [S/m])`, HF band.
+    ///
+    /// `AutoDetect` has no constants of its own: the solver resolves it to a
+    /// real surface per hop before ever asking for these. It reports the
+    /// default land fallback here so the function stays total and any path that
+    /// somehow reaches it gets a sane surface rather than a panic.
     #[must_use]
     pub fn constants(self) -> (f64, f64) {
         match self {
             Self::SeaWater => (80.0, 5.0),
             Self::FreshWater => (80.0, 0.003),
             Self::WetGround => (30.0, 0.01),
-            Self::MediumGround => (15.0, 0.003),
+            Self::MediumGround | Self::AutoDetect => (15.0, 0.003),
             Self::DryGround => (5.0, 0.001),
         }
     }
@@ -164,6 +193,11 @@ pub struct Inputs {
     /// Surface at the intermediate ground reflections (link-budget ground loss),
     /// and under both antennas (their image-theory ground reflection).
     pub ground_type: GroundType,
+    /// Which land preset a hop that lands on land takes when `ground_type` is
+    /// [`GroundType::AutoDetect`]. The coastline data says water or land; it
+    /// carries nothing about soil moisture, so that half stays the operator's
+    /// call. Ignored entirely for a manual `ground_type`.
+    pub ground_land_fallback: GroundType,
 
     // --- Antennas (see `crate::antenna`) ---------------------------------
     /// Transmitting antenna. Its gain at the launch elevation of the first hop
@@ -211,7 +245,8 @@ impl Default for Inputs {
             igrf_epoch: 2026.5,
             max_hops: 4,
             domain_top_km: 800.0,
-            ground_type: GroundType::MediumGround,
+            ground_type: GroundType::AutoDetect,
+            ground_land_fallback: GroundType::MediumGround,
             tx_antenna: AntennaConfig::default(),
             rx_antenna: AntennaConfig::default(),
             tx_power_w: 100.0,

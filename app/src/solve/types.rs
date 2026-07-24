@@ -35,6 +35,13 @@ pub struct HopDetail {
     /// Ground-reflection loss [dB] incurred where this hop lands, when another
     /// hop follows (0 for the final hop, which arrives at the receiver).
     pub ground_loss_db: f64,
+    /// Surface used at that reflection, `None` when this hop does not reflect.
+    /// Constant across hops for a manual selection; per-hop when the surface is
+    /// auto-detected from the coastline.
+    pub ground_label: Option<&'static str>,
+    /// Why that surface was picked, when auto-detection made the choice.
+    /// `None` for a manual selection, where there is nothing to explain.
+    pub ground_reason: Option<String>,
     pub steps: usize,
     pub hamiltonian_drift: f64,
     pub outcome: &'static str,

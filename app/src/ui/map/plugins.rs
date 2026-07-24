@@ -5,6 +5,7 @@ use egui::epaint::{Vertex, WHITE_UV};
 use egui::{Align2, Color32, FontId, Mesh, Pos2, Response, Shape, Stroke, Ui, pos2, vec2};
 use walkers::{MapMemory, Plugin, Projector, lat_lon};
 
+use crate::coastline::Outline;
 use crate::solve::Solution;
 use crate::ui::theme;
 
@@ -131,6 +132,88 @@ impl Plugin for TerminatorPlugin {
                 Stroke::new(1.5, Color32::from_rgb(0xB8, 0x86, 0x00)),
             );
         }
+    }
+}
+
+/// Debug overlay for coastline auto-detection: the land and lake polygon
+/// outlines exactly as the classifier holds them, so a hop's "sea water" or
+/// "fresh water" verdict can be checked against the geometry that produced it.
+///
+/// Deliberately cheap: it draws the pre-thinned rings from
+/// [`crate::coastline`] (about a hundred points each), culls anything whose
+/// bounding box is off screen, and strokes outlines only - no fills. It is a
+/// sanity check, not a basemap; the tiles underneath are the pretty rendering.
+pub struct CoastlinePlugin;
+
+/// Colours for the two layers: land outlines and lake outlines. Chosen to read
+/// over both the map tiles and the night shading without competing with the
+/// per-solution path colours.
+const LAND_OUTLINE: Color32 = Color32::from_rgb(0xFF, 0x6D, 0x00);
+const LAKE_OUTLINE: Color32 = Color32::from_rgb(0x00, 0xB8, 0xD4);
+
+fn draw_rings(
+    painter: &egui::Painter,
+    projector: &Projector,
+    rect: egui::Rect,
+    rings: &[Outline],
+    color: Color32,
+) {
+    let stroke = Stroke::new(1.0, color);
+    let mut points: Vec<Pos2> = Vec::new();
+    for ring in rings {
+        // Cull on the ring's own geographic bounds first: two projections
+        // decide whether the other hundred are worth doing, and at any useful
+        // zoom nearly every ring in the world fails here.
+        let (min_lon, min_lat, max_lon, max_lat) = ring.bounds;
+        let a = screen(projector, min_lat, min_lon);
+        let b = screen(projector, max_lat, max_lon);
+        if !egui::Rect::from_two_pos(a, b).intersects(rect) {
+            continue;
+        }
+        points.clear();
+        points.extend(
+            ring.points
+                .iter()
+                .map(|&(lon, lat)| screen(projector, lat, lon)),
+        );
+        for w in points.windows(2) {
+            // Rings clipped at the antimeridian would otherwise draw a chord
+            // straight across the map.
+            if (w[1].x - w[0].x).abs() > rect.width() * 4.0 {
+                continue;
+            }
+            painter.line_segment([w[0], w[1]], stroke);
+        }
+    }
+}
+
+impl Plugin for CoastlinePlugin {
+    fn run(
+        self: Box<Self>,
+        ui: &mut Ui,
+        response: &Response,
+        projector: &Projector,
+        _m: &MapMemory,
+    ) {
+        let Ok(coast) = crate::coastline::get() else {
+            return;
+        };
+        let painter = ui.painter();
+        let rect = response.rect;
+        draw_rings(
+            painter,
+            projector,
+            rect,
+            coast.land_outlines(),
+            LAND_OUTLINE,
+        );
+        draw_rings(
+            painter,
+            projector,
+            rect,
+            coast.lake_outlines(),
+            LAKE_OUTLINE,
+        );
     }
 }
 

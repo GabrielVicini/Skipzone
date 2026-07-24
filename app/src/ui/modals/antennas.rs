@@ -30,8 +30,20 @@ fn body(ui: &mut Ui, inputs: &mut Inputs) {
     let f_hz = inputs.freq_mhz * 1e6;
     let ground = inputs.ground_type.as_antenna_ground();
 
-    end(ui, "Transmitting antenna", "tx", &mut inputs.tx_antenna, inputs.freq_mhz);
-    end(ui, "Receiving antenna", "rx", &mut inputs.rx_antenna, inputs.freq_mhz);
+    end(
+        ui,
+        "Transmitting antenna",
+        "tx",
+        &mut inputs.tx_antenna,
+        inputs.freq_mhz,
+    );
+    end(
+        ui,
+        "Receiving antenna",
+        "rx",
+        &mut inputs.rx_antenna,
+        inputs.freq_mhz,
+    );
 
     let tx = inputs.tx_antenna.curve(ground, f_hz);
     let rx = inputs.rx_antenna.curve(ground, f_hz);
@@ -60,7 +72,11 @@ fn body(ui: &mut Ui, inputs: &mut Inputs) {
             kv(ui, "TX peak gain", format!("{tg:.2} dBi at {ta:.1} deg"));
             kv(ui, "RX", rx.label().to_string());
             kv(ui, "RX peak gain", format!("{rg:.2} dBi at {ra:.1} deg"));
-            kv(ui, "TX power", format!("{:.0} W at the antenna", inputs.tx_power_w));
+            kv(
+                ui,
+                "TX power",
+                format!("{:.0} W at the antenna", inputs.tx_power_w),
+            );
             kv(ui, "Feedline loss", "not modelled".to_string());
         });
     });
@@ -74,10 +90,7 @@ fn body(ui: &mut Ui, inputs: &mut Inputs) {
         }
     });
 
-    ui.colored_label(
-        WARN,
-        RichText::new("Not modelled at either end").strong(),
-    );
+    ui.colored_label(WARN, RichText::new("Not modelled at either end").strong());
     hint(
         ui,
         "Feedline loss, conductor and matching loss (beyond the EFHW transformer term), \

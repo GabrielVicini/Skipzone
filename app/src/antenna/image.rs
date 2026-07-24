@@ -165,7 +165,13 @@ impl Ground {
 }
 
 /// `|1 + R exp(-j 2 k h sin d)|^2`, the two-ray array factor in POWER.
-fn array_factor_sq(elev_rad: f64, height_m: f64, f_hz: f64, ground: Ground, pol: Polarization) -> f64 {
+fn array_factor_sq(
+    elev_rad: f64,
+    height_m: f64,
+    f_hz: f64,
+    ground: Ground,
+    pol: Polarization,
+) -> f64 {
     let r = ground.reflection(elev_rad, f_hz, pol);
     let k = 2.0 * PI * f_hz / C_M_PER_S;
     let psi = 2.0 * k * height_m * elev_rad.sin();
@@ -213,9 +219,7 @@ impl Element {
                 wire_element(cos_p.acos(), half_waves).powi(2)
             }
             // Wire along z: p = 90 deg - d, independent of azimuth.
-            Self::Vertical { half_waves } => {
-                wire_element(PI / 2.0 - elev_rad, half_waves).powi(2)
-            }
+            Self::Vertical { half_waves } => wire_element(PI / 2.0 - elev_rad, half_waves).powi(2),
         }
     }
 }
@@ -248,7 +252,11 @@ fn normalised_curve(
             let az = i as f64 * az_step;
             let p = element.power(elev, az);
             // Trapezoid: the two endpoints carry half weight.
-            let w = if i == 0 || i == AZ_SAMPLES - 1 { 0.5 } else { 1.0 };
+            let w = if i == 0 || i == AZ_SAMPLES - 1 {
+                0.5
+            } else {
+                1.0
+            };
             integral += w * p * az_step;
             max = max.max(p);
         }
@@ -603,8 +611,14 @@ mod tests {
         // over salt water it approaches the perfect-ground 5 dBi near the
         // horizon.
         assert!((4.0..5.2).contains(&sea_g), "sea water peak {sea_g:.2} dBi");
-        assert!((-1.0..2.0).contains(&med_g), "medium ground peak {med_g:.2} dBi");
-        assert!((20.0..=35.0).contains(&med_a), "medium ground peak at {med_a} deg");
+        assert!(
+            (-1.0..2.0).contains(&med_g),
+            "medium ground peak {med_g:.2} dBi"
+        );
+        assert!(
+            (20.0..=35.0).contains(&med_a),
+            "medium ground peak at {med_a} deg"
+        );
         assert!(dry_a > 25.0, "dry ground peak at {dry_a} deg");
     }
 
@@ -662,7 +676,10 @@ mod tests {
         );
         // On 40 m at 12 m up (0.28 wavelengths) it is a cloud-warmer.
         let (_, peak_deg) = ant.curve(12.0, 7.1e6).peak();
-        assert!(peak_deg > 40.0, "40 m peak at {peak_deg} deg, expected high");
+        assert!(
+            peak_deg > 40.0,
+            "40 m peak at {peak_deg} deg, expected high"
+        );
     }
 
     /// A 2-wavelength wire (EFHW 4th harmonic) has an exact null broadside, so
@@ -676,7 +693,10 @@ mod tests {
         let broadside = |n: f64| wire_element(PI / 2.0, n);
         assert!((broadside(1.0) - 1.0).abs() < 1e-12);
         assert!((broadside(2.0) - 2.0).abs() < 1e-12);
-        assert!(broadside(4.0).abs() < 1e-12, "2-wavelength wire nulls broadside");
+        assert!(
+            broadside(4.0).abs() < 1e-12,
+            "2-wavelength wire nulls broadside"
+        );
 
         // Yet the reported curve is healthy, because it maximises over azimuth.
         let c = HorizontalWire::efhw(
@@ -689,7 +709,10 @@ mod tests {
         )
         .curve(12.0, 28.4e6);
         let (g, _) = c.peak();
-        assert!(g > 6.0, "4th-harmonic EFHW peak {g:.2} dBi should be strong");
+        assert!(
+            g > 6.0,
+            "4th-harmonic EFHW peak {g:.2} dBi should be strong"
+        );
     }
 
     /// The shared Fresnel coefficient must reproduce the limits the solver's
@@ -712,8 +735,14 @@ mod tests {
         // horizontal does not.
         let v: Vec<f64> = (1..60)
             .map(|d| {
-                fresnel_coefficient(f64::from(d).to_radians(), f, 15.0, 0.003, Polarization::Vertical)
-                    .norm()
+                fresnel_coefficient(
+                    f64::from(d).to_radians(),
+                    f,
+                    15.0,
+                    0.003,
+                    Polarization::Vertical,
+                )
+                .norm()
             })
             .collect();
         let vmin = v.iter().copied().fold(f64::INFINITY, f64::min);

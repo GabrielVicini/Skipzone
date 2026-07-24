@@ -16,7 +16,7 @@
 //!
 //! | layer       | modules                              | knows about        |
 //! |-------------|--------------------------------------|--------------------|
-//! | conversion  | `clock`, `grid`, `solar`             | nothing else       |
+//! | conversion  | `clock`, `grid`, `solar`, `coastline`| nothing else       |
 //! | model       | `scenario`, `dregion`, `noise`       | the engine         |
 //! | computation | `compute`, `solve`, `sweep`          | the model          |
 //! | state       | `state`                              | the computation    |
@@ -28,6 +28,7 @@
 mod antenna;
 mod app;
 mod clock;
+mod coastline;
 mod compute;
 mod dregion;
 mod grid;

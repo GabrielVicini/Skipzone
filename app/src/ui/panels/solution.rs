@@ -214,7 +214,7 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
         .default_open(true)
         .show(ui, |ui| {
             wide_table(ui, "hops_scroll", |ui| {
-                data_grid(ui, "hops", 15, |ui| {
+                data_grid(ui, "hops", 19, |ui| {
                     head_cells(
                         ui,
                         &[
@@ -230,6 +230,10 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                             "phase km",
                             "arc km",
                             "abs dB",
+                            "refl lat",
+                            "refl lon",
+                            "ground",
+                            "gnd dB",
                             "steps",
                             "|H| drift",
                             "outcome",
@@ -248,6 +252,22 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                         num(ui, format!("{:.2}", hop.phase_km));
                         num(ui, format!("{:.2}", hop.arc_km));
                         num(ui, format!("{:.4}", hop.absorption_db));
+                        // The reflection point and the surface chosen there.
+                        // Blank on the final hop, which arrives at the receiver
+                        // and never bounces.
+                        match hop.ground_label {
+                            Some(label) => {
+                                num(ui, format!("{:.2}", hop.end_lat_lon.0));
+                                num(ui, format!("{:.2}", hop.end_lat_lon.1));
+                                num(ui, label.to_string());
+                                num(ui, format!("{:.2}", hop.ground_loss_db));
+                            }
+                            None => {
+                                for _ in 0..4 {
+                                    num(ui, "-".to_string());
+                                }
+                            }
+                        }
                         num(ui, hop.steps.to_string());
                         num(ui, format!("{:.2e}", hop.hamiltonian_drift));
                         num(ui, hop.outcome.to_string());
@@ -255,6 +275,35 @@ pub fn solution_panel(ui: &mut Ui, sol: &Solution) {
                     }
                 });
             });
+
+            // Auto-detected surfaces have to justify themselves: one line per
+            // bounce saying what was picked and why, so the classification can
+            // be checked against the map overlay rather than trusted.
+            let reasons: Vec<String> = sol
+                .hop_details
+                .iter()
+                .filter_map(|h| {
+                    let reason = h.ground_reason.as_ref()?;
+                    Some(format!(
+                        "hop {}: {} - {reason}",
+                        h.index,
+                        h.ground_label.unwrap_or("?"),
+                    ))
+                })
+                .collect();
+            if !reasons.is_empty() {
+                ui.add_space(4.0);
+                sub_head(ui, "GROUND AUTO-DETECT (COASTLINE)");
+                for line in &reasons {
+                    ui.label(RichText::new(line).small());
+                }
+                hint(
+                    ui,
+                    "Tested against the Natural Earth 1:50m land and lakes polygons. \
+                     Turn on the coastline debug overlay in Settings > Surface to see \
+                     those polygons drawn under the reflection dots.",
+                );
+            }
             hint(
                 ui,
                 "apex X is (fp/f)^2 at the turning point, from the engine's apex \
