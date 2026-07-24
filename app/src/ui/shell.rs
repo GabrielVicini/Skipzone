@@ -11,7 +11,7 @@ use crate::scenario::PlaceMode;
 use crate::state::{Session, UiState};
 
 use super::map::MapView;
-use super::{actions, header, modals, overlays, theme};
+use super::{actions, header, modals, overlays, theme, trace_panel};
 
 pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, map: &mut MapView) {
     theme::apply_scale(ui, &mut ui_state.styled_for_width);
@@ -19,7 +19,13 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, map: &mu
 
     let mut action = header::draw(ui, session, ui_state);
 
-    // The map is the centrepiece: it takes every pixel the header left.
+    // The trace panel docks to the right, taking its width off the map before
+    // the map is laid out - so opening it pushes the map and the floating
+    // controls aside rather than covering them.
+    action = action.or(trace_panel::draw(ui, session, ui_state));
+
+    // The map is the centrepiece: it takes every pixel the header and the
+    // trace panel left.
     if let Some((lat, lon)) = map.draw(ui, session, ui_state) {
         place(session, ui_state, lat, lon);
     }

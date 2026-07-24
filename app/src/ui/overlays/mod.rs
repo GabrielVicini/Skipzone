@@ -10,7 +10,7 @@ mod controls;
 mod map_tools;
 mod time_date;
 
-use egui::{Align, Align2, Area, Context, Id, InnerResponse, Order, Rect, Ui, Vec2, pos2, vec2};
+use egui::{Align, Align2, Area, Context, Id, InnerResponse, Order, Rect, Ui, Vec2, pos2};
 
 use crate::state::{Session, UiState};
 use crate::ui::actions::Action;
@@ -27,21 +27,28 @@ pub fn draw(
     ui_state: &mut UiState,
     map: &MapView,
 ) -> Option<Action> {
+    // The map's visible area: the window minus the header and, when it is open,
+    // the trace panel. Everything floats inside this, so opening the panel
+    // slides the right-hand groups across instead of hiding them behind it.
+    let over_map = {
+        let screen = ctx.viewport_rect();
+        Rect::from_min_max(
+            pos2(screen.left(), screen.top() + ui_state.header_height),
+            pos2(screen.right() - ui_state.right_inset, screen.bottom()),
+        )
+    };
+
     // Right edge, starting just below the solid header.
-    let controls = corner_area(
-        ctx,
-        "overlay_controls",
-        Align2::RIGHT_TOP,
-        vec2(MARGIN, ui_state.header_height + MARGIN),
-        |ui| controls::overlay(ui, session, ui_state),
-    );
+    let controls = corner_area(ctx, "overlay_controls", over_map, Align2::RIGHT_TOP, |ui| {
+        controls::overlay(ui, session, ui_state)
+    });
 
     // Bottom left: time and date.
     corner_area(
         ctx,
         "overlay_time_date",
+        over_map,
         Align2::LEFT_BOTTOM,
-        Vec2::splat(MARGIN),
         |ui| time_date::overlay(ui, session, ui_state),
     );
 
@@ -49,15 +56,15 @@ pub fn draw(
     let tools = corner_area(
         ctx,
         "overlay_map_tools",
+        over_map,
         Align2::RIGHT_BOTTOM,
-        Vec2::splat(MARGIN),
         |ui| map_tools::overlay(ui, ui_state, map.zoom()),
     );
 
     controls.inner.or(tools.inner)
 }
 
-/// An `Area` pinned to one corner of the window, inset by `margin`.
+/// An `Area` pinned to one corner of `bounds`, inset by [`MARGIN`].
 ///
 /// The corner is resolved here rather than with `Area::anchor` because the
 /// group's own size is needed to place its right/bottom edge, and that is only
@@ -68,16 +75,15 @@ pub fn draw(
 fn corner_area<R>(
     ctx: &Context,
     id: &str,
+    bounds: Rect,
     corner: Align2,
-    margin: Vec2,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> InnerResponse<R> {
     let id = Id::new(id);
     let size = ctx
         .memory(|memory| memory.area_rect(id))
         .map_or(Vec2::ZERO, |rect| rect.size());
-    let screen = ctx.viewport_rect();
-    let inner = Rect::from_min_max(screen.min + margin, screen.max - margin);
+    let inner = bounds.shrink(MARGIN);
     let x = match corner.x() {
         Align::Min | Align::Center => inner.left(),
         Align::Max => inner.right() - size.x,

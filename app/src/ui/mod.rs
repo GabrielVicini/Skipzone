@@ -4,7 +4,8 @@
 //! * [`header`]   - the solid top bar (menus, status, TX/RX rows).
 //! * [`map`]      - the full-screen map and its drawing overlays.
 //! * [`overlays`] - the control groups floating over the map.
-//! * [`modals`]   - the dialogs (trace, best frequency, settings, about).
+//! * [`trace_panel`] - the docked Calculate readout.
+//! * [`modals`]   - the dialog windows (best frequency, settings, about).
 //! * [`panels`]   - the trace readouts, composed inside the trace dialog.
 //! * [`widgets`]  - reusable pieces: charts, menus, the calendar, form bits.
 //! * [`theme`]    - colours, spacing and container chrome, defined once.
@@ -21,4 +22,5 @@ pub mod overlays;
 pub mod panels;
 pub mod shell;
 pub mod theme;
+pub mod trace_panel;
 pub mod widgets;
