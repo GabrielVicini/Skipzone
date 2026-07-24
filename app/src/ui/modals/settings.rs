@@ -10,6 +10,7 @@ use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 use crate::noise::{
     MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
 };
+use crate::fof2::Fof2Backend;
 use crate::scenario::{GroundType, Inputs, fof2_from_ssn};
 use crate::state::{Session, UiState};
 use crate::ui::widgets::{card, hint, labelled_drag, section};
@@ -48,6 +49,15 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
             .num_columns(2)
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
+                ui.label("foF2 model");
+                ComboBox::from_id_salt("fof2_backend")
+                    .selected_text(inputs.fof2_backend.label())
+                    .show_ui(ui, |ui| {
+                        for b in Fof2Backend::ALL {
+                            ui.selectable_value(&mut inputs.fof2_backend, b, b.label());
+                        }
+                    });
+                ui.end_row();
                 labelled_drag(
                     ui,
                     "Sunspot number",
@@ -74,13 +84,64 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
             });
         hint(
             ui,
-            &format!(
-                "foF2 = {:.2} MHz, derived from SSN (NmF2 linear in SSN, coarse midlat \
-                 anchor - not a path/season/time prediction). hmF2 and scale H are yours \
-                 directly; there is no climatology table underneath.",
-                fof2_from_ssn(inputs.ssn)
-            ),
+            &match inputs.fof2_backend {
+                Fof2Backend::ConstantSsn => format!(
+                    "foF2 = {:.2} MHz everywhere, derived from SSN alone (NmF2 linear in SSN, \
+                     coarse midlat anchor - not a path/season/time prediction). This is the \
+                     previous behaviour, kept selectable.",
+                    fof2_from_ssn(inputs.ssn)
+                ),
+                Fof2Backend::Gridded => format!(
+                    "foF2 varies across the domain: sampled at each ray point's own latitude \
+                     and local solar time from the bundled climatology grid, which reduces to \
+                     {:.2} MHz at its reference point (45 deg, equinox, 14 LST) for this SSN. \
+                     The grid is NOT CCIR/URSI/IRI data - see the foF2 source line in the \
+                     assumptions panel. hmF2 and scale H remain yours directly.",
+                    fof2_from_ssn(inputs.ssn)
+                ),
+            },
         );
+    });
+
+    section(ui, "Sporadic E");
+    card(ui, |ui| {
+        hint(
+            ui,
+            "Sporadic E is the layer that puts a signal at a few hundred km when F2 cannot. \
+             It is also the only layer that may simply not be there, so paths that need it \
+             are reported SEPARATELY, with an occurrence probability, and are never folded \
+             into the deterministic verdict.",
+        );
+        ui.add_space(4.0);
+        ui.checkbox(&mut inputs.es_enabled, "Model sporadic E");
+        ui.add_enabled_ui(inputs.es_enabled, |ui| {
+            ui.checkbox(
+                &mut inputs.es_manual,
+                "Override foEs and occurrence (otherwise from season, local time and latitude)",
+            );
+            ui.add_enabled_ui(inputs.es_manual, |ui| {
+                Grid::new("settings_es")
+                    .num_columns(2)
+                    .spacing([10.0, 4.0])
+                    .show(ui, |ui| {
+                        labelled_drag(
+                            ui,
+                            "foEs",
+                            DragValue::new(&mut inputs.foes_mhz)
+                                .speed(0.1)
+                                .range(1.0..=30.0)
+                                .suffix(" MHz"),
+                        );
+                        labelled_drag(
+                            ui,
+                            "Occurrence probability",
+                            DragValue::new(&mut inputs.es_probability)
+                                .speed(0.01)
+                                .range(0.0..=1.0),
+                        );
+                    });
+            });
+        });
     });
 }
 

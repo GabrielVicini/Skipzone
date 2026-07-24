@@ -1,20 +1,41 @@
 //! Turns UI inputs into the engine's model objects, and records every assumed
-//! value so the UI can display it. No physics here: `ChapmanLayer`,
-//! `IgrfModel` and `ExponentialCollisions` are all engine types used through
-//! their public constructors.
+//! value so the UI can display it. No physics here: the layers come from
+//! [`crate::chapman`], [`crate::fof2`] and [`crate::sporadic_e`], and
+//! `QuasiParabolicLayer`, `IgrfModel` and `ExponentialCollisions` are engine
+//! types used through their public constructors.
+//!
+//! # The density stack
+//!
+//! Four layers, built from two shapes:
+//!
+//! | layer | shape                              | peak density              |
+//! |-------|------------------------------------|---------------------------|
+//! | D     | Chapman, solar grazing `Ch(X, chi)`| constant overhead anchor  |
+//! | E     | Chapman, solar grazing `Ch(X, chi)`| foE from SSN, chi from Ch |
+//! | Es    | quasi-parabolic sheet              | foEs, probabilistic       |
+//! | F2    | Chapman, overhead (no chi law)     | foF2 climatology map      |
+//!
+//! Es is built into a SECOND stack rather than the main one, because it is the
+//! only layer that may or may not be there. The solver runs both and keeps the
+//! two verdicts apart (see [`crate::solve`]).
 
 use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
 use skipzone::density::{
-    ChapmanLayer, ElectronDensity, MultiLayer, critical_frequency, density_at_critical_frequency,
+    ElectronDensity, MultiLayer, critical_frequency, density_at_critical_frequency,
 };
 use skipzone::geo::SphericalPoint;
 use skipzone::mag::{Igrf, IgrfModel, MagneticField};
 use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
 use crate::antenna::{AntennaConfig, Ground};
-use crate::dregion::SolarChapmanD;
+use crate::chapman::{ConstantPeak, SlantFactor, SolarChapmanLayer};
+use crate::fof2::{self, Fof2Backend, Fof2Grid, GriddedF2Peak};
 use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
 use crate::solar::{self, SolarGeometry};
+use crate::sporadic_e::SporadicE;
+
+pub use crate::fof2::fof2_from_ssn;
+pub use crate::solar::{Season, season_at};
 
 /// Spherical Earth radius, matching the engine's validation suites.
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -60,6 +81,28 @@ pub const NU_REF_PER_S: f64 = 5.0e6;
 pub const NU_REF_ALT_KM: f64 = 70.0;
 /// Neutral scale height controlling the fall-off of nu, km.
 pub const NU_SCALE_HEIGHT_KM: f64 = 6.7;
+
+// --- E layer -------------------------------------------------------------
+//
+// The E region is the other layer close enough to photochemical equilibrium
+// for an alpha-Chapman profile driven by the solar zenith angle to be the
+// DERIVED answer rather than a fit: the layer produces a realised peak of
+// Nm Ch^{-1/2}, i.e. foE proportional to (cos chi)^{1/4} in the plane-parallel
+// regime, which is the standard foE law. The overhead-sun anchor and the
+// solar-activity scaling live in `crate::fof2`.
+//
+// The GEOMETRY below is a textbook order-of-magnitude anchor, NOT a fitted
+// model: the E peak sits near 105-110 km with a scale height of order 10 km.
+
+/// E-layer peak height, km.
+pub const E_REGION_PEAK_ALT_KM: f64 = 105.0;
+/// E-layer Chapman scale height, km.
+pub const E_REGION_SCALE_HEIGHT_KM: f64 = 10.0;
+
+/// Apex altitude below which a reflection is attributed to the E region rather
+/// than to F2, km. Sits above the E peak (a ray turns above the peak of the
+/// layer it reflects from) and well below the F1/F2 ledge.
+pub const E_ATTRIBUTION_TOP_KM: f64 = 145.0;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum PlaceMode {
@@ -172,12 +215,28 @@ pub struct Inputs {
     /// under 0.4 deg of declination - far below this model's accuracy).
     pub year: i32,
     pub month: u32,
-    /// Sunspot number. foF2 is derived from this (see `fof2_from_ssn`); it is
-    /// the solar-activity input, replacing the old day/season/solar-high table.
+    /// Sunspot number. It drives foF2 (see [`crate::fof2`]) and foE; it is the
+    /// solar-activity input, replacing the old day/season/solar-high table.
     pub ssn: f64,
+    /// Which foF2 model builds the F2 layer. Defaults to the gridded
+    /// climatology; the SSN-only scalar remains selectable, and is the
+    /// automatic fallback if the bundled grid fails to load.
+    pub fof2_backend: Fof2Backend,
     /// F2 peak height, km. A direct user input (no climatology table).
     pub hmf2_km: f64,
     pub scale_height_km: f64,
+    /// Include a sporadic-E layer in the probabilistic second solve. Off makes
+    /// the whole Es apparatus vanish from the output rather than reporting
+    /// zero-probability paths.
+    pub es_enabled: bool,
+    /// When false (the default) foEs and its occurrence probability are derived
+    /// from local season, local solar time and latitude. When true the two
+    /// fields below are used verbatim.
+    pub es_manual: bool,
+    /// Critical frequency of the Es layer when present, MHz.
+    pub foes_mhz: f64,
+    /// Probability that a usable Es layer is present, 0..1.
+    pub es_probability: f64,
     pub day_of_month: u32,
     /// When false (the default) the collision profile comes from the module
     /// constants above and the D region is driven by solar zenith angle. When
@@ -234,8 +293,13 @@ impl Default for Inputs {
             year: 2026,
             month: 1,
             ssn: 70.0,
+            fof2_backend: Fof2Backend::Gridded,
             hmf2_km: 300.0,
             scale_height_km: 50.0,
+            es_enabled: true,
+            es_manual: false,
+            foes_mhz: 5.0,
+            es_probability: 0.15,
             day_of_month: 15,
             collision_manual: false,
             nu0_per_s: NU_REF_PER_S,
@@ -258,29 +322,33 @@ impl Default for Inputs {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum Season {
-    Summer,
-    Winter,
-    Equinox,
-}
-
-impl Season {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Summer => "summer",
-            Self::Winter => "winter",
-            Self::Equinox => "equinox",
-        }
-    }
-}
-
 /// Every assumed / derived value, for display. Nothing here is hidden from the
 /// UI: the whole point is that the operator can see what was fed to the engine.
 #[derive(Clone)]
 pub struct Assumptions {
+    /// foF2 at the path midpoint, MHz. With the gridded backend this is one
+    /// sample of a field that varies across the whole domain, not the single
+    /// number the engine is given - which is exactly the change.
     pub fof2_mhz: f64,
     pub fof2_source: String,
+    /// foF2 at the transmitter and at the receiver, MHz. Present so the panel
+    /// can show that the field really does vary along the path; equal to
+    /// `fof2_mhz` under the constant backend.
+    pub fof2_tx_mhz: f64,
+    pub fof2_rx_mhz: f64,
+    /// Which backend actually ran, after any fallback.
+    pub fof2_backend: Fof2Backend,
+    /// Overhead-sun foE for this solar activity, MHz. The realised foE at any
+    /// point is this times `(cos chi)^(1/4)`, produced by the layer itself.
+    pub foe_overhead_mhz: f64,
+    /// Realised foE at the path midpoint, MHz.
+    pub foe_midpoint_mhz: f64,
+    pub foe_source: String,
+    pub e_region_peak_alt_km: f64,
+    /// Sporadic E: foEs, occurrence probability and provenance.
+    pub sporadic_e: SporadicE,
+    /// Whether the probabilistic Es solve will actually be run.
+    pub es_solved: bool,
     pub hmf2_km: f64,
     pub hmf2_source: String,
     pub scale_height_km: f64,
@@ -337,40 +405,6 @@ pub fn noise_floor_at(inputs: &Inputs, a: &Assumptions, f_mhz: f64) -> NoiseFloo
     )
 }
 
-pub fn season_at(month: u32, latitude_deg: f64) -> Season {
-    let north = match month {
-        1..=2 | 12 => Season::Winter,
-        6..=8 => Season::Summer,
-        _ => Season::Equinox,
-    };
-    if latitude_deg >= 0.0 {
-        north
-    } else {
-        match north {
-            Season::Winter => Season::Summer,
-            Season::Summer => Season::Winter,
-            Season::Equinox => Season::Equinox,
-        }
-    }
-}
-
-/// foF2 [MHz] derived from sunspot number. The peak plasma density NmF2 (and
-/// hence foF2^2, since NmF2 proportional to foF2^2) is taken linear in SSN -
-/// the standard first-order statement that peak ionisation scales with solar
-/// activity - calibrated to representative midlatitude anchors: foF2 ~ 4.5 MHz
-/// at SSN 0 and ~10 MHz at SSN 150.
-///
-/// This is a coarse climatological anchor, NOT a path-, season-, or
-/// time-specific prediction (that is the job of the CCIR maps, which are not
-/// implemented here), and it is always surfaced in the UI. There is
-/// deliberately no hidden day/night branch: SSN is the only driver, so the
-/// operator sees exactly the foF2 the engine is given.
-#[must_use]
-pub fn fof2_from_ssn(ssn: f64) -> f64 {
-    // foF2(0)^2 = 4.5^2 = 20.25; slope (10^2 - 20.25)/150 = 0.5317.
-    (20.25 + 0.531_666_7 * ssn.max(0.0)).sqrt()
-}
-
 pub fn ground_point(lat_deg: f64, lon_deg: f64) -> SphericalPoint {
     SphericalPoint::new(
         Meters::new(EARTH_RADIUS_M),
@@ -408,9 +442,16 @@ pub fn destination_point(start: &SphericalPoint, brng: Radians, arc: Radians) ->
 
 /// The engine model objects. Held together so the tracer can borrow them.
 pub struct Models {
-    /// F2 layer plus, in daylight, the D-region absorbing layer. Composed with
-    /// the engine's existing validated `MultiLayer`.
+    /// The DETERMINISTIC density stack: D, E and F2. Every layer in it is
+    /// present whenever the scenario says it is, so a path it supports is a
+    /// path that is simply there. Composed with the engine's validated
+    /// `MultiLayer`.
     pub density: MultiLayer,
+    /// The same stack plus a sporadic-E sheet, or `None` when Es is disabled or
+    /// too unlikely to be worth solving. Kept separate rather than merged
+    /// because Es is probabilistic: a path that needs it is a different KIND of
+    /// answer, and merging the stacks would make the two indistinguishable.
+    pub density_with_es: Option<MultiLayer>,
     pub field: Option<IgrfModel>,
     pub collisions: ExponentialCollisions,
 }
@@ -420,6 +461,13 @@ impl Models {
     /// a magnetic field is enabled (the engine's generics are `?Sized`).
     pub fn density_dyn(&self) -> &dyn ElectronDensity {
         &self.density
+    }
+
+    /// The Es-bearing stack, when there is one.
+    pub fn density_with_es_dyn(&self) -> Option<&dyn ElectronDensity> {
+        self.density_with_es
+            .as_ref()
+            .map(|d| d as &dyn ElectronDensity)
     }
 
     pub fn field_dyn(&self) -> &dyn MagneticField {
@@ -471,20 +519,21 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     // point along the ray; these numbers are the realised peak at the path
     // midpoint, for display only.
     let chi_deg = solar.zenith_angle_deg;
-    let d_disp = SolarChapmanD::new(
+    let mid_colat = Radians::from_degrees(90.0 - mid_lat).get();
+    let mid_lon_rad = Radians::from_degrees(mid_lon).get();
+    let d_disp = SolarChapmanLayer::d_region(
         D_REGION_PEAK_NE_OVERHEAD,
         EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
         D_REGION_SCALE_HEIGHT_KM * 1e3,
         solar.declination_deg,
         inputs.utc_hours,
     );
-    let chi_rad = chi_deg.to_radians();
-    let d_region_peak_ne = d_disp.realised_peak_ne(chi_rad);
+    let d_region_peak_ne = d_disp.realised_peak_ne(mid_colat, mid_lon_rad);
     // "Active" now means "producing at the midpoint", tied to the SAME
     // sun-above-horizon test as is_day(), so the panel can no longer disagree
     // with itself about day vs night (the old 85 deg / 90 deg split).
     let d_region_active = solar.is_day() && d_region_peak_ne > 1e-3 * D_REGION_PEAK_NE_OVERHEAD;
-    let rise_km = d_disp.realised_peak_rise(chi_rad) / 1e3;
+    let rise_km = d_disp.realised_peak_rise(mid_colat, mid_lon_rad) / 1e3;
     let d_region_peak_alt_km = if rise_km.is_finite() {
         D_REGION_PEAK_ALT_KM + rise_km
     } else {
@@ -499,12 +548,46 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
          (order-of-magnitude, not a fitted model)"
     );
 
-    let fof2 = fof2_from_ssn(inputs.ssn);
-    let fof2_source = format!(
-        "derived from SSN = {:.0} (NmF2 linear in SSN, coarse midlat anchor; \
-         no day/night branch)",
-        inputs.ssn
+    // E region: the same generalised layer on the same grazing branch, so foE
+    // follows (cos chi)^{1/4} without ever touching the engine's plane-parallel
+    // 85 deg limit. The overhead anchor is the only free number.
+    let foe_overhead_mhz = fof2::foe_overhead(inputs.ssn);
+    let e_disp = SolarChapmanLayer::new(
+        Box::new(ConstantPeak(fof2::e_layer_peak_ne(inputs.ssn))),
+        SlantFactor::solar(solar.declination_deg, inputs.utc_hours),
+        EARTH_RADIUS_M + E_REGION_PEAK_ALT_KM * 1e3,
+        E_REGION_SCALE_HEIGHT_KM * 1e3,
     );
+    let foe_midpoint_mhz = critical_frequency(PerCubicMeter::new(
+        e_disp.realised_peak_ne(mid_colat, mid_lon_rad),
+    ))
+    .get()
+        / 1e6;
+    let foe_source = format!(
+        "overhead foE {foe_overhead_mhz:.2} MHz from SSN = {:.0} via \
+         foE^4 proportional to (1 + {:.4} R), realised as foE (cos chi)^(1/4) BY THE LAYER \
+         through the same Chapman grazing function the D region uses - so it thins smoothly \
+         through the terminator instead of being cut off at 85 deg. Peak {E_REGION_PEAK_ALT_KM:.0} km, \
+         scale {E_REGION_SCALE_HEIGHT_KM:.0} km (order-of-magnitude anchors, not a fitted model)",
+        inputs.ssn,
+        fof2::FOE_SOLAR_COEFF,
+    );
+
+    // Sporadic E: probabilistic, so it never enters the deterministic verdict.
+    let sporadic = if inputs.es_manual {
+        SporadicE::manual(inputs.foes_mhz, inputs.es_probability)
+    } else {
+        SporadicE::derive(season, lst, mid_lat)
+    };
+    let es_solved = inputs.es_enabled && sporadic.is_worth_solving();
+
+    // F2: the peak density now comes from a field, not a scalar. `fof2_mhz` is
+    // its value AT THE MIDPOINT, for display; the engine gets the whole field.
+    let (fof2_backend, fof2_at) = resolve_fof2(inputs, season);
+    let fof2 = fof2_at(mid_lat, mid_lon);
+    let fof2_tx_mhz = fof2_at(inputs.tx_lat, inputs.tx_lon);
+    let fof2_rx_mhz = fof2_at(inputs.rx_lat, inputs.rx_lon);
+    let fof2_source = fof2_source_text(inputs, fof2_backend, season, fof2, fof2_tx_mhz, fof2_rx_mhz);
     let hmf2 = inputs.hmf2_km;
     let hmf2_source = "direct user input".to_string();
     let nm = density_at_critical_frequency(Hertz::new(fof2 * 1e6));
@@ -540,6 +623,15 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     Assumptions {
         fof2_mhz: fof2,
         fof2_source,
+        fof2_tx_mhz,
+        fof2_rx_mhz,
+        fof2_backend,
+        foe_overhead_mhz,
+        foe_midpoint_mhz,
+        foe_source,
+        e_region_peak_alt_km: E_REGION_PEAK_ALT_KM,
+        sporadic_e: sporadic,
+        es_solved,
         hmf2_km: hmf2,
         hmf2_source,
         scale_height_km: inputs.scale_height_km,
@@ -567,27 +659,182 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     }
 }
 
+/// Which foF2 backend will actually run, and a closure sampling it in degrees.
+///
+/// The fallback is deliberately not silent: if the operator asked for the grid
+/// and it could not be parsed, this returns `ConstantSsn`, and
+/// [`fof2_source_text`] says so in the string the panel displays.
+fn resolve_fof2(
+    inputs: &Inputs,
+    season: Season,
+) -> (Fof2Backend, Box<dyn Fn(f64, f64) -> f64 + '_>) {
+    let utc = inputs.utc_hours;
+    match inputs.fof2_backend {
+        Fof2Backend::Gridded => match Fof2Grid::bundled() {
+            Ok(grid) => {
+                let peak = GriddedF2Peak::new(grid.plane(season, inputs.ssn), utc);
+                (
+                    Fof2Backend::Gridded,
+                    Box::new(move |lat, lon| peak.fof2_at(lat, lon)),
+                )
+            }
+            Err(_) => {
+                let f = fof2_from_ssn(inputs.ssn);
+                (Fof2Backend::ConstantSsn, Box::new(move |_, _| f))
+            }
+        },
+        Fof2Backend::ConstantSsn => {
+            let f = fof2_from_ssn(inputs.ssn);
+            (Fof2Backend::ConstantSsn, Box::new(move |_, _| f))
+        }
+    }
+}
+
+/// The provenance string for whichever backend ran. Every value the F2 layer
+/// was built from appears here; nothing about it is hidden from the panel.
+fn fof2_source_text(
+    inputs: &Inputs,
+    ran: Fof2Backend,
+    season: Season,
+    mid: f64,
+    tx: f64,
+    rx: f64,
+) -> String {
+    let fell_back = inputs.fof2_backend == Fof2Backend::Gridded && ran == Fof2Backend::ConstantSsn;
+    match ran {
+        Fof2Backend::ConstantSsn => {
+            let why = if fell_back {
+                format!(
+                    "FELL BACK to the constant model: the bundled foF2 grid failed to load ({}). ",
+                    Fof2Grid::bundled().err().unwrap_or("unknown error")
+                )
+            } else {
+                String::new()
+            };
+            format!(
+                "{why}constant {mid:.2} MHz over the whole domain, derived from SSN = {:.0} \
+                 (NmF2 linear in SSN, coarse midlat anchor; no latitude, local-time or \
+                 seasonal branch)",
+                inputs.ssn
+            )
+        }
+        Fof2Backend::Gridded => format!(
+            "bundled climatology grid sampled at each ray point's own latitude and local solar \
+             time: {mid:.2} MHz at the midpoint, {tx:.2} at the transmitter, {rx:.2} at the \
+             receiver ({} season, SSN = {:.0}, interpolated in NmF2 between the SSN 0 and SSN 100 \
+             pages, bicubic in latitude and local time). NOT CCIR / URSI / IRI coefficient data: \
+             the layout follows the operational maps but the values are an order-of-magnitude \
+             climatology calibrated only to the same SSN anchor the constant model uses, \
+             reproducing the diurnal maximum, the equatorial anomaly, the high-latitude trough \
+             and the winter anomaly. Magnitudes are indicative; the VARIATION is the defensible \
+             part",
+            season.label(),
+            inputs.ssn,
+        ),
+    }
+}
+
 pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> {
-    let f2 = ChapmanLayer::new(
-        PerCubicMeter::new(a.nm_per_m3),
-        Meters::new(EARTH_RADIUS_M + a.hmf2_km * 1e3),
-        Meters::new(a.scale_height_km * 1e3),
-    )
-    .map_err(|e| format!("F2 Chapman layer rejected: {e}"))?;
+    // F2. The peak density is a FIELD now, not a scalar, so the layer varies
+    // with latitude and local solar time; the vertical shape is unchanged.
+    //
+    // The slant factor is deliberately `Overhead`, not the solar grazing branch
+    // the D and E layers use. The F2 region is transport-dominated rather than
+    // in photochemical equilibrium - which is why it survives the night and why
+    // the winter anomaly exists - so its day/night behaviour belongs in the
+    // climatology, not in a zenith-angle law. Applying both would double-count
+    // it. (Using the engine's `ChapmanLayer::with_zenith_angle` here would be
+    // worse still: it refuses past 85 deg, which would put a hard absorption
+    // cliff on F2 at every terminator - see docs/derivations/chapman-grazing.md.)
+    let f2_source: Box<dyn crate::chapman::PeakDensitySource> = match a.fof2_backend {
+        Fof2Backend::Gridded => {
+            let grid = Fof2Grid::bundled()
+                .map_err(|e| format!("bundled foF2 grid failed to load: {e}"))?;
+            Box::new(GriddedF2Peak::new(
+                grid.plane(a.season, inputs.ssn),
+                inputs.utc_hours,
+            ))
+        }
+        Fof2Backend::ConstantSsn => Box::new(ConstantPeak(a.nm_per_m3)),
+    };
+    let f2 = SolarChapmanLayer::new(
+        f2_source,
+        SlantFactor::Overhead,
+        EARTH_RADIUS_M + a.hmf2_km * 1e3,
+        a.scale_height_km * 1e3,
+    );
 
     // The D region is always present and is day/night-aware: it evaluates the
     // Chapman grazing function at the local solar zenith angle of each sampled
     // point, self-zeroing smoothly on the night side rather than being switched
     // off at a midpoint zenith-angle threshold (docs/derivations/chapman-grazing.md).
-    let d = SolarChapmanD::new(
+    let d = SolarChapmanLayer::d_region(
         D_REGION_PEAK_NE_OVERHEAD,
         EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
         D_REGION_SCALE_HEIGHT_KM * 1e3,
         a.solar.declination_deg,
         inputs.utc_hours,
     );
-    let layers: Vec<Box<dyn ElectronDensity + Send + Sync>> = vec![Box::new(f2), Box::new(d)];
+
+    // E region: same treatment as D, one region up. This is what gives short
+    // paths somewhere to reflect from in daylight when F2 has no solution at
+    // that geometry.
+    let e = SolarChapmanLayer::new(
+        Box::new(ConstantPeak(fof2::e_layer_peak_ne(inputs.ssn))),
+        SlantFactor::solar(a.solar.declination_deg, inputs.utc_hours),
+        EARTH_RADIUS_M + E_REGION_PEAK_ALT_KM * 1e3,
+        E_REGION_SCALE_HEIGHT_KM * 1e3,
+    );
+
+    let layers: Vec<Box<dyn ElectronDensity + Send + Sync>> =
+        vec![Box::new(f2), Box::new(e), Box::new(d)];
     let density = MultiLayer::new(layers);
+
+    // The probabilistic stack: everything above, plus the Es sheet. Rebuilt
+    // rather than shared because `MultiLayer` owns its layers; the cost is one
+    // extra construction per solve, which is nothing next to the tracing.
+    let density_with_es = if a.es_solved {
+        let es = a
+            .sporadic_e
+            .layer(EARTH_RADIUS_M)
+            .map_err(|e| format!("sporadic-E layer rejected: {e}"))?;
+        let f2_source_2: Box<dyn crate::chapman::PeakDensitySource> = match a.fof2_backend {
+            Fof2Backend::Gridded => {
+                let grid = Fof2Grid::bundled()
+                    .map_err(|e| format!("bundled foF2 grid failed to load: {e}"))?;
+                Box::new(GriddedF2Peak::new(
+                    grid.plane(a.season, inputs.ssn),
+                    inputs.utc_hours,
+                ))
+            }
+            Fof2Backend::ConstantSsn => Box::new(ConstantPeak(a.nm_per_m3)),
+        };
+        let layers: Vec<Box<dyn ElectronDensity + Send + Sync>> = vec![
+            Box::new(SolarChapmanLayer::new(
+                f2_source_2,
+                SlantFactor::Overhead,
+                EARTH_RADIUS_M + a.hmf2_km * 1e3,
+                a.scale_height_km * 1e3,
+            )),
+            Box::new(SolarChapmanLayer::new(
+                Box::new(ConstantPeak(fof2::e_layer_peak_ne(inputs.ssn))),
+                SlantFactor::solar(a.solar.declination_deg, inputs.utc_hours),
+                EARTH_RADIUS_M + E_REGION_PEAK_ALT_KM * 1e3,
+                E_REGION_SCALE_HEIGHT_KM * 1e3,
+            )),
+            Box::new(SolarChapmanLayer::d_region(
+                D_REGION_PEAK_NE_OVERHEAD,
+                EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
+                D_REGION_SCALE_HEIGHT_KM * 1e3,
+                a.solar.declination_deg,
+                inputs.utc_hours,
+            )),
+            Box::new(es),
+        ];
+        Some(MultiLayer::new(layers))
+    } else {
+        None
+    };
 
     let field = if inputs.use_field {
         let igrf = Igrf::from_embedded().map_err(|e| format!("IGRF load failed: {e}"))?;
@@ -608,6 +855,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
 
     Ok(Models {
         density,
+        density_with_es,
         field,
         collisions,
     })
@@ -663,27 +911,239 @@ pub fn sample_profile(models: &Models, a: &Assumptions) -> Vec<ProfileRow> {
 mod tests {
     use super::*;
 
-    /// foF2(SSN) hits its calibration anchors, rises monotonically with solar
-    /// activity, and clamps negative SSN rather than producing NaN.
+    fn sample_at(models: &Models, alt_km: f64, lat: f64, lon: f64) -> f64 {
+        models
+            .density
+            .sample(&SphericalPoint::new(
+                Meters::new(EARTH_RADIUS_M + alt_km * 1e3),
+                Radians::from_degrees(90.0 - lat),
+                Radians::from_degrees(lon),
+            ))
+            .ne
+    }
+
+    /// The headline change: the F2 layer is no longer one number for the whole
+    /// Earth. Sampled at the same altitude at two places at the same instant,
+    /// the density must genuinely differ - and it must differ in the direction
+    /// the climatology claims, with the daylit side denser.
     #[test]
-    fn fof2_from_ssn_monotonic_and_anchored() {
+    fn f2_layer_varies_across_the_domain() {
+        let inputs = Inputs {
+            utc_hours: 12.0,
+            month: 4,
+            day_of_month: 15,
+            ..Inputs::default()
+        };
+        let a = resolve(&inputs);
+        assert_eq!(a.fof2_backend, Fof2Backend::Gridded, "grid must be in use");
+        let models = build_models(&inputs, &a).expect("models");
+
+        // At 12 UTC, longitude 30 E is local mid-afternoon and longitude 150 W
+        // is local pre-dawn. Same latitude, same altitude, same instant.
+        let day = sample_at(&models, 300.0, 40.0, 30.0);
+        let night = sample_at(&models, 300.0, 40.0, -150.0);
         assert!(
-            (fof2_from_ssn(0.0) - 4.5).abs() < 0.02,
-            "{}",
-            fof2_from_ssn(0.0)
+            day > 1.6 * night,
+            "afternoon F2 {day:.3e} should stand well above pre-dawn {night:.3e}"
+        );
+
+        // The equatorial anomaly crest at the same local time as the midlatitude
+        // point beats it.
+        let crest = sample_at(&models, 300.0, 16.0, 30.0);
+        assert!(
+            crest > day,
+            "anomaly crest {crest:.3e} should exceed midlatitude {day:.3e}"
+        );
+
+        // ...and none of this happens under the constant backend. Its F2 layer
+        // is exactly flat (pinned bit for bit by
+        // `constant_backend_reproduces_the_engine_f2_layer_exactly`); what is
+        // checked here is the whole stack, where the only residual day/night
+        // difference at F2 heights is the E layer's own exponential tail. That
+        // must be negligible - two orders below the structure the grid adds.
+        let flat_inputs = Inputs {
+            fof2_backend: Fof2Backend::ConstantSsn,
+            ..inputs.clone()
+        };
+        let flat_a = resolve(&flat_inputs);
+        let flat = build_models(&flat_inputs, &flat_a).expect("models");
+        let flat_day = sample_at(&flat, 300.0, 40.0, 30.0);
+        let flat_night = sample_at(&flat, 300.0, 40.0, -150.0);
+        let flat_swing = (flat_day - flat_night).abs() / flat_day;
+        let grid_swing = (day - night).abs() / day;
+        assert!(
+            flat_swing < 1e-3,
+            "the constant backend's stack should be flat at F2 heights, swing {flat_swing:.2e}"
         );
         assert!(
-            (fof2_from_ssn(150.0) - 10.0).abs() < 0.05,
-            "{}",
-            fof2_from_ssn(150.0)
+            grid_swing > 100.0 * flat_swing,
+            "the grid must add real structure: {grid_swing:.3} vs residual {flat_swing:.2e}"
         );
-        let mut prev = fof2_from_ssn(0.0);
-        for s in 1..=300 {
-            let v = fof2_from_ssn(f64::from(s));
-            assert!(v > prev, "not monotonic at SSN {s}: {v} <= {prev}");
-            prev = v;
+    }
+
+    /// The constant backend must reproduce the OLD F2 layer bit for bit: the
+    /// engine's `ChapmanLayer::new` at the same NmF2, height and scale height.
+    /// This is what makes the generalisation safe to adopt - the previous
+    /// behaviour is still reachable and still identical.
+    #[test]
+    fn constant_backend_reproduces_the_engine_f2_layer_exactly() {
+        use skipzone::density::ChapmanLayer;
+
+        let inputs = Inputs {
+            fof2_backend: Fof2Backend::ConstantSsn,
+            ..Inputs::default()
+        };
+        let a = resolve(&inputs);
+        assert!(
+            (a.fof2_mhz - fof2_from_ssn(inputs.ssn)).abs() < 1e-12,
+            "constant backend must return the scalar anchor"
+        );
+
+        let old = ChapmanLayer::new(
+            PerCubicMeter::new(a.nm_per_m3),
+            Meters::new(EARTH_RADIUS_M + a.hmf2_km * 1e3),
+            Meters::new(a.scale_height_km * 1e3),
+        )
+        .unwrap();
+        let new = SolarChapmanLayer::new(
+            Box::new(ConstantPeak(a.nm_per_m3)),
+            SlantFactor::Overhead,
+            EARTH_RADIUS_M + a.hmf2_km * 1e3,
+            a.scale_height_km * 1e3,
+        );
+        for i in 0..=300 {
+            let r = EARTH_RADIUS_M + 60e3 + (700e3 - 60e3) * f64::from(i) / 300.0;
+            let p = SphericalPoint::new(Meters::new(r), Radians::new(1.1), Radians::new(-0.4));
+            assert_eq!(old.sample(&p).ne.to_bits(), new.sample(&p).ne.to_bits());
+            assert_eq!(
+                old.sample(&p).d_ne[0].to_bits(),
+                new.sample(&p).d_ne[0].to_bits()
+            );
         }
-        // Negative SSN is clamped to the SSN = 0 value (never NaN).
-        assert_eq!(fof2_from_ssn(-40.0), fof2_from_ssn(0.0));
+    }
+
+    /// The E layer exists, peaks where it says it does, and follows the
+    /// zenith-angle law: daylight E is far denser than night E, and it does NOT
+    /// vanish at the terminator the way a plane-parallel layer would (the
+    /// engine refuses past 85 deg; this one keeps going).
+    #[test]
+    fn e_layer_follows_solar_zenith_angle_through_the_terminator() {
+        let inputs = Inputs {
+            utc_hours: 12.0,
+            month: 3,
+            day_of_month: 21,
+            ..Inputs::default()
+        };
+        let a = resolve(&inputs);
+        let models = build_models(&inputs, &a).expect("models");
+
+        // Local noon at the equator (12 UTC, lon 0 on an equinox) is chi ~ 0.
+        let noon = sample_at(&models, E_REGION_PEAK_ALT_KM, 0.0, 0.0);
+        // 88 deg of longitude away is chi ~ 88 deg: past the engine's limit,
+        // still producing.
+        let terminator = sample_at(&models, E_REGION_PEAK_ALT_KM + 8.0, 0.0, -88.0);
+        // Deep night.
+        let night = sample_at(&models, E_REGION_PEAK_ALT_KM, 0.0, 180.0);
+
+        assert!(noon > 1e11, "noon E layer Ne = {noon:.3e}");
+        assert!(
+            terminator > 1e-3 * noon,
+            "terminator E layer collapsed to {terminator:.3e} against noon {noon:.3e}"
+        );
+        assert!(
+            terminator < 0.5 * noon,
+            "terminator E should be thinned, got {terminator:.3e} vs {noon:.3e}"
+        );
+        assert!(night < 1e-3 * noon, "night E layer Ne = {night:.3e}");
+
+        // foE at the midpoint follows (cos chi)^(1/4) off the overhead anchor.
+        let chi = a.solar.zenith_angle_deg.to_radians();
+        if a.solar.is_day() {
+            let want = a.foe_overhead_mhz * chi.cos().max(0.0).powf(0.25);
+            assert!(
+                (a.foe_midpoint_mhz - want).abs() < 0.05 * want.max(0.1),
+                "foE {} vs (cos chi)^(1/4) law {want}",
+                a.foe_midpoint_mhz
+            );
+        }
+    }
+
+    /// The Es stack is the deterministic stack plus a thin sheet, and nothing
+    /// else: below and above the sheet the two must agree exactly, so an Es
+    /// result can never be contaminated by an unintended change elsewhere.
+    #[test]
+    fn es_stack_differs_from_the_deterministic_one_only_at_the_sheet() {
+        let inputs = Inputs {
+            month: 7,
+            day_of_month: 15,
+            utc_hours: 16.0,
+            tx_lat: 45.0,
+            tx_lon: 0.0,
+            rx_lat: 47.0,
+            rx_lon: 4.0,
+            ..Inputs::default()
+        };
+        let a = resolve(&inputs);
+        assert!(a.es_solved, "summer afternoon midlatitude Es should be solved");
+        let models = build_models(&inputs, &a).expect("models");
+        let with_es = models.density_with_es.as_ref().expect("an Es stack");
+
+        let at = |d: &MultiLayer, alt_km: f64| {
+            d.sample(&SphericalPoint::new(
+                Meters::new(EARTH_RADIUS_M + alt_km * 1e3),
+                Radians::from_degrees(90.0 - 46.0),
+                Radians::from_degrees(2.0),
+            ))
+            .ne
+        };
+        for alt in [60.0, 80.0, 90.0, 93.0, 120.0, 200.0, 300.0, 500.0] {
+            assert_eq!(
+                at(&models.density, alt).to_bits(),
+                at(with_es, alt).to_bits(),
+                "the two stacks must agree at {alt} km, away from the sheet"
+            );
+        }
+        let sheet = at(with_es, a.sporadic_e.height_km) - at(&models.density, a.sporadic_e.height_km);
+        assert!(
+            (sheet - a.sporadic_e.peak_ne()).abs() < 1e-6 * a.sporadic_e.peak_ne(),
+            "the sheet should add exactly its own peak density"
+        );
+
+        // Deep winter night: no sheet is built at all.
+        let quiet = Inputs {
+            month: 1,
+            utc_hours: 2.0,
+            tx_lat: 5.0,
+            rx_lat: 6.0,
+            ..inputs.clone()
+        };
+        let qa = resolve(&quiet);
+        assert!(!qa.es_solved, "negligible Es should not be solved");
+        assert!(build_models(&quiet, &qa).unwrap().density_with_es.is_none());
+    }
+
+    /// Every assumed value the new layers introduce is surfaced with a source
+    /// string, and the strings say what they actually are. This is the
+    /// transparency contract of `Assumptions`, not decoration.
+    #[test]
+    fn new_assumptions_are_all_surfaced_with_provenance() {
+        let a = resolve(&Inputs::default());
+        assert!(a.fof2_source.contains("NOT CCIR"), "{}", a.fof2_source);
+        assert!(a.fof2_source.contains("climatology"));
+        assert!(a.foe_source.contains("order-of-magnitude"));
+        assert!(a.foe_source.contains("cos chi"));
+        assert!(a.sporadic_e.source.contains("order-of-magnitude"));
+        assert!(a.sporadic_e.source.contains("NOT a Chapman layer"));
+        assert!(a.foe_overhead_mhz > 0.0);
+        assert!(a.sporadic_e.foes_mhz > 0.0);
+        assert!((0.0..=1.0).contains(&a.sporadic_e.probability));
+
+        // The fallback path names itself rather than quietly substituting.
+        let constant = resolve(&Inputs {
+            fof2_backend: Fof2Backend::ConstantSsn,
+            ..Inputs::default()
+        });
+        assert!(constant.fof2_source.contains("constant"), "{}", constant.fof2_source);
+        assert!(!constant.fof2_source.contains("FELL BACK"));
     }
 }

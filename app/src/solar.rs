@@ -25,6 +25,58 @@
 /// are not modelled: one day of offset moves the declination by under 0.4 deg.
 const DAYS_BEFORE_MONTH: [u32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 
+/// Season at a place, in the LOCAL hemisphere's sense: `Summer` always means
+/// the local summer, so a southern-hemisphere January is `Summer`.
+///
+/// Lives here, in the conversion layer, because both the ionospheric model
+/// (`fof2`, `sporadic_e`) and the noise model need it and neither should have
+/// to depend on the other. Re-exported from `scenario` for callers that already
+/// reach for it there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Season {
+    Summer,
+    Winter,
+    Equinox,
+}
+
+impl Season {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Summer => "summer",
+            Self::Winter => "winter",
+            Self::Equinox => "equinox",
+        }
+    }
+
+    /// The opposite hemisphere's season at the same instant.
+    #[must_use]
+    pub fn flipped(self) -> Self {
+        match self {
+            Self::Winter => Self::Summer,
+            Self::Summer => Self::Winter,
+            Self::Equinox => Self::Equinox,
+        }
+    }
+}
+
+/// Local season for a month at a latitude. Three-way (the ionospheric
+/// literature's winter / equinox / summer split), not four-way, and flipped
+/// below the equator.
+#[must_use]
+pub fn season_at(month: u32, latitude_deg: f64) -> Season {
+    let north = match month {
+        1..=2 | 12 => Season::Winter,
+        6..=8 => Season::Summer,
+        _ => Season::Equinox,
+    };
+    if latitude_deg >= 0.0 {
+        north
+    } else {
+        north.flipped()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct SolarGeometry {
     pub day_of_year: u32,

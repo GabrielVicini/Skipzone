@@ -1,16 +1,128 @@
 //! Result types produced by the solver and consumed by the UI: one traced
-//! hop, an assembled multi-hop solution, a near-miss record, and the overall
-//! outcome of a solve.
+//! hop, an assembled multi-hop solution, a near-miss record, a per-layer
+//! report, and the overall outcome of a solve.
 
 use skipzone::magnetoionic::Mode;
 
-use crate::noise::LinkBudget;
+use crate::noise::{LinkBudget, PathState};
 
 #[must_use]
 pub fn mode_label(m: Mode) -> &'static str {
     match m {
         Mode::Ordinary => "O",
         Mode::Extraordinary => "X",
+    }
+}
+
+/// Which layer a path reflected from. Attributed from the apex altitude the
+/// ENGINE reports, not assumed from the launch angle: a solution is filed under
+/// the layer it actually turned in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LayerMode {
+    F2,
+    /// The regular E region.
+    E,
+    /// Sporadic E. Probabilistic - see [`ModeReport::probability`].
+    Es,
+}
+
+impl LayerMode {
+    pub const ALL: [Self; 3] = [Self::F2, Self::E, Self::Es];
+
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::F2 => "F2",
+            Self::E => "E",
+            Self::Es => "Es",
+        }
+    }
+
+    /// True for a layer that is simply there when the model says it is. Es is
+    /// the only one that is not, which is the whole reason this distinction
+    /// exists.
+    #[must_use]
+    pub fn is_deterministic(self) -> bool {
+        self != Self::Es
+    }
+}
+
+/// Why a layer produced no solution. Distinguishing these is the point of
+/// item 5: `NoBracket` used to be swallowed and rendered identically to a
+/// genuine "nothing arrives", so a map cell inside the F2 skip zone looked the
+/// same as one beyond every possible mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LayerStatus {
+    /// At least one geometry closed through this layer.
+    Solved,
+    /// The layer exists and rays reflect from it, but no launch elevation puts
+    /// one at the target range: the target is inside this layer's skip zone or
+    /// beyond its maximum range. A different layer may still reach it.
+    NoBracket,
+    /// Rays reflect from nothing here at any elevation - the frequency is above
+    /// this layer's maximum usable frequency for every geometry.
+    Penetrates,
+    /// The tracer failed on this stack. A NUMERICAL outcome, never to be shown
+    /// as a physical one: it means the model could not answer, not that nothing
+    /// arrives.
+    Failed,
+    /// Not attempted. For Es that means "disabled, or too unlikely to be worth
+    /// the second solve"; the probability says which.
+    NotAttempted,
+}
+
+impl LayerStatus {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Solved => "path found",
+            Self::NoBracket => "no bracketing elevation (skip zone or out of range)",
+            Self::Penetrates => "frequency above this layer's MUF at every elevation",
+            Self::Failed => "tracer failed (numerical, not a physical verdict)",
+            Self::NotAttempted => "not attempted",
+        }
+    }
+}
+
+/// What one layer, on its own, has to say about the path.
+///
+/// The SNR here is a continuous number and is always reported, whether or not
+/// it clears the threshold; [`ModeReport::state`] applies the threshold only
+/// for display. That separation is deliberate - the threshold is an operating
+/// preference, not a property of the ionosphere.
+#[derive(Clone)]
+pub struct ModeReport {
+    pub layer: LayerMode,
+    pub status: LayerStatus,
+    /// Best SNR among this layer's solutions [dB]; `-inf` when it produced none.
+    pub best_snr_db: f64,
+    /// Threshold in force, carried so a reader of this struct alone can apply it.
+    pub threshold_db: f64,
+    /// Probability the layer is present at all: 1 for F2 and E, the occurrence
+    /// probability for Es. Never folded into the SNR.
+    pub probability: f64,
+    /// Hop count of the best solution; 0 when there is none.
+    pub hops: u32,
+    /// Plain-language summary for the panel.
+    pub note: String,
+}
+
+impl ModeReport {
+    /// The threshold applied, FOR DISPLAY ONLY.
+    #[must_use]
+    pub fn state(&self) -> PathState {
+        if self.status != LayerStatus::Solved {
+            PathState::NoPath
+        } else if self.best_snr_db >= self.threshold_db {
+            PathState::Usable
+        } else {
+            PathState::BelowThreshold
+        }
+    }
+
+    #[must_use]
+    pub fn margin_db(&self) -> f64 {
+        self.best_snr_db - self.threshold_db
     }
 }
 
@@ -54,6 +166,13 @@ pub struct HopDetail {
 #[derive(Clone)]
 pub struct Solution {
     pub mode: Mode,
+    /// Which layer this path reflected from, attributed from the engine's own
+    /// apex altitude.
+    pub layer: LayerMode,
+    /// Probability the supporting layer is present: 1 for F2 and E. An Es
+    /// solution carries the occurrence probability rather than being reported
+    /// as an ordinary path.
+    pub probability: f64,
     pub hops: u32,
     pub hop_details: Vec<HopDetail>,
     pub total_group_km: f64,
@@ -113,7 +232,18 @@ pub struct NearMiss {
 }
 
 pub struct SolveOutcome {
+    /// Paths through the DETERMINISTIC stack (F2 and E). These are paths that
+    /// are simply there when the model says they are.
     pub solutions: Vec<Solution>,
+    /// Paths that need a sporadic-E sheet. Kept apart from `solutions` rather
+    /// than merged, so that no caller can accidentally report a 15 %-likely
+    /// opening and an every-day F2 path as the same kind of answer. Each
+    /// carries its own probability.
+    pub es_solutions: Vec<Solution>,
+    /// One entry per layer, in `LayerMode::ALL` order: what each layer alone
+    /// had to say, with its own SNR and its own reason for failing. This is
+    /// what lets the UI distinguish "no F2 solution" from "no path at all".
+    pub mode_reports: Vec<ModeReport>,
     /// The noise floor every solution above was judged against. Present even
     /// when nothing was found, so the panel can still show what the receiver
     /// would have been listening through.

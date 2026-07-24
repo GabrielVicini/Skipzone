@@ -11,7 +11,16 @@ pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
         .default_open(false)
         .show(ui, |ui| {
             data_grid(ui, "assume", 2, |ui| {
-                kv(ui, "foF2", format!("{:.2} MHz", a.fof2_mhz));
+                kv(ui, "foF2 (midpoint)", format!("{:.2} MHz", a.fof2_mhz));
+                // Shown as three samples of ONE field, not as three numbers: if
+                // they differ, the F2 layer really does vary along the path,
+                // which is the thing the gridded backend exists to do.
+                kv(
+                    ui,
+                    "  at TX / RX",
+                    format!("{:.2} / {:.2} MHz", a.fof2_tx_mhz, a.fof2_rx_mhz),
+                );
+                kv(ui, "  backend", a.fof2_backend.label().to_string());
                 kv(ui, "  source", a.fof2_source.clone());
                 kv(ui, "hmF2", format!("{:.0} km", a.hmf2_km));
                 kv(ui, "  source", a.hmf2_source.clone());
@@ -81,6 +90,54 @@ pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
                     format!("{:.2} km", a.d_region_peak_alt_km),
                 );
                 kv(ui, "  basis", a.d_region_source.clone());
+
+                sub_head(ui, "E REGION");
+                kv(
+                    ui,
+                    "foE overhead",
+                    format!("{:.2} MHz", a.foe_overhead_mhz),
+                );
+                kv(
+                    ui,
+                    "  realised at midpoint",
+                    format!("{:.2} MHz", a.foe_midpoint_mhz),
+                );
+                kv(
+                    ui,
+                    "  peak altitude",
+                    format!("{:.0} km", a.e_region_peak_alt_km),
+                );
+                kv(ui, "  basis", a.foe_source.clone());
+
+                sub_head(ui, "SPORADIC E (PROBABILISTIC)");
+                kv(
+                    ui,
+                    "foEs",
+                    format!("{:.2} MHz", a.sporadic_e.foes_mhz),
+                );
+                kv(
+                    ui,
+                    "  occurrence",
+                    format!("{:.0} %", 100.0 * a.sporadic_e.probability),
+                );
+                kv(
+                    ui,
+                    "  solved this run",
+                    if a.es_solved {
+                        "yes - Es paths reported separately, with their probability".to_string()
+                    } else {
+                        "no - too unlikely to be worth a second pass, or switched off".to_string()
+                    },
+                );
+                kv(
+                    ui,
+                    "  sheet",
+                    format!(
+                        "{:.1} km semi-thick at {:.0} km",
+                        a.sporadic_e.semi_thickness_km, a.sporadic_e.height_km
+                    ),
+                );
+                kv(ui, "  basis", a.sporadic_e.source.clone());
 
                 sub_head(ui, "COLLISION FREQUENCY");
                 kv(ui, "nu0", format!("{:.3e} /s", a.nu0_per_s));
