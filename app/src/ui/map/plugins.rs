@@ -262,10 +262,17 @@ impl Plugin for CoveragePlugin<'_> {
             if !rect.intersects(view) {
                 continue;
             }
-            let base = if cell.found_path() {
-                theme::coverage_color(cell.snr_db)
-            } else {
+            // Three answers, three hues. A deterministic path takes the SNR
+            // ramp at full saturation; a position only sporadic E can reach
+            // takes the Es hue, faded by how likely that opening is; nothing at
+            // all stays grey. Painting the second as the third is what made the
+            // dead zone look hard when it was not.
+            let base = if !cell.found_path() {
                 theme::COVERAGE_NO_PATH
+            } else if cell.es_only() {
+                theme::coverage_es_color(cell.snr_db, cell.probability)
+            } else {
+                theme::coverage_color(cell.snr_db)
             };
             // Expand by half a pixel: adjacent cells then meet exactly, so the
             // grid reads as tiles rather than as a dotted lattice with seams.

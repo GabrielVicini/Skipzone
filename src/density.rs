@@ -46,8 +46,6 @@ pub fn density_at_critical_frequency(f: Hertz) -> PerCubicMeter {
     PerCubicMeter::new(w * w / OMEGA_P_SQ_PER_DENSITY)
 }
 
-
-
 /// Plasma (critical) frequency of a density, inverse of the above.
 #[must_use]
 pub fn critical_frequency(ne: PerCubicMeter) -> Hertz {

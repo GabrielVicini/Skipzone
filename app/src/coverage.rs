@@ -25,7 +25,7 @@ use skipzone::magnetoionic::Mode;
 
 use crate::noise::PathState;
 use crate::scenario::{self, EARTH_RADIUS_M, Inputs, Models};
-use crate::solve;
+use crate::solve::{self, LayerMode, LayerStatus};
 
 /// Upper bound on grid points in one run. This is a guard against an
 /// accidentally enormous job, not a quality knob: a full solve costs on the
@@ -121,6 +121,16 @@ fn wrap_lon(lon: f64) -> f64 {
 /// One solved grid point: where it is, and what the receiver there would hear.
 ///
 /// Every field is read straight off the solve; nothing is rescaled or blended.
+///
+/// # Deterministic and probabilistic, side by side
+///
+/// A cell carries BOTH verdicts, because they are different kinds of answer and
+/// a map that folds them together is exactly what produced the reported "hard
+/// dead zone": a position the F2 layer cannot reach was painted the same grey
+/// as a position nothing can reach, even when a sporadic-E opening puts a real
+/// signal there a third of the time. `snr_db` is the strongest mode of any
+/// kind - what a listener would hear on a day when everything present is
+/// present - and `probability` says how often that day comes.
 #[derive(Clone, Copy)]
 pub struct CoverageCell {
     pub lat: f64,
@@ -130,8 +140,22 @@ pub struct CoverageCell {
     /// resolution control is moved afterwards.
     pub step_deg: f64,
     pub state: PathState,
-    /// SNR [dB] of the strongest mode; `-inf` when no path was found.
+    /// SNR [dB] of the strongest mode of ANY kind; `-inf` when nothing arrives.
+    /// A continuous field: the threshold is applied only for display.
     pub snr_db: f64,
+    /// SNR [dB] of the strongest DETERMINISTIC (F2 or E) mode; `-inf` when
+    /// there is none. Equal to `snr_db` unless a sporadic-E path wins.
+    pub deterministic_snr_db: f64,
+    /// Probability the mode behind `snr_db` is present at all: 1 for F2 and E,
+    /// the occurrence probability for Es.
+    pub probability: f64,
+    /// Which layer `snr_db` came from.
+    pub layer: Option<LayerMode>,
+    /// Why the deterministic stack produced nothing, when it produced nothing.
+    /// This is what separates "inside the F2 skip zone" from "nothing arrives
+    /// at all" - the map's colour key promised that distinction long before the
+    /// solver could make it.
+    pub deterministic_status: LayerStatus,
     pub rx_power_dbm: f64,
     pub noise_dbm: f64,
     /// `snr_db - threshold`; `-inf` when no path was found.
@@ -146,6 +170,18 @@ impl CoverageCell {
     #[must_use]
     pub fn found_path(self) -> bool {
         self.state.found_path()
+    }
+
+    /// True when the only thing reaching this position needs sporadic E.
+    #[must_use]
+    pub fn es_only(self) -> bool {
+        self.layer == Some(LayerMode::Es)
+    }
+
+    /// True when a deterministic path exists.
+    #[must_use]
+    pub fn has_deterministic_path(self) -> bool {
+        self.deterministic_snr_db.is_finite()
     }
 }
 
@@ -172,13 +208,37 @@ pub fn solve_cell(
     let out = solve::solve(&point_inputs, &a, models);
     let range_km = out.great_circle_km;
 
-    if let Some(best) = solve::best_by_snr(&out) {
+    let deterministic_snr_db =
+        solve::best_by_snr(&out).map_or(f64::NEG_INFINITY, |s| s.link.snr_db);
+    let deterministic_status = out
+        .mode_reports
+        .iter()
+        .filter(|r| r.layer.is_deterministic())
+        .find(|r| r.status == LayerStatus::Solved)
+        .map_or_else(
+            || {
+                // Nothing deterministic closed: report the F2 layer's own
+                // reason, which is the one an operator looking at a dead zone
+                // is actually asking about.
+                out.mode_reports
+                    .iter()
+                    .find(|r| r.layer == LayerMode::F2)
+                    .map_or(LayerStatus::NotAttempted, |r| r.status)
+            },
+            |r| r.status,
+        );
+
+    if let Some(best) = solve::best_including_es(&out) {
         CoverageCell {
             lat,
             lon,
             step_deg,
             state: best.link.state(),
             snr_db: best.link.snr_db,
+            deterministic_snr_db,
+            probability: best.probability,
+            layer: Some(best.layer),
+            deterministic_status,
             rx_power_dbm: best.link.rx_power_dbm,
             noise_dbm: best.link.noise.power_dbm,
             margin_db: best.link.margin_db(),
@@ -193,6 +253,10 @@ pub fn solve_cell(
             step_deg,
             state: PathState::NoPath,
             snr_db: f64::NEG_INFINITY,
+            deterministic_snr_db,
+            probability: 0.0,
+            layer: None,
+            deterministic_status,
             rx_power_dbm: f64::NEG_INFINITY,
             noise_dbm: out.noise.power_dbm,
             margin_db: f64::NEG_INFINITY,
@@ -230,7 +294,7 @@ mod tests {
             let models = scenario::build_models(&reference_inputs, &a).expect("models");
             let out = solve::solve(&reference_inputs, &a, &models);
 
-            let (state, snr, prx, hops) = solve::best_by_snr(&out).map_or(
+            let (state, snr, prx, hops) = solve::best_including_es(&out).map_or(
                 (
                     PathState::NoPath,
                     f64::NEG_INFINITY,

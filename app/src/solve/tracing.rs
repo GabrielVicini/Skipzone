@@ -13,10 +13,10 @@ use skipzone::trace::{Outcome, TraceConfig, Tracer};
 use skipzone::units::{Hertz, Meters, Radians};
 
 use crate::noise::{LinkBudget, LinkSettings};
-use crate::scenario::{Assumptions, EARTH_RADIUS_M, GroundType, Models, to_lat_lon};
+use crate::scenario::{Assumptions, EARTH_RADIUS_M, GroundType, to_lat_lon};
 
 use super::link_budget::{NEPERS_TO_DB, free_space_loss_db, ground_reflection_loss_db};
-use super::types::{HopDetail, NearMiss, Solution, mode_label};
+use super::types::{HopDetail, LayerMode, NearMiss, Solution, mode_label};
 
 /// Cap on drawn points per hop; the ray polyline is decimated to this.
 const MAX_POLY_POINTS: usize = 400;
@@ -158,17 +158,79 @@ fn outcome_label(o: Outcome) -> &'static str {
     }
 }
 
+/// Step-control settings for one density stack.
+///
+/// The deterministic stack uses the engine's defaults and is unchanged. The
+/// sporadic-E stack cannot: the engine's `QuasiParabolicLayer` is C0 with a
+/// documented GRADIENT KINK at each of its zeros, and an Es sheet is only about
+/// 3 km thick, so at the default `rtol` of 1e-10 the step controller refines
+/// into that kink until it hits `min_step` and the trace fails outright with
+/// "step collapsed". Measured over an elevation sweep on a real Es geometry
+/// (18.1 MHz, foEs 8.7 MHz, 400 km):
+///
+/// | rtol  | step cap | landings | trace failures | max drift |
+/// |-------|----------|----------|----------------|-----------|
+/// | 1e-10 | 25 km    | 0        | 28             | -         |
+/// | 1e-10 | 1.5 km   | 0        | 73             | -         |
+/// | 1e-9  | 1.5 km   | 20       | 3              | 4.4e-7    |
+/// | 3e-9  | 1.5 km   | 23       | 0              | 1.1e-6    |
+/// | 1e-8  | 1.5 km   | 23       | 0              | 3.5e-6    |
+///
+/// So the Es stack takes `rtol = 3e-9` (the loosest-but-one that clears every
+/// failure) and a step cap below the sheet thickness, which stops a single step
+/// straddling the whole layer unseen. Both are settings on the engine's own
+/// public `TraceConfig`; no physics is changed, and the resulting Hamiltonian
+/// drift is still reported per solution so the cost is visible rather than
+/// assumed away.
+#[derive(Clone, Copy)]
+pub(super) struct StepTuning {
+    pub rtol: Option<f64>,
+    pub max_step_m: Option<f64>,
+}
+
+impl StepTuning {
+    /// The engine's defaults, untouched.
+    pub const DEFAULT: Self = Self {
+        rtol: None,
+        max_step_m: None,
+    };
+
+    /// Relative tolerance the sporadic-E stack needs; see the type docs.
+    pub const ES_RTOL: f64 = 3e-9;
+
+    /// Settings for a stack containing a sheet of the given semi-thickness.
+    pub fn for_thin_sheet(semi_thickness_m: f64) -> Self {
+        Self {
+            rtol: Some(Self::ES_RTOL),
+            max_step_m: Some(semi_thickness_m),
+        }
+    }
+}
+
+/// A tracer over one density stack. The density is passed in rather than read
+/// off `Models` because the solver now runs the same homing against two stacks
+/// (with and without a sporadic-E sheet) while the field and collision models
+/// are shared between them.
 pub(super) fn make_tracer<'a>(
-    models: &'a Models,
+    density: &'a (dyn ElectronDensity + 'a),
+    field: &'a (dyn MagneticField + 'a),
+    collisions: &'a (dyn CollisionFrequency + 'a),
     freq_mhz: f64,
     mode: Mode,
     a: &Assumptions,
+    tuning: StepTuning,
 ) -> Tracer<'a, dyn ElectronDensity + 'a, dyn MagneticField + 'a, dyn CollisionFrequency + 'a> {
-    let config = TraceConfig::new(Meters::new(a.r_ground_m), Meters::new(a.r_top_m));
+    let mut config = TraceConfig::new(Meters::new(a.r_ground_m), Meters::new(a.r_top_m));
+    if let Some(rtol) = tuning.rtol {
+        config.rtol = rtol;
+    }
+    if let Some(cap) = tuning.max_step_m {
+        config.max_step = config.max_step.min(cap);
+    }
     Tracer::new(
-        models.density_dyn(),
-        models.field_dyn(),
-        models.collisions_dyn(),
+        density,
+        field,
+        collisions,
         Hertz::new(freq_mhz * 1e6),
         mode,
         config,
@@ -289,6 +351,8 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn assemble(
     mode: Mode,
+    layer: LayerMode,
+    probability: f64,
     hops: u32,
     details: Vec<HopDetail>,
     ends: &[SphericalPoint],
@@ -339,6 +403,8 @@ pub(super) fn assemble(
 
     Solution {
         mode,
+        layer,
+        probability,
         hops,
         hop_details: details,
         total_group_km,

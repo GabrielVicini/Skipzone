@@ -267,26 +267,35 @@ fn legend(ui: &mut Ui) {
         }
         ui.label(RichText::new("dB SNR").small().color(MUTED));
     });
-    ui.horizontal(|ui| {
-        let (r, g, b, _) = theme::COVERAGE_NO_PATH.to_tuple();
-        ui.colored_label(
-            Color32::from_rgb(r, g, b),
-            RichText::new("\u{25A0}").strong(),
-        );
-        ui.label(
-            RichText::new(
-                "no path found - nothing arrives at all, which is not the same as a weak signal",
-            )
-            .small()
-            .color(MUTED),
-        );
-    });
+    for (colour, caption) in [
+        (
+            theme::COVERAGE_ES_ONLY,
+            "sporadic E only - no deterministic path, but an Es opening reaches here. Faded by \
+             how likely that opening is; the ramp above still sets the hue's brightness",
+        ),
+        (
+            theme::COVERAGE_NO_PATH,
+            "no path found - nothing arrives at all, by any mode. Distinct from both a weak \
+             signal and from an Es-only position",
+        ),
+    ] {
+        ui.horizontal(|ui| {
+            let (r, g, b, _) = colour.to_tuple();
+            ui.colored_label(
+                Color32::from_rgb(r, g, b),
+                RichText::new("\u{25A0}").strong(),
+            );
+            ui.label(RichText::new(caption).small().color(MUTED));
+        });
+    }
 }
 
 /// What the tiles currently on the map add up to.
 fn summary(ui: &mut Ui, cells: &[CoverageCell]) {
     section(ui, "Computed tiles");
     let with_path = cells.iter().filter(|c| c.found_path()).count();
+    let deterministic = cells.iter().filter(|c| c.has_deterministic_path()).count();
+    let es_only = cells.iter().filter(|c| c.es_only()).count();
     let usable = cells
         .iter()
         .filter(|c| c.found_path() && c.margin_db >= 0.0)
@@ -300,6 +309,8 @@ fn summary(ui: &mut Ui, cells: &[CoverageCell]) {
         data_grid(ui, "coverage_summary", 2, |ui| {
             kv(ui, "Points computed", cells.len().to_string());
             kv(ui, "With a path", with_path.to_string());
+            kv(ui, "  deterministic (F2 / E)", deterministic.to_string());
+            kv(ui, "  sporadic E only", es_only.to_string());
             kv(ui, "Clearing the threshold", usable.to_string());
             if let Some(b) = best {
                 // The full link budget at the strongest tile, so the colour on

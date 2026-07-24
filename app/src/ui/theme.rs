@@ -216,6 +216,37 @@ pub const COVERAGE_STOPS: [(f64, [u8; 3]); 7] = [
 /// answer from "something weak arrives", and the two must not blend.
 pub const COVERAGE_NO_PATH: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
 
+/// Colour for a grid point the deterministic layers cannot reach, but that a
+/// sporadic-E opening can. Purple, a third hue outside both the ramp and the
+/// no-path grey.
+///
+/// This exists because the key used to promise a distinction the solver could
+/// not make. A position inside the F2 skip zone was painted the same grey as a
+/// position nothing could reach - which is how a several-hundred-km "hard dead
+/// zone" appeared around the transmitter on paths that were, in fact, being
+/// heard. An Es tile is now its own answer, and its colour carries how likely
+/// it is: see [`coverage_es_color`].
+pub const COVERAGE_ES_ONLY: Color32 = Color32::from_rgb(0x9B, 0x59, 0xD0);
+
+/// Colour for an Es-only tile at a given SNR and occurrence probability.
+///
+/// The ramp colour for the SNR, faded towards the background as the occurrence
+/// probability falls. The fade is the honesty: a 45 %-likely opening reads
+/// strongly, a 5 %-likely one barely reads at all, and neither is confusable
+/// with a deterministic path of the same strength - which keeps its full
+/// saturation.
+#[must_use]
+pub fn coverage_es_color(snr_db: f64, probability: f64) -> Color32 {
+    let base = coverage_color(snr_db);
+    // Never fade to nothing: even an unlikely opening must stay visible as a
+    // distinct answer from "no path at all".
+    #[allow(clippy::cast_possible_truncation)]
+    let weight = (0.35 + 0.65 * probability.clamp(0.0, 1.0)) as f32;
+    let (br, bg, bb, _) = base.to_tuple();
+    let (er, eg, eb, _) = COVERAGE_ES_ONLY.to_tuple();
+    mix([er, eg, eb], [br, bg, bb], weight)
+}
+
 /// Colour for one computed SNR, following [`COVERAGE_STOPS`].
 #[must_use]
 pub fn coverage_color(snr_db: f64) -> Color32 {
