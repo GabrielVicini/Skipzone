@@ -273,7 +273,11 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
         // Es-pass errors are tagged rather than merged anonymously: an error
         // from this pass says something about the Es sheet, not about the
         // deterministic ionosphere the operator is mostly looking at.
-        errors.extend(es_errors.into_iter().map(|e| format!("sporadic-E pass: {e}")));
+        errors.extend(
+            es_errors
+                .into_iter()
+                .map(|e| format!("sporadic-E pass: {e}")),
+        );
     }
 
     let mut near_misses = Vec::new();
@@ -388,9 +392,7 @@ fn build_mode_reports(
 
             let (status, hops, best_snr_db) = match best {
                 Some(s) => (LayerStatus::Solved, s.hops, s.link.snr_db),
-                None if is_es && !a.es_solved => {
-                    (LayerStatus::NotAttempted, 0, f64::NEG_INFINITY)
-                }
+                None if is_es && !a.es_solved => (LayerStatus::NotAttempted, 0, f64::NEG_INFINITY),
                 None => {
                     let (no_bracket, trace_failure) = if is_es {
                         (diag.es_no_bracket, diag.es_trace_failure)
@@ -432,7 +434,10 @@ fn build_mode_reports(
                     a.sporadic_e.foes_mhz,
                 ),
                 (LayerStatus::Solved, _) => {
-                    format!("{hops}-hop {} path at {best_snr_db:.1} dB SNR", layer.label())
+                    format!(
+                        "{hops}-hop {} path at {best_snr_db:.1} dB SNR",
+                        layer.label()
+                    )
                 }
                 (LayerStatus::NotAttempted, LayerMode::Es) => format!(
                     "sporadic E not solved: occurrence {:.0} % is below the {:.0} % worth a \
@@ -836,8 +841,7 @@ mod tests {
         // contains an E layer and so may list an E-mode solution first; the
         // BEFORE and ISOLATE stacks are F2-only. Comparing the mode a listener
         // would actually hear keeps the comparison like for like.
-        let first_abs =
-            |o: &SolveOutcome| best_by_snr(o).map_or(0.0, |s| s.total_absorption_db);
+        let first_abs = |o: &SolveOutcome| best_by_snr(o).map_or(0.0, |s| s.total_absorption_db);
         let (a_before, a_after) = (first_abs(&before), first_abs(&after));
         let (a_isolate, a_night) = (first_abs(&isolate), first_abs(&night));
         println!(
@@ -943,7 +947,6 @@ mod tests {
         );
         assert!(f2.note.contains("NOT the same as nothing arriving"));
     }
-
 
     /// Auto-detect must classify each bounce from where it actually lands, and
     /// must leave every other manual selection alone. Denver -> London crosses
@@ -1160,7 +1163,10 @@ mod tests {
         let (lo, hi) = scenario::resolve(&inputs).sporadic_e.attribution_band_km();
         for s in &out.es_solutions {
             let apex = s.hop_details[0].apex_alt_km;
-            assert!((lo..=hi).contains(&apex), "Es apex {apex} km outside {lo}..{hi}");
+            assert!(
+                (lo..=hi).contains(&apex),
+                "Es apex {apex} km outside {lo}..{hi}"
+            );
         }
 
         // And the near-miss sweep did NOT run: something was found, so there is

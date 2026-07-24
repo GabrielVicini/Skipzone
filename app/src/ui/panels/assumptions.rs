@@ -92,11 +92,7 @@ pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
                 kv(ui, "  basis", a.d_region_source.clone());
 
                 sub_head(ui, "E REGION");
-                kv(
-                    ui,
-                    "foE overhead",
-                    format!("{:.2} MHz", a.foe_overhead_mhz),
-                );
+                kv(ui, "foE overhead", format!("{:.2} MHz", a.foe_overhead_mhz));
                 kv(
                     ui,
                     "  realised at midpoint",
@@ -110,11 +106,7 @@ pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
                 kv(ui, "  basis", a.foe_source.clone());
 
                 sub_head(ui, "SPORADIC E (PROBABILISTIC)");
-                kv(
-                    ui,
-                    "foEs",
-                    format!("{:.2} MHz", a.sporadic_e.foes_mhz),
-                );
+                kv(ui, "foEs", format!("{:.2} MHz", a.sporadic_e.foes_mhz));
                 kv(
                     ui,
                     "  occurrence",

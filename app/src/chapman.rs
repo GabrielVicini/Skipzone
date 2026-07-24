@@ -712,18 +712,10 @@ mod tests {
 
         let r0 = 6_371_000.0;
         let (nm, r_peak, h) = (1.2e12, r0 + 300e3, 50e3);
-        let engine = ChapmanLayer::new(
-            PerCubicMeter::new(nm),
-            Meters::new(r_peak),
-            Meters::new(h),
-        )
-        .unwrap();
-        let ours = SolarChapmanLayer::new(
-            Box::new(ConstantPeak(nm)),
-            SlantFactor::Overhead,
-            r_peak,
-            h,
-        );
+        let engine =
+            ChapmanLayer::new(PerCubicMeter::new(nm), Meters::new(r_peak), Meters::new(h)).unwrap();
+        let ours =
+            SolarChapmanLayer::new(Box::new(ConstantPeak(nm)), SlantFactor::Overhead, r_peak, h);
         for ri in 0..=200 {
             let r = r0 + 60e3 + (700e3 - 60e3) * f64::from(ri) / 200.0;
             // Position must not matter for either layer.

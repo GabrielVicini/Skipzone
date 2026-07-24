@@ -587,7 +587,8 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     let fof2 = fof2_at(mid_lat, mid_lon);
     let fof2_tx_mhz = fof2_at(inputs.tx_lat, inputs.tx_lon);
     let fof2_rx_mhz = fof2_at(inputs.rx_lat, inputs.rx_lon);
-    let fof2_source = fof2_source_text(inputs, fof2_backend, season, fof2, fof2_tx_mhz, fof2_rx_mhz);
+    let fof2_source =
+        fof2_source_text(inputs, fof2_backend, season, fof2, fof2_tx_mhz, fof2_rx_mhz);
     let hmf2 = inputs.hmf2_km;
     let hmf2_source = "direct user input".to_string();
     let nm = density_at_critical_frequency(Hertz::new(fof2 * 1e6));
@@ -1084,7 +1085,10 @@ mod tests {
             ..Inputs::default()
         };
         let a = resolve(&inputs);
-        assert!(a.es_solved, "summer afternoon midlatitude Es should be solved");
+        assert!(
+            a.es_solved,
+            "summer afternoon midlatitude Es should be solved"
+        );
         let models = build_models(&inputs, &a).expect("models");
         let with_es = models.density_with_es.as_ref().expect("an Es stack");
 
@@ -1103,7 +1107,8 @@ mod tests {
                 "the two stacks must agree at {alt} km, away from the sheet"
             );
         }
-        let sheet = at(with_es, a.sporadic_e.height_km) - at(&models.density, a.sporadic_e.height_km);
+        let sheet =
+            at(with_es, a.sporadic_e.height_km) - at(&models.density, a.sporadic_e.height_km);
         assert!(
             (sheet - a.sporadic_e.peak_ne()).abs() < 1e-6 * a.sporadic_e.peak_ne(),
             "the sheet should add exactly its own peak density"
@@ -1143,7 +1148,11 @@ mod tests {
             fof2_backend: Fof2Backend::ConstantSsn,
             ..Inputs::default()
         });
-        assert!(constant.fof2_source.contains("constant"), "{}", constant.fof2_source);
+        assert!(
+            constant.fof2_source.contains("constant"),
+            "{}",
+            constant.fof2_source
+        );
         assert!(!constant.fof2_source.contains("FELL BACK"));
     }
 }

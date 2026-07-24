@@ -105,8 +105,7 @@ fn es_shape(season: Season, lst_h: f64, lat_deg: f64) -> f64 {
         (-u * u).exp()
     };
     let diurnal = ES_DIURNAL_FLOOR
-        + (1.0 - ES_DIURNAL_FLOOR)
-            * peak(ES_MORNING_PEAK_LST_H).max(peak(ES_EVENING_PEAK_LST_H));
+        + (1.0 - ES_DIURNAL_FLOOR) * peak(ES_MORNING_PEAK_LST_H).max(peak(ES_EVENING_PEAK_LST_H));
 
     let u = (lat_deg.abs() - ES_PEAK_LAT_DEG) / ES_LAT_WIDTH_DEG;
     let latitude = ES_LAT_FLOOR + (1.0 - ES_LAT_FLOOR) * (-u * u).exp();
@@ -246,9 +245,7 @@ mod tests {
         assert!(temperate > at(Season::Summer, ES_MORNING_PEAK_LST_H, 0.0));
         assert!(temperate > at(Season::Summer, ES_MORNING_PEAK_LST_H, 85.0));
         // Symmetric about the equator.
-        assert!(
-            (at(Season::Summer, 10.0, 38.0) - at(Season::Summer, 10.0, -38.0)).abs() < 1e-12
-        );
+        assert!((at(Season::Summer, 10.0, 38.0) - at(Season::Summer, 10.0, -38.0)).abs() < 1e-12);
 
         // Probabilities are probabilities.
         for season in [Season::Summer, Season::Equinox, Season::Winter] {
@@ -286,7 +283,10 @@ mod tests {
             );
         }
         assert!(strong.is_worth_solving());
-        assert!(!weak.is_worth_solving(), "deep winter night should be skipped");
+        assert!(
+            !weak.is_worth_solving(),
+            "deep winter night should be skipped"
+        );
     }
 
     /// The engine accepts the geometry, and the built layer really is a thin

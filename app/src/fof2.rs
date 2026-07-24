@@ -305,12 +305,18 @@ impl Fof2Grid {
                 .iter()
                 .position(|l| (l - ssn).abs() < 1e-9)
                 .ok_or_else(|| {
-                    format!("fof2 grid line {}: ssn {ssn} is not a tabulated level", lineno + 1)
+                    format!(
+                        "fof2 grid line {}: ssn {ssn} is not a tabulated level",
+                        lineno + 1
+                    )
                 })?;
             let row = ((lat - GRID_LAT_MIN_DEG) / GRID_LAT_STEP_DEG).round();
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let row_i = row as usize;
-            if row < 0.0 || row_i >= GRID_LAT_ROWS || (GRID_LAT_MIN_DEG + row * GRID_LAT_STEP_DEG - lat).abs() > 1e-6 {
+            if row < 0.0
+                || row_i >= GRID_LAT_ROWS
+                || (GRID_LAT_MIN_DEG + row * GRID_LAT_STEP_DEG - lat).abs() > 1e-6
+            {
                 return Err(format!(
                     "fof2 grid line {}: latitude {lat} is not on the lattice",
                     lineno + 1
@@ -469,11 +475,7 @@ impl Fof2Plane {
         }
         let (f, df_dx) = catmull_rom(vals, tx);
         let (df_dy, _) = catmull_rom(dlst, tx);
-        (
-            f,
-            df_dx / GRID_LAT_STEP_DEG,
-            df_dy / GRID_LST_STEP_H,
-        )
+        (f, df_dx / GRID_LAT_STEP_DEG, df_dy / GRID_LST_STEP_H)
     }
 }
 
@@ -601,12 +603,7 @@ mod tests {
     fn climatology_reduces_to_the_scalar_anchor_at_its_reference_point() {
         for ssn in [0.0, 30.0, 70.0, 150.0, 250.0] {
             let want = fof2_from_ssn(ssn);
-            let got = climatology_fof2(
-                REFERENCE_LAT_DEG,
-                DIURNAL_PEAK_LST_H,
-                Season::Equinox,
-                ssn,
-            );
+            let got = climatology_fof2(REFERENCE_LAT_DEG, DIURNAL_PEAK_LST_H, Season::Equinox, ssn);
             // The soft floor lifts the value very slightly; that is the only
             // permitted difference, and it is bounded by it.
             let floored = (want * want + FOF2_FLOOR_MHZ * FOF2_FLOOR_MHZ).sqrt();
@@ -815,8 +812,7 @@ mod tests {
         ] {
             let s = src.peak(colat, lon);
             let h = 1e-6;
-            let fd_theta =
-                (src.peak(colat + h, lon).nm - src.peak(colat - h, lon).nm) / (2.0 * h);
+            let fd_theta = (src.peak(colat + h, lon).nm - src.peak(colat - h, lon).nm) / (2.0 * h);
             let fd_phi = (src.peak(colat, lon + h).nm - src.peak(colat, lon - h).nm) / (2.0 * h);
             assert!(
                 (s.d_nm[0] - fd_theta).abs() < 1e-6 * fd_theta.abs().max(1e-3 * s.nm),
@@ -851,7 +847,10 @@ mod tests {
         );
         // And north of the equatorial crest, moving towards the equator
         // (increasing colatitude in the northern hemisphere) must raise it too.
-        let src2 = GriddedF2Peak::new(Fof2Grid::bundled().unwrap().plane(Season::Equinox, 70.0), 0.0);
+        let src2 = GriddedF2Peak::new(
+            Fof2Grid::bundled().unwrap().plane(Season::Equinox, 70.0),
+            0.0,
+        );
         let colat_35n = std::f64::consts::FRAC_PI_2 - 35.0_f64.to_radians();
         // Local afternoon at lon 150 deg east: the crest is present.
         assert!(

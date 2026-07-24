@@ -43,7 +43,9 @@ fn parse_args() -> Result<Args, String> {
                 ssn = Some(v.parse::<f64>().map_err(|e| format!("bad --ssn: {e}"))?);
             }
             "--quiet" => quiet = true,
-            "-h" | "--help" => return Err("usage: wspr_validate <spots.tsv> [--ssn N] [--quiet]".into()),
+            "-h" | "--help" => {
+                return Err("usage: wspr_validate <spots.tsv> [--ssn N] [--quiet]".into());
+            }
             other if other.starts_with('-') => return Err(format!("unknown flag {other}")),
             other => path = Some(other.to_string()),
         }
@@ -76,7 +78,10 @@ fn main() -> ExitCode {
     if !problems.is_empty() {
         // Loud, and before the results: a bias measured over a silently
         // truncated dataset is worse than no bias at all.
-        eprintln!("{} unreadable row(s) - NOT included in any statistic below:", problems.len());
+        eprintln!(
+            "{} unreadable row(s) - NOT included in any statistic below:",
+            problems.len()
+        );
         for p in &problems {
             eprintln!("  {p}");
         }

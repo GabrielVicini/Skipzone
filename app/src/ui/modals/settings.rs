@@ -7,10 +7,10 @@
 
 use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 
+use crate::fof2::Fof2Backend;
 use crate::noise::{
     MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
 };
-use crate::fof2::Fof2Backend;
 use crate::scenario::{GroundType, Inputs, fof2_from_ssn};
 use crate::state::{Session, UiState};
 use crate::ui::widgets::{card, hint, labelled_drag, section};
