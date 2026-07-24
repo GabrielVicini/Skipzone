@@ -12,7 +12,7 @@ use walkers::{HttpTiles, Map, MapMemory, Projector, lat_lon, sources::OpenStreet
 use crate::solar;
 use crate::state::{Session, UiState};
 
-use super::plugins::{PathPlugin, TerminatorPlugin};
+use super::plugins::{CoastlinePlugin, PathPlugin, TerminatorPlugin};
 
 pub struct MapView {
     tiles: HttpTiles,
@@ -86,6 +86,13 @@ impl MapView {
                         decl_deg,
                         sub_lon_deg,
                     });
+                }
+
+                // Coastline debug outlines sit above the shading but below the
+                // ray paths: they are there to be compared against the
+                // reflection dots, so the dots must stay on top.
+                if ui_state.show_coastlines {
+                    map = map.with_plugin(CoastlinePlugin);
                 }
 
                 let response = ui.add(map.with_plugin(PathPlugin {

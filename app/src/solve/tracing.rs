@@ -13,7 +13,7 @@ use skipzone::trace::{Outcome, TraceConfig, Tracer};
 use skipzone::units::{Hertz, Meters, Radians};
 
 use crate::noise::{LinkBudget, LinkSettings};
-use crate::scenario::{Assumptions, EARTH_RADIUS_M, Models, to_lat_lon};
+use crate::scenario::{Assumptions, EARTH_RADIUS_M, GroundType, Models, to_lat_lon};
 
 use super::link_budget::{NEPERS_TO_DB, free_space_loss_db, ground_reflection_loss_db};
 use super::types::{HopDetail, NearMiss, Solution, mode_label};
@@ -28,6 +28,42 @@ const MAX_POLY_POINTS: usize = 400;
 /// (< ~0.1 % of path length). Accepting it here turns those "practically a
 /// match" cases into the connections they are, instead of reporting no path.
 const PRACTICAL_MISS_TOLERANCE_M: f64 = 2000.0;
+
+/// How the surface at a ground reflection is decided for this solve.
+///
+/// `Fixed` is the historical behaviour and stays bit-for-bit what it was: one
+/// operator-chosen surface applied to every bounce. `Auto` defers the choice to
+/// the reflection point's own position, hop by hop.
+#[derive(Clone, Copy)]
+pub(super) enum GroundModel {
+    Fixed(GroundType),
+    Auto { land_fallback: GroundType },
+}
+
+impl GroundModel {
+    /// The surface at one reflection point, and (for auto-detection only) the
+    /// reason it was picked, so the per-hop readout can justify itself.
+    fn at(self, lat: f64, lon: f64) -> (GroundType, Option<String>) {
+        match self {
+            Self::Fixed(g) => (g, None),
+            Self::Auto { land_fallback } => match crate::coastline::get() {
+                Ok(c) => {
+                    let pick = c.classify(lat, lon, land_fallback);
+                    (pick.ground, Some(pick.reason))
+                }
+                // A missing or unreadable dataset must not sink the solve: fall
+                // back to the operator's land choice and say so, loudly, on the
+                // hop itself.
+                Err(e) => (
+                    land_fallback,
+                    Some(format!(
+                        "coastline data unavailable ({e}); used the land fallback"
+                    )),
+                ),
+            },
+        }
+    }
+}
 
 struct Captured {
     result: skipzone::trace::TraceResult,
@@ -161,14 +197,13 @@ pub(super) fn propagate<D, B, C>(
     az: Radians,
     hops: u32,
     f_hz: f64,
-    ground: (f64, f64),
+    ground: GroundModel,
 ) -> (Vec<HopDetail>, Vec<SphericalPoint>, Option<String>)
 where
     D: ElectronDensity + ?Sized,
     B: MagneticField + ?Sized,
     C: CollisionFrequency + ?Sized,
 {
-    let (eps_r, sigma) = ground;
     let mut details = Vec::new();
     let mut ends = Vec::new();
     let mut point = *tx;
@@ -185,10 +220,22 @@ where
         let (arr_elev, arr_az) = arrival_angles(res.end_m);
         // A ground reflection happens where this hop lands only if another hop
         // follows; the final hop arrives at the receiver with no reflection.
-        let ground_loss_db = if res.outcome == Outcome::Landed && i + 1 < hops {
-            ground_reflection_loss_db(arr_elev.to_radians(), f_hz, eps_r, sigma)
+        // The surface is looked up at the landing point, so with auto-detection
+        // each bounce gets the ground it actually happens over.
+        let end_lat_lon = to_lat_lon(&res.end);
+        let reflects = res.outcome == Outcome::Landed && i + 1 < hops;
+        let (ground_type, ground_reason) = if reflects {
+            let (g, why) = ground.at(end_lat_lon.0, end_lat_lon.1);
+            (Some(g), why)
         } else {
-            0.0
+            (None, None)
+        };
+        let ground_loss_db = match ground_type {
+            Some(g) => {
+                let (eps_r, sigma) = g.constants();
+                ground_reflection_loss_db(arr_elev.to_radians(), f_hz, eps_r, sigma)
+            }
+            None => 0.0,
         };
         let range_km = central_angle(&point, &res.end).get() * EARTH_RADIUS_M / 1e3;
         let apex_x = res.apexes.first().map_or(f64::NAN, |ap| ap.x);
@@ -212,11 +259,13 @@ where
             arc_km: res.arc_length.get() / 1e3,
             absorption_db: res.absorption.get() * NEPERS_TO_DB,
             ground_loss_db,
+            ground_label: ground_type.map(GroundType::label),
+            ground_reason,
             steps: res.steps,
             hamiltonian_drift: res.hamiltonian_drift,
             outcome: outcome_label(res.outcome),
             polyline: cap.polyline,
-            end_lat_lon: to_lat_lon(&res.end),
+            end_lat_lon,
         });
         ends.push(res.end);
 

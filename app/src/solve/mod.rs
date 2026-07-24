@@ -32,7 +32,7 @@ use crate::scenario::{
     self, Assumptions, EARTH_RADIUS_M, Inputs, Models, destination_point, ground_point,
 };
 
-use tracing::{assemble, homing_config, make_tracer, near_miss_sweep, propagate};
+use tracing::{GroundModel, assemble, homing_config, make_tracer, near_miss_sweep, propagate};
 
 pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome {
     let started = std::time::Instant::now();
@@ -45,7 +45,13 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     let mut solutions = Vec::new();
     let mut errors = Vec::new();
     let f_hz = inputs.freq_mhz * 1e6;
-    let ground = inputs.ground_type.constants();
+    let ground = if inputs.ground_type.is_auto() {
+        GroundModel::Auto {
+            land_fallback: inputs.ground_land_fallback,
+        }
+    } else {
+        GroundModel::Fixed(inputs.ground_type)
+    };
 
     // The judgment layer's inputs, fixed for this solve. Computed at THIS
     // frequency (not the tuned one) so the frequency sweep, which re-solves
@@ -55,10 +61,23 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     // Antenna patterns, built once per solve. Each curve costs a hemispherical
     // power integral (see `crate::antenna::image`), so it is computed here and
     // sampled per solution rather than recomputed per angle. Both ends stand
-    // over the scenario's ground type.
-    let antenna_ground = inputs.ground_type.as_antenna_ground();
-    let tx_antenna = inputs.tx_antenna.curve(antenna_ground, f_hz);
-    let rx_antenna = inputs.rx_antenna.curve(antenna_ground, f_hz);
+    // over the scenario's ground type - and when that is auto-detected, over
+    // the surface at each station's own coordinates, which is the same lookup
+    // the bounces use rather than a second rule.
+    let ground_under = |lat: f64, lon: f64| match ground {
+        GroundModel::Fixed(g) => g,
+        GroundModel::Auto { land_fallback } => crate::coastline::get().map_or(land_fallback, |c| {
+            c.classify(lat, lon, land_fallback).ground
+        }),
+    };
+    let tx_antenna = inputs.tx_antenna.curve(
+        ground_under(inputs.tx_lat, inputs.tx_lon).as_antenna_ground(),
+        f_hz,
+    );
+    let rx_antenna = inputs.rx_antenna.curve(
+        ground_under(inputs.rx_lat, inputs.rx_lon).as_antenna_ground(),
+        f_hz,
+    );
 
     let link_settings = LinkSettings {
         tx_power_w: inputs.tx_power_w,
@@ -576,6 +595,83 @@ mod tests {
             "night absorption {a_night} dB should collapse relative to day {a_after} dB"
         );
         let _ = a_before;
+    }
+
+    /// Auto-detect must classify each bounce from where it actually lands, and
+    /// must leave every other manual selection alone. Denver -> London crosses
+    /// North America and then the Atlantic, so a multi-hop path should pick up
+    /// both land and sea bounces - the whole point of doing this per hop.
+    #[test]
+    fn auto_detect_classifies_each_bounce_from_its_own_position() {
+        use crate::scenario::GroundType;
+
+        let inputs = Inputs {
+            ground_type: GroundType::AutoDetect,
+            ground_land_fallback: GroundType::DryGround,
+            ..Inputs::default()
+        };
+        let out = run(&inputs);
+        assert!(!out.solutions.is_empty(), "errors: {:?}", out.errors);
+
+        let mut seen = Vec::new();
+        for s in &out.solutions {
+            for h in &s.hop_details {
+                // A reflection carries a surface and a reason; the final hop,
+                // which arrives at the receiver, carries neither.
+                assert_eq!(h.ground_label.is_some(), h.ground_reason.is_some());
+                if let (Some(label), Some(reason)) = (h.ground_label, h.ground_reason.as_ref()) {
+                    println!(
+                        "{}-mode {} hop(s), hop {}: {label} - {reason}",
+                        mode_label(s.mode),
+                        s.hops,
+                        h.index
+                    );
+                    assert!(reason.contains("reflection point"), "reason: {reason}");
+                    // Only water, or the operator's land fallback, may appear:
+                    // auto-detect never invents a soil type.
+                    assert!(
+                        label == GroundType::SeaWater.label()
+                            || label == GroundType::FreshWater.label()
+                            || label == GroundType::DryGround.label(),
+                        "unexpected surface {label}"
+                    );
+                    seen.push(label);
+                }
+                // No reflection, no ground loss.
+                if h.ground_label.is_none() {
+                    assert_eq!(h.ground_loss_db, 0.0);
+                }
+            }
+        }
+        assert!(!seen.is_empty(), "a multi-hop path should have bounces");
+        assert!(
+            seen.contains(&GroundType::SeaWater.label()),
+            "a transatlantic path must bounce off the sea somewhere: {seen:?}"
+        );
+    }
+
+    /// A manual selection is unchanged by any of this: one surface, applied to
+    /// every bounce, exactly as before.
+    #[test]
+    fn manual_ground_still_applies_one_surface_to_the_whole_path() {
+        use crate::scenario::GroundType;
+
+        let inputs = Inputs {
+            ground_type: GroundType::DryGround,
+            // Deliberately different, and must be ignored entirely.
+            ground_land_fallback: GroundType::WetGround,
+            ..Inputs::default()
+        };
+        let out = run(&inputs);
+        assert!(!out.solutions.is_empty(), "errors: {:?}", out.errors);
+        for s in &out.solutions {
+            for h in &s.hop_details {
+                assert!(h.ground_reason.is_none(), "manual needs no explanation");
+                if let Some(label) = h.ground_label {
+                    assert_eq!(label, GroundType::DryGround.label());
+                }
+            }
+        }
     }
 
     /// With no field, O and X are degenerate, so only one mode is traced.

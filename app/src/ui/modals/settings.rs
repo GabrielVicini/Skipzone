@@ -16,22 +16,28 @@ use crate::ui::widgets::{card, hint, labelled_drag, section};
 
 pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) {
     let inputs = &mut session.inputs;
+    // The open flag and the overlay toggle live in the same struct, so the
+    // dialog's `&mut open` is taken as a copy and written back; only the one
+    // field the body actually edits is lent to it.
+    let mut open = ui_state.modals.settings;
+    let show_coastlines = &mut ui_state.show_coastlines;
     super::chrome::dialog(
         ctx,
         "settings_dialog",
         "Settings",
-        &mut ui_state.modals.settings,
+        &mut open,
         vec2(520.0, 560.0),
-        |ui| body(ui, inputs),
+        |ui| body(ui, inputs, show_coastlines),
     );
+    ui_state.modals.settings = open;
 }
 
-fn body(ui: &mut Ui, inputs: &mut Inputs) {
+fn body(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
     ionosphere(ui, inputs);
     absorption(ui, inputs);
     noise(ui, inputs);
     magnetic_field(ui, inputs);
-    surface(ui, inputs);
+    surface(ui, inputs, show_coastlines);
     geometry(ui, inputs);
 }
 
@@ -228,26 +234,75 @@ fn magnetic_field(ui: &mut Ui, inputs: &mut Inputs) {
     });
 }
 
-fn surface(ui: &mut Ui, inputs: &mut Inputs) {
+fn surface(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
     section(ui, "Surface (ground reflections)");
     card(ui, |ui| {
         ComboBox::from_id_salt("settings_ground")
             .selected_text(inputs.ground_type.label())
             .show_ui(ui, |ui| {
-                for ground in GroundType::ALL {
+                for ground in GroundType::ALL_SELECTABLE {
                     ui.selectable_value(&mut inputs.ground_type, ground, ground.label());
                 }
             });
-        let (eps_r, sigma) = inputs.ground_type.constants();
-        hint(
-            ui,
-            &format!(
-                "Surface at the intermediate ground bounces, used for the Fresnel \
-                 reflection loss in the link budget. eps_r = {eps_r:.0}, sigma = {sigma} S/m \
-                 (ITU-R P.527 / P.368 HF-band values). One choice approximates the whole \
-                 path - there is no coastline database here."
-            ),
-        );
+
+        if inputs.ground_type.is_auto() {
+            ui.add_space(6.0);
+            ui.label(RichText::new("Land fallback (soil type is not in the data)").small());
+            ComboBox::from_id_salt("settings_ground_land")
+                .selected_text(inputs.ground_land_fallback.label())
+                .show_ui(ui, |ui| {
+                    for ground in GroundType::LAND_TYPES {
+                        ui.selectable_value(
+                            &mut inputs.ground_land_fallback,
+                            ground,
+                            ground.label(),
+                        );
+                    }
+                });
+            hint(
+                ui,
+                "Each hop's reflection point is tested against the Natural Earth 1:50m \
+                 land and lakes polygons: inside a lake gives fresh water, inside land \
+                 gives the fallback above, outside both gives sea water. The datasets \
+                 record where the water is, not how wet the soil is, so auto-detection \
+                 decides water vs. land only. The per-hop table shows the surface chosen \
+                 for every bounce and the reason. The 1:50m coastline is generalised to \
+                 a km or two, so a point that close to the shore can fall on the wrong \
+                 side - immaterial between bounces hundreds of km apart.",
+            );
+
+            ui.add_space(6.0);
+            ui.checkbox(
+                show_coastlines,
+                "Debug: draw the land / lake polygons on the map",
+            );
+            match crate::coastline::get() {
+                Ok(c) => hint(ui, &c.summary()),
+                Err(e) => {
+                    ui.colored_label(
+                        crate::ui::theme::FAIL,
+                        RichText::new(format!("coastline data unavailable: {e}")).small(),
+                    );
+                    hint(
+                        ui,
+                        "Every hop will fall back to the land type above until the two \
+                         shapefiles are in place.",
+                    );
+                }
+            }
+        } else {
+            let (eps_r, sigma) = inputs.ground_type.constants();
+            hint(
+                ui,
+                &format!(
+                    "Surface at the intermediate ground bounces, used for the Fresnel \
+                     reflection loss in the link budget. eps_r = {eps_r:.0}, sigma = {sigma} \
+                     S/m (ITU-R P.527 / P.368 HF-band values). This one choice applies to the \
+                     whole path; pick auto-detect to have each bounce classified against the \
+                     coastline instead."
+                ),
+            );
+        }
     });
 }
 

@@ -84,6 +84,10 @@ pub struct UiState {
     pub right_inset: f32,
     /// Draw the live day/night terminator shading on the map.
     pub show_terminator: bool,
+    /// Debug view for coastline auto-detection: draw the land and lake polygon
+    /// outlines the classifier actually tests against, so a hop's verdict can be
+    /// checked against the data by eye instead of taken on trust.
+    pub show_coastlines: bool,
     /// Window width the text styles were last scaled for.
     pub styled_for_width: f32,
     /// Height of the solid header, measured last frame. The floating overlays
@@ -108,6 +112,7 @@ impl UiState {
             trace_open: false,
             right_inset: 0.0,
             show_terminator: true,
+            show_coastlines: false,
             styled_for_width: 0.0,
             header_height: 0.0,
         }

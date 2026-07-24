@@ -16,6 +16,7 @@ num-complex = "0.4"
 # embarrassingly-parallel batch of independent engine solves). The engine crate
 # stays single-threaded; parallelism lives entirely in this app layer.
 rayon = "1"
+shapefile = { version = "0.9.0", default-features = false }
 
 # Deliberately NOT clippy-pedantic, unlike the engine crate: this is an
 # egui application crate, and pedantic lint churn on UI layout code buys
