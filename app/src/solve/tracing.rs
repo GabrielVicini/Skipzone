@@ -247,7 +247,7 @@ pub(super) fn assemble(
     homing_miss_m: f64,
     note: Option<String>,
     f_mhz: f64,
-    link_settings: LinkSettings,
+    link_settings: LinkSettings<'_>,
 ) -> Solution {
     let total_group_km: f64 = details.iter().map(|h| h.group_km).sum();
     let total_phase_km: f64 = details.iter().map(|h| h.phase_km).sum();
@@ -271,9 +271,22 @@ pub(super) fn assemble(
         u32::try_from(details.iter().filter(|h| h.ground_loss_db > 0.0).count()).unwrap_or(0);
     let total_system_loss_db = free_space_loss_db + total_absorption_db + ground_reflection_loss_db;
 
-    // Judgment layer only: transmitter power and noise floor applied to the
-    // loss just computed. Nothing above this line is affected by it.
-    let link = LinkBudget::from_settings(link_settings, total_system_loss_db);
+    // Antenna gain. Each end is read at the angle the ray actually uses: the
+    // transmitter at the launch elevation of the first hop, the receiver at the
+    // arrival elevation of the last. This is what makes the pattern change
+    // which mode wins rather than scaling every solution equally - a steep
+    // 4-hop path and a shallow 2-hop path see different parts of the pattern.
+    let tx_elev_deg = details.first().map_or(0.0, |h| h.launch_elev_deg);
+    let rx_elev_deg = details.last().map_or(0.0, |h| h.arrival_elev_deg);
+    let tx_gain_dbi = link_settings.tx_antenna.gain_dbi(tx_elev_deg.to_radians());
+    let rx_gain_dbi = link_settings.rx_antenna.gain_dbi(rx_elev_deg.to_radians());
+    let total_gain_db = tx_gain_dbi + rx_gain_dbi;
+
+    // Judgment layer only: transmitter power, antenna gain and noise floor
+    // applied to the propagation loss just computed. Nothing above the
+    // `total_system_loss_db` line is affected by any of it, which is why that
+    // figure remains a pure propagation loss the UI can show on its own.
+    let link = LinkBudget::from_settings(link_settings, total_system_loss_db - total_gain_db);
 
     Solution {
         mode,
@@ -287,6 +300,11 @@ pub(super) fn assemble(
         ground_reflection_loss_db,
         num_ground_reflections,
         total_system_loss_db,
+        tx_gain_dbi,
+        rx_gain_dbi,
+        tx_elev_deg,
+        rx_elev_deg,
+        total_gain_db,
         link,
         total_ground_km,
         terminal_miss_km,

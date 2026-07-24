@@ -39,6 +39,7 @@
 //! Everything is combined on a power basis and converted once, explicitly, at
 //! the boundaries - see [`dbm_from_watts`] and [`noise_power_dbm`].
 
+use crate::antenna::GainCurve;
 use crate::scenario::Season;
 
 /// Boltzmann's constant, J/K. The value P.372-9 itself states under eq. (2).
@@ -334,11 +335,20 @@ impl PathState {
 /// Everything the judgment layer needs that the ray tracer does not produce.
 /// Carried into the solution assembler so the loss terms stay untouched and
 /// only the verdict is added on top.
+///
+/// The two antenna curves live here rather than being passed separately
+/// because they are exactly that: inputs to the verdict that the ray tracer
+/// knows nothing about. The tracer supplies the launch and arrival elevations;
+/// the assembler reads each curve at the matching angle.
 #[derive(Clone, Copy)]
-pub struct LinkSettings {
+pub struct LinkSettings<'a> {
     pub tx_power_w: f64,
     pub noise: NoiseFloor,
     pub threshold_db: f64,
+    /// Transmitting antenna gain against elevation, at this frequency.
+    pub tx_antenna: &'a GainCurve,
+    /// Receiving antenna gain against elevation, at this frequency.
+    pub rx_antenna: &'a GainCurve,
 }
 
 /// The received-signal verdict for one solution: what arrives, what it has to
@@ -346,8 +356,9 @@ pub struct LinkSettings {
 #[derive(Clone, Copy)]
 pub struct LinkBudget {
     pub tx_power_dbm: f64,
-    /// `P_rx = P_tx - total system loss` [dBm]. No antenna gains: the loss the
-    /// tracer produces is a basic transmission loss between isotropic ends.
+    /// `P_rx = P_tx - propagation loss + G_tx + G_rx` [dBm]. The two antenna
+    /// gains are read from the patterns in [`crate::antenna`] at the launch and
+    /// arrival elevations the tracer produced.
     pub rx_power_dbm: f64,
     pub noise: NoiseFloor,
     /// `SNR = P_rx - P_noise` [dB].
@@ -385,8 +396,11 @@ impl LinkBudget {
 
     /// Same as [`LinkBudget::new`], reading the scenario-level settings from a
     /// [`LinkSettings`].
+    ///
+    /// `total_system_loss_db` here is the loss NET of antenna gain: the caller
+    /// has already subtracted `G_tx + G_rx` from the propagation loss.
     #[must_use]
-    pub fn from_settings(s: LinkSettings, total_system_loss_db: f64) -> Self {
+    pub fn from_settings(s: LinkSettings<'_>, total_system_loss_db: f64) -> Self {
         Self::new(s.tx_power_w, total_system_loss_db, s.noise, s.threshold_db)
     }
 
