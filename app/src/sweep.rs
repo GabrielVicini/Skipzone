@@ -277,14 +277,26 @@ pub fn better(a: SweepPoint, b: SweepPoint) -> SweepPoint {
 /// their job's epoch and `drain` returns only current-epoch messages, so
 /// straggler progress from a superseded job can never flip the UI state.
 pub struct SolverService {
+    /// Web build: nothing reads this, because `dispatch` runs the job inline
+    /// rather than queuing it. Kept so the two builds share one struct shape.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     job_tx: Sender<(u64, Job, Arc<AtomicBool>)>,
     msg_rx: Receiver<(u64, Msg)>,
+    /// Web build only: the job runs on the caller's stack, so the service holds
+    /// the sending half and the pool the worker thread would otherwise own.
+    #[cfg(target_arch = "wasm32")]
+    msg_tx: Sender<(u64, Msg)>,
+    #[cfg(target_arch = "wasm32")]
+    ctx: Context,
+    #[cfg(target_arch = "wasm32")]
+    pool: ComputePool,
     current_cancel: Option<Arc<AtomicBool>>,
     epoch: u64,
 }
 
 impl SolverService {
     #[must_use]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(ctx: Context) -> Self {
         let (job_tx, job_rx) = mpsc::channel::<(u64, Job, Arc<AtomicBool>)>();
         let (msg_tx, msg_rx) = mpsc::channel::<(u64, Msg)>();
@@ -300,6 +312,26 @@ impl SolverService {
         }
     }
 
+    /// Web build: no worker thread, because wasm32-unknown-unknown has none to
+    /// spawn. The channels and the epoch protocol are kept exactly as they are
+    /// natively - only *when* the job runs changes, and [`Self::dispatch`] runs
+    /// it inline. Everything downstream, including `drain`, is unaware.
+    #[must_use]
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(ctx: Context) -> Self {
+        let (job_tx, _job_rx) = mpsc::channel::<(u64, Job, Arc<AtomicBool>)>();
+        let (msg_tx, msg_rx) = mpsc::channel::<(u64, Msg)>();
+        Self {
+            job_tx,
+            msg_rx,
+            msg_tx,
+            ctx,
+            pool: build_pool("coverage", coverage_pool_config()),
+            current_cancel: None,
+            epoch: 0,
+        }
+    }
+
     /// Queue a job. Any in-flight job is asked to stop first (the sweep checks
     /// the flag between frequencies; a single main solve is atomic and simply
     /// finishes, its result then dropped by the epoch filter).
@@ -309,7 +341,22 @@ impl SolverService {
         }
         self.epoch += 1;
         let cancel = Arc::new(AtomicBool::new(false));
+        #[cfg(not(target_arch = "wasm32"))]
         let _ = self.job_tx.send((self.epoch, job, Arc::clone(&cancel)));
+        // Web build: run it here and now. This blocks the browser's main thread
+        // for the length of the job, so a long sweep or a coverage grid freezes
+        // the tab until it finishes and its progress lands in one go instead of
+        // streaming - the honest consequence of having no worker thread. CANCEL
+        // cannot interrupt a job that is already running for the same reason.
+        #[cfg(target_arch = "wasm32")]
+        run_job(
+            self.epoch,
+            job,
+            &self.pool,
+            &cancel,
+            &self.msg_tx,
+            &self.ctx,
+        );
         self.current_cancel = Some(cancel);
     }
 
@@ -336,6 +383,30 @@ impl SolverService {
     }
 }
 
+/// Run one job to completion, whatever thread we happen to be on.
+///
+/// Split out of [`worker`] so the web build, which has no worker thread, can
+/// call exactly the same code path from `dispatch`. On wasm both job kinds share
+/// one sequential pool, since the sweep/coverage thread-budget split that
+/// `sweep_pool_config` and `coverage_pool_config` express has nothing to divide.
+fn run_job(
+    epoch: u64,
+    job: Job,
+    pool: &ComputePool,
+    cancel: &AtomicBool,
+    msg_tx: &Sender<(u64, Msg)>,
+    ctx: &Context,
+) {
+    match job {
+        Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, ctx),
+        Job::Sweep(inputs) => run_sweep(epoch, &inputs, pool, cancel, msg_tx, ctx),
+        Job::Coverage(inputs, config) => {
+            run_coverage(epoch, &inputs, config, pool, cancel, msg_tx, ctx);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn worker(
     job_rx: &Receiver<(u64, Job, Arc<AtomicBool>)>,
     msg_tx: &Sender<(u64, Msg)>,
@@ -348,13 +419,13 @@ fn worker(
     let pool = build_pool("sweep", sweep_pool_config());
     let coverage_pool = build_pool("coverage", coverage_pool_config());
     while let Ok((epoch, job, cancel)) = job_rx.recv() {
-        match job {
-            Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, ctx),
-            Job::Sweep(inputs) => run_sweep(epoch, &inputs, &pool, &cancel, msg_tx, ctx),
-            Job::Coverage(inputs, config) => {
-                run_coverage(epoch, &inputs, config, &coverage_pool, &cancel, msg_tx, ctx);
-            }
-        }
+        // The pool a job gets is the only thing the worker decides; the job
+        // itself runs identically here and in the web build's inline path.
+        let pool = match job {
+            Job::Coverage(..) => &coverage_pool,
+            Job::Main(_) | Job::Sweep(_) => &pool,
+        };
+        run_job(epoch, job, pool, &cancel, msg_tx, ctx);
     }
 }
 
@@ -371,6 +442,9 @@ fn worker(
 /// tile fetcher and the UI thread both want CPU while it does. Reserving two
 /// cores keeps the interface responsive for the whole minute-plus it takes. The
 /// coverage grid is the opposite case and is sized accordingly.
+// Only the worker thread splits the thread budget between the two job kinds,
+// and the web build has no worker thread and no budget to split.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn sweep_pool_config() -> PoolConfig {
     let cores = available_cores();
     PoolConfig {
@@ -606,7 +680,7 @@ fn run_sweep_sequential(
     msg_tx: &Sender<(u64, Msg)>,
     ctx: &Context,
 ) {
-    let sweep_started = std::time::Instant::now();
+    let sweep_started = web_time::Instant::now();
     let mut per_item: Vec<Duration> = Vec::new();
 
     let coarse = coarse_freqs();
@@ -617,7 +691,7 @@ fn run_sweep_sequential(
     ctx.request_repaint();
 
     let mut timed_solve = |f: f64| -> Option<SweepPoint> {
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let point = solve_point(f, inputs, a, models, cancel);
         if point.is_some() {
             per_item.push(started.elapsed());

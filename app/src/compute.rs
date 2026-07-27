@@ -17,7 +17,9 @@
 //!   * Every map returns a [`Timing`] with per-item and total wall-clock, so a
 //!     claimed speedup can be measured rather than assumed.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// `std::time::Instant` panics on wasm32; `web_time` forwards to std natively.
+use web_time::Instant;
 
 use rayon::prelude::*;
 
@@ -117,6 +119,16 @@ impl ComputePool {
     /// Propagates a `rayon` thread-pool build failure as a human-readable string.
     pub fn new(config: PoolConfig) -> Result<Self, String> {
         let cores = available_cores();
+        // The browser build has no threads to give: wasm32-unknown-unknown
+        // cannot spawn one without a cross-origin-isolated shared-memory setup,
+        // so rayon's pool build fails there. Sequential is not a degraded mode
+        // here - it is the only mode - and it produces bit-identical results,
+        // which is the property the whole compute layer is built around.
+        #[cfg(target_arch = "wasm32")]
+        let config = PoolConfig {
+            execution: Execution::Sequential,
+            ..config
+        };
         match config.execution {
             Execution::Sequential => Ok(Self {
                 pool: None,

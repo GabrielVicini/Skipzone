@@ -46,4 +46,9 @@ pub mod sporadic_e;
 pub mod state;
 pub mod sweep;
 pub mod ui;
+/// Browser entry point. A proof of concept: Windows is the primary target and
+/// `main.rs` remains the default build. See the module docs for the two things
+/// the browser does differently, both forced by wasm32 having no threads.
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 pub mod wspr;
