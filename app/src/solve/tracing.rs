@@ -2,6 +2,8 @@
 //! full multi-hop solutions and, when nothing homes, a near-miss report.
 //! Calls the engine's public API only; no physics is implemented here.
 
+use rayon::prelude::*;
+
 use skipzone::collision::CollisionFrequency;
 use skipzone::density::ElectronDensity;
 use skipzone::error::TraceError;
@@ -186,6 +188,9 @@ fn outcome_label(o: Outcome) -> &'static str {
 pub(super) struct StepTuning {
     pub rtol: Option<f64>,
     pub max_step_m: Option<f64>,
+    /// Measure the on-shell drift diagnostic. Only the traces whose numbers are
+    /// reported need it; see `TraceConfig::measure_drift`.
+    pub measure_drift: bool,
 }
 
 impl StepTuning {
@@ -193,6 +198,7 @@ impl StepTuning {
     pub const DEFAULT: Self = Self {
         rtol: None,
         max_step_m: None,
+        measure_drift: true,
     };
 
     /// Relative tolerance the sporadic-E stack needs; see the type docs.
@@ -218,6 +224,7 @@ impl StepTuning {
         Self {
             rtol: Some(Self::ES_RTOL),
             max_step_m: Some(semi_thickness_m),
+            measure_drift: true,
         }
     }
 
@@ -229,8 +236,34 @@ impl StepTuning {
     /// needs just as much as the refinement does.
     pub fn for_scan(self) -> Self {
         Self {
-            rtol: Some(self.rtol.unwrap_or(Self::SCAN_RTOL)),
+            rtol: Some(self.rtol.map_or(Self::SCAN_RTOL, |r| r.max(Self::SCAN_RTOL))),
             max_step_m: self.max_step_m,
+            // A scanned ray is thrown away as soon as its landing range has
+            // been read off it, so its integrator-quality diagnostic has no
+            // reader.
+            measure_drift: false,
+        }
+    }
+
+    /// Relative tolerance for the terminal homing SEARCH.
+    ///
+    /// The engine's 1e-10 default resolves a landing point to about 10 cm over
+    /// a 1000 km path. The search does not need that: it is looking for a
+    /// launch elevation, and it is followed by a polish pass on the reporting
+    /// tracer at full tolerance, so its only job is to land in the polish
+    /// pass's basin of convergence. 1e-8 still resolves the landing to metres -
+    /// three orders inside the kilometre-scale acceptance bound - while the
+    /// step count falls as roughly `rtol^(-1/5)`.
+    pub const SEARCH_RTOL: f64 = 1e-8;
+
+    /// Settings for the traces the terminal homing search throws away: looser
+    /// tolerance, no drift diagnostic. A stack that names its own tolerance
+    /// keeps it, for the reasons in [`Self::for_scan`].
+    pub fn for_search(self) -> Self {
+        Self {
+            rtol: Some(self.rtol.map_or(Self::SEARCH_RTOL, |r| r.max(Self::SEARCH_RTOL))),
+            max_step_m: self.max_step_m,
+            measure_drift: false,
         }
     }
 }
@@ -239,15 +272,22 @@ impl StepTuning {
 /// off `Models` because the solver now runs the same homing against two stacks
 /// (with and without a sporadic-E sheet) while the field and collision models
 /// are shared between them.
+pub(super) type DynTracer<'a> = Tracer<
+    'a,
+    dyn ElectronDensity + Sync + 'a,
+    dyn MagneticField + Sync + 'a,
+    dyn CollisionFrequency + Sync + 'a,
+>;
+
 pub(super) fn make_tracer<'a>(
-    density: &'a (dyn ElectronDensity + 'a),
-    field: &'a (dyn MagneticField + 'a),
-    collisions: &'a (dyn CollisionFrequency + 'a),
+    density: &'a (dyn ElectronDensity + Sync + 'a),
+    field: &'a (dyn MagneticField + Sync + 'a),
+    collisions: &'a (dyn CollisionFrequency + Sync + 'a),
     freq_mhz: f64,
     mode: Mode,
     a: &Assumptions,
     tuning: StepTuning,
-) -> Tracer<'a, dyn ElectronDensity + 'a, dyn MagneticField + 'a, dyn CollisionFrequency + 'a> {
+) -> DynTracer<'a> {
     let mut config = TraceConfig::new(Meters::new(a.r_ground_m), Meters::new(a.r_top_m));
     if let Some(rtol) = tuning.rtol {
         config.rtol = rtol;
@@ -255,6 +295,7 @@ pub(super) fn make_tracer<'a>(
     if let Some(cap) = tuning.max_step_m {
         config.max_step = config.max_step.min(cap);
     }
+    config.measure_drift = tuning.measure_drift;
     Tracer::new(
         density,
         field,
@@ -297,8 +338,6 @@ const TERMINAL_MAX_CORRECTION: f64 = 0.017_453_292_519_943_295;
 pub(super) struct TerminalHomed {
     pub elevation: Radians,
     pub azimuth: Radians,
-    /// Great-circle distance from the final landing point to the receiver, m.
-    pub miss_m: f64,
 }
 
 /// Where an N-hop path launched at `(elev, az)` actually ends, or `None` if it
@@ -378,7 +417,7 @@ pub(super) fn home_terminal<D, B, C>(
     tx: &SphericalPoint,
     rx: &SphericalPoint,
     hops: u32,
-    bracket: (f64, f64),
+    seed_elev: f64,
     limits: (f64, f64),
     tolerance_m: f64,
 ) -> Option<TerminalHomed>
@@ -388,7 +427,7 @@ where
     C: CollisionFrequency + ?Sized,
 {
     let r0 = tx.r.get();
-    let (mut e, mut az) = (0.5 * (bracket.0 + bracket.1), bearing(tx, rx).get());
+    let (mut e, mut az) = (seed_elev, bearing(tx, rx).get());
     // The search is bounded by the SCANNED elevation range, not by the bracket.
     // The bracket comes from the equal-hop assumption, and the whole point of
     // homing the terminal point is that that assumption is wrong: on a
@@ -399,12 +438,20 @@ where
     // them the app does not model the geometry at all - so they are the ones to
     // hold the secant to.
     let (lo, hi) = limits;
-    // Converge as far as the secant will go rather than stopping the moment the
-    // tolerance is met: the extra iterations are cheap once it is close, and
-    // they are what keeps a short path's miss in the tens of metres instead of
-    // sitting just inside a kilometre-scale acceptance bound.
-    let tight = tolerance_m * 0.01;
+    // Converge comfortably inside the acceptance bound rather than stopping the
+    // moment it is met - a path that merely scrapes in is not the same as one
+    // that lands on the receiver - but no further. Chasing the last few metres
+    // is what this loop was doing before, and it cost the full iteration budget
+    // on paths that were already inside a hundred metres of a two-kilometre
+    // bound. Each of those iterations is a full N-hop propagation on the
+    // critical path of the whole solve.
+    let tight = tolerance_m * 0.05;
     let mut best: Option<(f64, f64, f64)> = None;
+    // The previous iterate, which is the second point of the secant. Only the
+    // FIRST step has to spend a finite-difference probe to get a slope; after
+    // that the point the last step already paid for supplies it, halving the
+    // full N-hop propagations this loop performs.
+    let mut prev: Option<(f64, f64)> = None;
     for _ in 0..TERMINAL_MAX_ITERS {
         let Some((along, cross)) = terminal_errors(tracer, tx, rx, hops, e, az) else {
             // The trial launch no longer completes the path. Retreat halfway to
@@ -413,10 +460,11 @@ where
             let (be, ba, _) = best?;
             e = 0.5 * (e + be);
             az = 0.5 * (az + ba);
+            prev = None;
             continue;
         };
         let miss = along.hypot(cross) * r0;
-        let improved = best.is_none_or(|(_, _, m)| miss < 0.9 * m);
+        let improved = best.is_none_or(|(_, _, m)| miss < 0.7 * m);
         if best.is_none_or(|(_, _, m)| miss < m) {
             best = Some((e, az, miss));
         }
@@ -425,19 +473,27 @@ where
         if miss < tight || (!improved && best.is_some_and(|(_, _, m)| m < tolerance_m)) {
             break;
         }
-        // Slope of the terminal along-track error against launch elevation.
-        // Probed on whichever side still completes the path.
-        let h = TERMINAL_FD_STEP;
-        let slope = match terminal_errors(tracer, tx, rx, hops, e + h, az) {
-            Some((up, _)) => (up - along) / h,
-            None => {
-                let (down, _) = terminal_errors(tracer, tx, rx, hops, e - h, az)?;
-                (along - down) / h
+        // Slope of the terminal along-track error against launch elevation:
+        // from the previous iterate when there is one and it is far enough away
+        // to divide by, otherwise from a probe on whichever side still
+        // completes the path.
+        let slope = match prev {
+            Some((pe, pa)) if (e - pe).abs() > TERMINAL_FD_STEP => (along - pa) / (e - pe),
+            _ => {
+                let h = TERMINAL_FD_STEP;
+                match terminal_errors(tracer, tx, rx, hops, e + h, az) {
+                    Some((up, _)) => (up - along) / h,
+                    None => {
+                        let (down, _) = terminal_errors(tracer, tx, rx, hops, e - h, az)?;
+                        (along - down) / h
+                    }
+                }
             }
         };
         if !slope.is_finite() || slope == 0.0 {
             break;
         }
+        prev = Some((e, along));
         e = (e + (-along / slope).clamp(-TERMINAL_MAX_CORRECTION, TERMINAL_MAX_CORRECTION))
             .clamp(lo, hi);
         // Exact for a spherically symmetric medium, first order otherwise -
@@ -449,7 +505,6 @@ where
     (miss_m < tolerance_m).then_some(TerminalHomed {
         elevation: Radians::new(e),
         azimuth: Radians::new(az),
-        miss_m,
     })
 }
 
@@ -465,18 +520,14 @@ where
 /// 77 traces each, 74 % of all the tracing a solve did.
 ///
 /// This type traces the fan once and then answers "which elevation intervals
-/// bracket THIS target arc" arithmetically. Refinement is untouched: each
-/// bracket is handed back to the engine's own `home_scan` with the scan range
-/// narrowed to exactly that interval, so the engine re-derives the bracket in
-/// two traces and runs its unmodified bisection from it.
+/// bracket THIS target arc" arithmetically. Each interval it reports is one
+/// candidate ray, handed to [`home_terminal`] to be refined against the end of
+/// the whole multi-hop path.
 pub(super) struct ElevationScan {
     /// `(elevation, along-track angle)` per scanned elevation, in scan order.
     /// The angle is `None` where the ray escaped or the trace failed - which is
     /// how the engine treats those too: a boundary, not an error.
     points: Vec<(f64, Option<f64>)>,
-    /// The scan step, carried so a narrowed config can reproduce the interval
-    /// endpoints by the same accumulation the scan used.
-    step: f64,
 }
 
 impl ElevationScan {
@@ -498,25 +549,6 @@ impl ElevationScan {
         brackets
     }
 
-    /// A homing config whose scan range is exactly one bracket, so the engine
-    /// re-derives that bracket in two traces instead of scanning the whole
-    /// elevation range again.
-    ///
-    /// The step is left at the scan's own step, which is what makes the second
-    /// traced elevation bit-identical to `e_hi`: the scan produced `e_hi` as
-    /// `e_lo + step` under the same accumulation, so the engine, starting from
-    /// `e_lo` and adding the same `step`, lands on the same f64. `e_hi` as the
-    /// upper limit then stops the loop after those two points.
-    pub fn narrowed(&self, base: &HomingConfig, (e_lo, e_hi): (f64, f64)) -> HomingConfig {
-        HomingConfig {
-            elev_min: Radians::new(e_lo),
-            elev_max: Radians::new(e_hi),
-            elev_step: Radians::new(self.step),
-            miss_tolerance_m: base.miss_tolerance_m,
-            max_iters: base.max_iters,
-            fd_step: base.fd_step,
-        }
-    }
 }
 
 /// Trace the elevation fan once for one tracer. Reproduces the engine's scan
@@ -530,9 +562,9 @@ pub(super) fn scan_elevations<D, B, C>(
     config: &HomingConfig,
 ) -> ElevationScan
 where
-    D: ElectronDensity + ?Sized,
-    B: MagneticField + ?Sized,
-    C: CollisionFrequency + ?Sized,
+    D: ElectronDensity + Sync + ?Sized,
+    B: MagneticField + Sync + ?Sized,
+    C: CollisionFrequency + Sync + ?Sized,
 {
     let az0 = bearing(from, to);
     let (e0, e1, de) = (
@@ -540,19 +572,30 @@ where
         config.elev_max.get(),
         config.elev_step.get(),
     );
-    let mut points = Vec::new();
+    // The elevations are enumerated by the same accumulation the engine's own
+    // scan uses, so the values handed back are the ones its narrowed re-scan
+    // would produce; only the tracing of them is fanned out. Rays are entirely
+    // independent - the tracer holds no mutable state - and `map` preserves
+    // input order, so the scan is bit-for-bit what the serial loop produced.
+    let mut elevations = Vec::new();
     let mut e = e0;
     while e <= e1 {
-        let along = match tracer.trace(from, Radians::new(e), az0) {
-            Ok(res) if res.outcome == Outcome::Landed => {
-                Some(track_errors(from, az0, &res.end).0.get())
-            }
-            Ok(_) | Err(_) => None,
-        };
-        points.push((e, along));
+        elevations.push(e);
         e += de;
     }
-    ElevationScan { points, step: de }
+    let points = elevations
+        .par_iter()
+        .map(|&e| {
+            let along = match tracer.trace(from, Radians::new(e), az0) {
+                Ok(res) if res.outcome == Outcome::Landed => {
+                    Some(track_errors(from, az0, &res.end).0.get())
+                }
+                Ok(_) | Err(_) => None,
+            };
+            (e, along)
+        })
+        .collect();
+    ElevationScan { points }
 }
 
 pub(super) fn homing_config(use_field: bool) -> HomingConfig {
@@ -763,30 +806,48 @@ pub(super) fn near_miss_sweep<D, B, C>(
     notes: &mut Vec<String>,
 ) -> Vec<NearMiss>
 where
-    D: ElectronDensity + ?Sized,
-    B: MagneticField + ?Sized,
-    C: CollisionFrequency + ?Sized,
+    D: ElectronDensity + Sync + ?Sized,
+    B: MagneticField + Sync + ?Sized,
+    C: CollisionFrequency + Sync + ?Sized,
 {
     // The sweep itself does not depend on the hop count - only the target range
     // each landing is measured against does - so it is traced once and then
     // reduced per hop count, instead of once per hop count as it used to be.
-    let mut swept: Vec<(f64, Option<f64>)> = Vec::new();
+    let mut elevations = Vec::new();
     let mut elev = 3.0_f64;
     while elev <= 88.0 {
-        match tracer.trace(tx, Radians::from_degrees(elev), brng) {
-            Ok(res) => {
-                let landed = res.outcome == Outcome::Landed;
-                let range_km = central_angle(tx, &res.end).get() * EARTH_RADIUS_M / 1e3;
-                swept.push((elev, landed.then_some(range_km)));
-            }
-            Err(e) => {
-                let msg = format!("{} mode, sweep elev {elev:.1} deg: {e}", mode_label(mode));
+        elevations.push(elev);
+        elev += 1.0;
+    }
+    // Independent rays, fanned out and folded back in elevation order so both
+    // the sweep and its diagnostics are what the serial loop produced.
+    let traced: Vec<(f64, Result<Option<f64>, String>)> = elevations
+        .par_iter()
+        .map(|&elev| {
+            let outcome = match tracer.trace(tx, Radians::from_degrees(elev), brng) {
+                Ok(res) => {
+                    let landed = res.outcome == Outcome::Landed;
+                    let range_km = central_angle(tx, &res.end).get() * EARTH_RADIUS_M / 1e3;
+                    Ok(landed.then_some(range_km))
+                }
+                Err(e) => Err(format!(
+                    "{} mode, sweep elev {elev:.1} deg: {e}",
+                    mode_label(mode)
+                )),
+            };
+            (elev, outcome)
+        })
+        .collect();
+    let mut swept: Vec<(f64, Option<f64>)> = Vec::new();
+    for (elev, outcome) in traced {
+        match outcome {
+            Ok(range) => swept.push((elev, range)),
+            Err(msg) => {
                 if !errors.contains(&msg) {
                     errors.push(msg);
                 }
             }
         }
-        elev += 1.0;
     }
 
     let mut out = Vec::new();

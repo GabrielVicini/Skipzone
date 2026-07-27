@@ -34,6 +34,8 @@
 //! near-field Sommerfeld ground loss, terrain, or nearby structures. Checked
 //! against NEC-4 it runs 0.3-0.6 dB optimistic; see [`image`] for the numbers.
 
+use rayon::prelude::*;
+
 mod image;
 mod table;
 
@@ -70,8 +72,12 @@ pub struct GainCurve {
 
 impl GainCurve {
     /// Build from a closure taking elevation in RADIANS and returning dBi.
-    pub fn from_fn(label: impl Into<String>, f: impl Fn(f64) -> f64) -> Self {
+    /// Samples are independent, and each costs an azimuth quadrature, so they
+    /// are evaluated across the pool. `map` keeps input order, so the curve is
+    /// bit-for-bit the one the serial loop produced.
+    pub fn from_fn(label: impl Into<String>, f: impl Fn(f64) -> f64 + Sync) -> Self {
         let samples = (0..CURVE_SAMPLES)
+            .into_par_iter()
             .map(|i| {
                 #[allow(clippy::cast_precision_loss)]
                 let deg = i as f64 * CURVE_STEP_DEG;

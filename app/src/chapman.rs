@@ -46,6 +46,17 @@ const TWO_OVER_SQRT_PI: f64 = std::f64::consts::FRAC_2_SQRT_PI;
 /// sqrt(pi).
 const SQRT_PI: f64 = 1.772_453_850_905_516;
 
+/// Levels of the A&S 7.1.14 continued fraction evaluated in [`erfcx`]. Kept at
+/// the 48 the function was written with: the recurrence changed, the truncation
+/// depth did not.
+const CF_DEPTH: u32 = 48;
+/// Rescale the continuants once one exceeds this, so the recurrence cannot
+/// overflow for a large argument.
+const CF_RESCALE_ABOVE: f64 = 1e250;
+/// The rescale factor, 2^-60 written exactly. A power of two, so applying it
+/// only shifts exponents and leaves every mantissa untouched.
+const CF_RESCALE: f64 = 1.0 / 1_152_921_504_606_846_976.0;
+
 /// Scaled complementary error function `erfcx(t) = e^{t^2} erfc(t)` for
 /// `t >= 0`. Stable everywhere (no `e^{t^2}` overflow): series below 2, the
 /// A&S 7.1.14 continued fraction above. See derivation section 3.
@@ -74,11 +85,39 @@ pub fn erfcx(t: f64) -> f64 {
         (t * t).exp() * (1.0 - erf)
     } else {
         // sqrt(pi) erfcx(t) = 1/(t + (1/2)/(t + (2/2)/(t + (3/2)/(t + ...)))).
-        let mut frac = 0.0_f64;
-        for k in (1..=48).rev() {
-            frac = 0.5 * f64::from(k) / (t + frac);
+        //
+        // Evaluated by the continuant (forward) recurrence
+        //   A_k = t A_{k-1} + (k/2) A_{k-2},   B_k likewise,
+        // whose ratio A_n/B_n is the n-th convergent - the SAME continued
+        // fraction truncated at the SAME depth as the backward recurrence this
+        // replaces. The backward form spends one division per level, 48 of them
+        // in a single dependency chain at ~14 cycles each, and this runs twice
+        // per density sample (once for D, once for E) on the ray equations' hot
+        // path. The forward form is multiply-add only, with one division at the
+        // end. Every term is positive, so there is no cancellation and the
+        // accumulated error stays at the 1e-15 level; `erfcx_forward_recurrence_
+        // matches_backward` pins it against the backward form.
+        let (mut a_prev, mut a) = (1.0_f64, t);
+        let (mut b_prev, mut b) = (0.0_f64, 1.0_f64);
+        for k in 1..=CF_DEPTH {
+            let ak = 0.5 * f64::from(k);
+            let (a_next, b_next) = (t * a + ak * a_prev, t * b + ak * b_prev);
+            a_prev = a;
+            a = a_next;
+            b_prev = b;
+            b = b_next;
+            // The continuants grow like t^k. Nothing this crate produces gets
+            // near overflow (t <= ~24 here, so A <= 24^48 ~ 1e66), but `erfcx`
+            // is public, so rescale defensively. The factor is an exact power
+            // of two, making the rescale exact: it changes no digit of A/B.
+            if a > CF_RESCALE_ABOVE {
+                a *= CF_RESCALE;
+                a_prev *= CF_RESCALE;
+                b *= CF_RESCALE;
+                b_prev *= CF_RESCALE;
+            }
         }
-        1.0 / (SQRT_PI * (t + frac))
+        b / (SQRT_PI * a)
     }
 }
 
@@ -412,6 +451,48 @@ mod tests {
 
     fn point(r: f64, colat: f64, lon: f64) -> SphericalPoint {
         SphericalPoint::new(Meters::new(r), Radians::new(colat), Radians::new(lon))
+    }
+
+    /// The forward (continuant) recurrence evaluates the SAME continued
+    /// fraction, to the same depth, as the backward one it replaced. It is not
+    /// bit-identical - the operations differ - so this pins the agreement
+    /// instead, densely across the branch and out past the largest `t` any
+    /// layer in this crate can produce (`sqrt(X/2)` with `X = r_peak/H`, about
+    /// 23 for the D region). Every term of both recurrences is positive, so
+    /// there is no cancellation and the two stay within a few 1e-16.
+    #[test]
+    fn erfcx_forward_recurrence_matches_backward() {
+        fn backward(t: f64) -> f64 {
+            let mut frac = 0.0_f64;
+            for k in (1..=CF_DEPTH).rev() {
+                frac = 0.5 * f64::from(k) / (t + frac);
+            }
+            1.0 / (SQRT_PI * (t + frac))
+        }
+        let (lo, hi, n) = (3.0_f64, 60.0_f64, 500_000);
+        let mut worst = 0.0_f64;
+        for i in 0..=n {
+            let t = lo + (hi - lo) * f64::from(i) / f64::from(n);
+            let (got, want) = (erfcx(t), backward(t));
+            worst = worst.max(((got - want) / want).abs());
+        }
+        assert!(worst < 1e-14, "worst relative disagreement {worst:e}");
+    }
+
+    /// The rescale guard keeps a large argument finite and accurate rather
+    /// than letting the continuants overflow to inf/inf.
+    #[test]
+    fn erfcx_is_stable_for_large_arguments() {
+        for t in [50.0_f64, 500.0, 5e3, 1e5, 1e8] {
+            let got = erfcx(t);
+            // erfcx(t) -> 1/(t sqrt(pi)) as t -> infinity.
+            let asymptotic = 1.0 / (t * std::f64::consts::PI.sqrt());
+            assert!(got.is_finite(), "erfcx({t}) = {got}");
+            assert!(
+                ((got - asymptotic) / asymptotic).abs() < 1e-3,
+                "erfcx({t}) = {got}, asymptote {asymptotic}"
+            );
+        }
     }
 
     /// erfcx against reference values (Abramowitz & Stegun / direct e^{t^2}
