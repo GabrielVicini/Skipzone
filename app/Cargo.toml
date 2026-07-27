@@ -28,6 +28,14 @@ shapefile = { version = "0.9.0", default-features = false }
 # forwards straight to std everywhere else, so the native timings are unchanged.
 web-time = "1"
 
+# HTTPS for the validation harness only: it fetches live WSPR spots and the
+# current solar indices. Nothing in the GUI or the solver touches the network,
+# and the engine crate never sees this - the workspace split exists so that an
+# HTTP dependency here cannot reach it. Pure-Rust TLS so there is no system
+# library to install, matching the crate's portability requirement.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
 # The web proof of concept. None of this is pulled into a native build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

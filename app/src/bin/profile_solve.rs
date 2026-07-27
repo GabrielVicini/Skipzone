@@ -33,6 +33,7 @@ fn counts() -> (u64, u64, u64) {
     )
 }
 
+#[allow(dead_code)] // kept alongside the field/collision counters for symmetry
 struct CountingDensity<'a>(&'a (dyn ElectronDensity + Sync));
 impl ElectronDensity for CountingDensity<'_> {
     fn sample(&self, p: &SphericalPoint) -> DensitySample {

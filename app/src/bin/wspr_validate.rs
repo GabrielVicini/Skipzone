@@ -142,6 +142,8 @@ fn score(spot: &WsprSpot, base: &Inputs) -> SpotResult {
             modelled_snr_db: None,
             error_db: None,
             hops: 0,
+            assumed_gain_db: None,
+            noise_dbm: None,
         };
     };
     let out = solve::solve(&inputs, &a, &models);
@@ -159,6 +161,8 @@ fn score(spot: &WsprSpot, base: &Inputs) -> SpotResult {
         modelled_snr_db: best.map(|s| s.link.snr_db),
         error_db: best.map(|s| s.link.snr_db - spot.snr_db),
         hops: best.map_or(0, |s| s.hops),
+        assumed_gain_db: best.map(|s| s.total_gain_db),
+        noise_dbm: Some(out.noise.power_dbm),
     }
 }
 
