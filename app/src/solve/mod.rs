@@ -60,7 +60,6 @@ pub fn best_including_es(out: &SolveOutcome) -> Option<&Solution> {
 
 use skipzone::density::ElectronDensity;
 use skipzone::geo::{bearing, central_angle};
-use skipzone::homing::{Homing, HomingError};
 use skipzone::magnetoionic::Mode;
 use skipzone::units::Radians;
 
@@ -71,7 +70,8 @@ use crate::scenario::{
 };
 
 use tracing::{
-    GroundModel, StepTuning, assemble, homing_config, make_tracer, near_miss_sweep, propagate,
+    GroundModel, StepTuning, assemble, home_terminal, homing_config, make_tracer, near_miss_sweep,
+    propagate, scan_elevations, terminal_tolerance_m,
 };
 
 /// What one pass over the homing produced, per layer.
@@ -84,6 +84,23 @@ struct StackOutcome {
     /// separately so a numerical failure is never reported to the operator as
     /// a physical "nothing reflects" - the two used to be indistinguishable.
     saw_trace_failure: bool,
+}
+
+/// Two launches this close in elevation are the same ray found twice, not
+/// multipath: real multipath branches (low ray / high ray, E / F2) are degrees
+/// apart, and the terminal homing converges to well under a milli-degree.
+const SAME_RAY_ELEV_DEG: f64 = 1e-3;
+
+/// Do these two solutions describe the same propagation mode?
+fn is_same_ray(a: &Solution, b: &Solution) -> bool {
+    a.mode == b.mode
+        && a.hops == b.hops
+        && match (a.hop_details.first(), b.hop_details.first()) {
+            (Some(x), Some(y)) => {
+                (x.launch_elev_deg - y.launch_elev_deg).abs() < SAME_RAY_ELEV_DEG
+            }
+            _ => false,
+        }
 }
 
 /// Attribute a deterministic solution to a layer from the apex altitude the
@@ -108,6 +125,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
 
     let mut errors = Vec::new();
     let f_hz = inputs.freq_mhz * 1e6;
+    let terminal_tol = terminal_tolerance_m(great_circle_km);
     let ground = if inputs.ground_type.is_auto() {
         GroundModel::Auto {
             land_fallback: inputs.ground_land_fallback,
@@ -179,60 +197,108 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                 a,
                 tuning,
             );
-            let homing = Homing {
-                tracer: &tracer,
-                config: homing_config(inputs.use_field),
-            };
+            let base_config = homing_config(inputs.use_field);
+            // The elevation fan, traced ONCE for this (mode, stack), on its own
+            // tracer at the bracketing tolerance. Every hop count below brackets
+            // against the same rays; see `ElevationScan` and `StepTuning::for_scan`.
+            let scan_tracer = make_tracer(
+                density,
+                models.field_dyn(),
+                models.collisions_dyn(),
+                inputs.freq_mhz,
+                mode,
+                a,
+                tuning.for_scan(),
+            );
+            let scan = scan_elevations(&scan_tracer, &tx, &rx, &base_config);
+
             for hops in 1..=inputs.max_hops {
                 let target = if hops == 1 {
                     rx
                 } else {
                     destination_point(&tx, brng, Radians::new(total_arc.get() / f64::from(hops)))
                 };
-                match homing.home_scan(&tx, &target) {
-                    Ok(rays) => {
-                        for ray in rays {
-                            let (details, ends, note) = propagate(
-                                &tracer,
-                                &tx,
-                                ray.elevation,
-                                ray.azimuth,
-                                hops,
-                                f_hz,
-                                ground,
-                            );
-                            if details.is_empty() {
-                                if let Some(n) = note {
-                                    errors.push(format!(
-                                        "{} mode, {hops} hop(s): {n}",
-                                        mode_label(mode)
-                                    ));
-                                }
-                                continue;
-                            }
-                            let apex_km = details.first().map_or(f64::NAN, |h| h.apex_alt_km);
-                            solutions.push(assemble(
-                                mode,
-                                classify_deterministic(apex_km),
-                                1.0,
-                                hops,
-                                details,
-                                &ends,
-                                &rx,
-                                ray.miss_m,
-                                note,
-                                inputs.freq_mhz,
-                                link_settings,
-                            ));
-                        }
-                    }
+                // The scan brackets against ONE hop of 1/N of the arc: that is
+                // what makes it a cheap way to enumerate the distinct rays
+                // (low ray, high ray, E and F2 branches) that could serve this
+                // hop count. Which of them actually reaches the receiver, and at
+                // what launch angle, is settled by `home_terminal`.
+                let brackets = scan.brackets(central_angle(&tx, &target).get());
+                if brackets.is_empty() {
                     // Recorded rather than swallowed: "rays reflect but none
                     // lands here" is a different answer from "nothing reflects",
                     // and the per-layer report has to be able to say which.
-                    Err(HomingError::NoBracket { .. }) => saw_no_bracket = true,
-                    Err(e) => {
-                        saw_trace_failure = true;
-                        errors.push(format!("{} mode, {hops} hop(s): {e}", mode_label(mode)));
+                    saw_no_bracket = true;
+                    continue;
+                }
+                // Each bracket is one candidate ray. The engine's single-hop
+                // bisection is NOT run on it: what has to be driven to zero is
+                // the error at the END of the whole N-hop path, not at the end
+                // of the first hop, so `home_terminal` refines the bracket
+                // directly against that. Skipping the single-hop refinement
+                // also drops its failure mode - on a caustic bracket it spends
+                // its full 25-iteration budget and then reports no convergence,
+                // which cost real time and lost the hop count entirely.
+                for bracket in brackets {
+                    let Some(homed) = home_terminal(
+                        &tracer,
+                        &tx,
+                        &rx,
+                        hops,
+                        bracket,
+                        (base_config.elev_min.get(), base_config.elev_max.get()),
+                        terminal_tol,
+                    ) else {
+                        saw_no_bracket = true;
+                        continue;
+                    };
+                    let (details, ends, note) = propagate(
+                        &tracer,
+                        &tx,
+                        homed.elevation,
+                        homed.azimuth,
+                        hops,
+                        f_hz,
+                        ground,
+                    );
+                    // A path that did not complete is not a path. `propagate`
+                    // reports a note exactly when a hop escaped through the top
+                    // or the trace failed, i.e. when the ray never came back
+                    // down to make the next reflection - so the remaining hops
+                    // never happened and the ray never reached the receiver.
+                    // Such a path used to be pushed as a solution anyway, on the
+                    // grounds that it had SOME hop detail to show, and was drawn
+                    // on the map as a line shooting past the receiver and out
+                    // the far side of the world.
+                    if let Some(n) = &note {
+                        errors.push(format!("{} mode, {hops} hop(s): {n}", mode_label(mode)));
+                        continue;
+                    }
+                    let apex_km = details.first().map_or(f64::NAN, |h| h.apex_alt_km);
+                    let candidate = assemble(
+                        mode,
+                        classify_deterministic(apex_km),
+                        1.0,
+                        hops,
+                        details,
+                        &ends,
+                        &rx,
+                        homed.miss_m,
+                        note,
+                        inputs.freq_mhz,
+                        link_settings,
+                    );
+                    // Two brackets of the equal-hop scan can converge onto the
+                    // same ray once the terminal point is what is being homed,
+                    // because the scan brackets a quantity the refinement no
+                    // longer targets. That is one propagation mode, so it is
+                    // listed once - keeping whichever landed closer.
+                    match solutions.iter_mut().find(|s| is_same_ray(s, &candidate)) {
+                        Some(existing) if candidate.homing_miss_m < existing.homing_miss_m => {
+                            *existing = candidate;
+                        }
+                        Some(_) => {}
+                        None => solutions.push(candidate),
                     }
                 }
             }
@@ -925,27 +991,53 @@ mod tests {
             "10.1 MHz should still reach F2"
         );
 
-        // The low band does not - and, crucially, it says WHY. The report must
-        // read "no bracketing elevation", i.e. rays reflect but not to here,
-        // NOT "nothing arrives at all". That distinction is item 5's whole
-        // purpose and this is the case that motivates it.
-        let f2 = low
-            .mode_reports
-            .iter()
-            .find(|r| r.layer == LayerMode::F2)
-            .expect("an F2 report");
-        assert_ne!(
-            f2.status,
-            LayerStatus::Solved,
-            "7.1 MHz should be screened off F2 at midday"
+        // Screening is a statement about LAUNCH ANGLE, and that is what this
+        // asserts. foE sec(i) at the E layer lets 10.1 MHz through at a shallow
+        // incidence but not 7.1 MHz, so the low band can only reach F2 by going
+        // over the E layer steeply - and a steep multi-hop path is absorbed to
+        // death on the way. The observable is therefore: no shallow F2 path at
+        // 7.1 MHz, a shallow one at 10.1 MHz, and an F2 SNR at 7.1 MHz that is
+        // nowhere near usable.
+        //
+        // This used to assert `LayerStatus::NoBracket` at 7.1 MHz instead. That
+        // was pinning a NUMERICAL failure as a physical result: the steep F2
+        // paths were always there, and the single-hop bisection simply failed
+        // to converge onto them, which is exactly the confusion `LayerStatus`
+        // exists to prevent.
+        let shallowest = |o: &SolveOutcome| {
+            o.solutions
+                .iter()
+                .filter(|s| s.layer == LayerMode::F2)
+                .filter_map(|s| s.hop_details.first())
+                .map(|h| h.launch_elev_deg)
+                .fold(f64::INFINITY, f64::min)
+        };
+        let (low_f2, high_f2) = (shallowest(&low), shallowest(&high));
+        assert!(
+            high_f2 < 25.0,
+            "10.1 MHz should get a shallow F2 path through the E layer, got {high_f2} deg"
         );
-        assert_eq!(
-            f2.status,
-            LayerStatus::NoBracket,
-            "screening is a skip-zone answer, not a penetration one: {}",
-            f2.note
+        assert!(
+            low_f2 > 30.0,
+            "7.1 MHz should be screened off every shallow F2 geometry, got {low_f2} deg"
         );
-        assert!(f2.note.contains("NOT the same as nothing arriving"));
+
+        let best_f2 = |o: &SolveOutcome| {
+            o.solutions
+                .iter()
+                .filter(|s| s.layer == LayerMode::F2)
+                .map(|s| s.link.snr_db)
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        let (low_snr, high_snr) = (best_f2(&low), best_f2(&high));
+        assert!(
+            low_snr < high_snr - 40.0,
+            "the screened band's only F2 route is the absorbed steep one:              7.1 MHz {low_snr:.1} dB vs 10.1 MHz {high_snr:.1} dB"
+        );
+        assert!(
+            low_snr < base.snr_threshold_db,
+            "7.1 MHz F2 must not be usable at midday, got {low_snr:.1} dB"
+        );
     }
 
     /// Auto-detect must classify each bounce from where it actually lands, and
