@@ -203,6 +203,16 @@ pub struct SpotResult {
     pub es: Option<(f64, f64)>,
     /// The layer behind `modelled_snr_db`.
     pub layer: Option<&'static str>,
+    /// Combined antenna gain the model credited this path with, dB (both ends
+    /// summed, read at the launch and arrival elevations the ray actually
+    /// used). Carried because it is an ASSUMPTION, not a measurement - the spot
+    /// says nothing about either station's antenna - and a report that quotes
+    /// a bias without also quoting the gain it handed itself is not showing
+    /// where that bias came from.
+    pub assumed_gain_db: Option<f64>,
+    /// Noise floor the model scored against, dBm. Also an assumption: the
+    /// receiver's noise environment is chosen, not known.
+    pub noise_dbm: Option<f64>,
     /// Best modelled SNR of any kind, dB; `None` if the path did not close.
     pub modelled_snr_db: Option<f64>,
     /// `modelled - measured` [dB]; `None` if the path did not close. Positive
@@ -395,6 +405,8 @@ mod tests {
             modelled_snr_db: err.map(|e| e - 11.0),
             error_db: err,
             hops: 1,
+            assumed_gain_db: err.map(|_| 10.4),
+            noise_dbm: err.map(|_| -97.8),
         };
         let results = vec![
             make(Some(2.0), Some("F2")),

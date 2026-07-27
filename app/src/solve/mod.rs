@@ -788,11 +788,7 @@ mod tests {
     /// the solved absorption stay meaningfully non-zero.
     #[test]
     fn terminator_d_region_is_not_cut() {
-        use std::cmp::Ordering;
-
-use rayon::prelude::*;
-
-use skipzone::density::ElectronDensity;
+        use skipzone::density::ElectronDensity;
         use skipzone::geo::SphericalPoint;
         use skipzone::units::{Meters, Radians};
 

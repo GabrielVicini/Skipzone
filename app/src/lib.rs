@@ -38,10 +38,17 @@ pub mod compute;
 pub mod coverage;
 pub mod fof2;
 pub mod grid;
+/// Outbound HTTP, used only by the validation harnesses. Not built for the web
+/// target, which has no business making these requests.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod net;
 pub mod noise;
 pub mod scenario;
 pub mod solar;
 pub mod solve;
+/// Observed solar indices, fetched rather than assumed.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod spaceweather;
 pub mod sporadic_e;
 pub mod state;
 pub mod sweep;
@@ -52,3 +59,7 @@ pub mod ui;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 pub mod wspr;
+pub mod wspr_report;
+/// Live WSPR spot retrieval.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod wsprlive;
