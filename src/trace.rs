@@ -66,6 +66,21 @@ pub struct TraceConfig {
     /// Runaway guard; a multi-hop HF ray needs ~1e4 steps, so 5e5 means
     /// something is wrong.
     pub max_steps: usize,
+    /// Measure `hamiltonian_drift` along the ray.
+    ///
+    /// The drift is a pure DIAGNOSTIC: `H = 0` on the true trajectory, so
+    /// `max |H|` over the accepted steps reports how far the integrator has
+    /// wandered off shell. It is not fed back into the solution in any way.
+    ///
+    /// Measuring it costs one full evaluation of the density, field and
+    /// collision models per accepted step, on top of the six the
+    /// Dormand-Prince stages already need - measured at 1 in every 7.2
+    /// evaluations a trace performs, i.e. about 14 % of all model work. That is
+    /// worth paying on a ray whose numbers are going to be reported, and pure
+    /// waste on the hundreds of rays a homing search throws away. Callers that
+    /// are searching turn it off and get `hamiltonian_drift = 0.0`; callers
+    /// that report leave it on and get exactly the figure they always did.
+    pub measure_drift: bool,
 }
 
 impl TraceConfig {
@@ -79,6 +94,7 @@ impl TraceConfig {
             max_step: 25_000.0,
             min_step: 1e-3,
             max_steps: 500_000,
+            measure_drift: true,
         }
     }
 }
@@ -286,7 +302,9 @@ where
             y = y5;
             k1 = k7;
             h = h_next;
-            drift = drift.max(self.eqs.hamiltonian(&y)?.abs());
+            if self.config.measure_drift {
+                drift = drift.max(self.eqs.hamiltonian(&y)?.abs());
+            }
             observer(sigma, &y);
         }
     }

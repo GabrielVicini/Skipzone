@@ -58,6 +58,10 @@ pub fn best_including_es(out: &SolveOutcome) -> Option<&Solution> {
         .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
 }
 
+use std::cmp::Ordering;
+
+use rayon::prelude::*;
+
 use skipzone::density::ElectronDensity;
 use skipzone::geo::{bearing, central_angle};
 use skipzone::magnetoionic::Mode;
@@ -84,6 +88,21 @@ struct StackOutcome {
     /// separately so a numerical failure is never reported to the operator as
     /// a physical "nothing reflects" - the two used to be indistinguishable.
     saw_trace_failure: bool,
+    /// Diagnostics from this pass, kept per outcome so that the modes can be
+    /// run in parallel and their messages still merged in a fixed order.
+    errors: Vec<String>,
+}
+
+/// What one candidate ray produced. Carried out of the parallel map so the
+/// fold back into the solution and error lists happens in a fixed order.
+enum Candidate {
+    /// Boxed because a `Solution` carries every hop's polyline, which would
+    /// otherwise set the size of the enum at every use site.
+    Solved(Box<Solution>),
+    /// Nothing from this bracket reaches the receiver at this hop count.
+    NoBracket,
+    /// The propagation itself failed, which is not a physical answer.
+    Failed(String),
 }
 
 /// Two launches this close in elevation are the same ray found twice, not
@@ -180,14 +199,21 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     // it now runs twice: once against the deterministic layers, and once with a
     // sporadic-E sheet added. Two passes, not one merged stack, is what keeps
     // the probabilistic answer separable from the deterministic one.
-    let run_stack = |density: &dyn ElectronDensity,
+    let run_stack = |density: &(dyn ElectronDensity + Sync),
                      tuning: StepTuning,
                      errors: &mut Vec<String>|
      -> StackOutcome {
+        // The two magnetoionic modes are separate rays through separate
+        // refractive indices with nothing shared but the read-only models, so
+        // they run side by side and are merged back in mode order.
+        let per_mode: Vec<StackOutcome> = modes
+            .par_iter()
+            .map(|&mode| {
         let mut solutions = Vec::new();
         let mut saw_no_bracket = false;
         let mut saw_trace_failure = false;
-        for &mode in modes {
+        let mut errors: Vec<String> = Vec::new();
+        {
             let tracer = make_tracer(
                 density,
                 models.field_dyn(),
@@ -196,6 +222,18 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                 mode,
                 a,
                 tuning,
+            );
+            // The search tracer: same tolerances as the reporting one, drift
+            // diagnostic off. Terminal homing runs hundreds of traces through
+            // it and reads only the landing point off each.
+            let search_tracer = make_tracer(
+                density,
+                models.field_dyn(),
+                models.collisions_dyn(),
+                inputs.freq_mhz,
+                mode,
+                a,
+                tuning.for_search(),
             );
             let base_config = homing_config(inputs.use_field);
             // The elevation fan, traced ONCE for this (mode, stack), on its own
@@ -212,6 +250,15 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
             );
             let scan = scan_elevations(&scan_tracer, &tx, &rx, &base_config);
 
+            // Every (hop count, bracket) pair is one independent candidate
+            // ray: its own terminal homing search and its own propagation, with
+            // nothing shared but the read-only models. They are enumerated
+            // first and then run across the pool, and the results are folded
+            // back IN ORDER, so the solution list and the error list come out
+            // the same whatever order the threads finish in. The parallelism
+            // seam stays outside the ODE loop, as the engine's own `trace_fan`
+            // does.
+            let mut work = Vec::new();
             for hops in 1..=inputs.max_hops {
                 let target = if hops == 1 {
                     rx
@@ -231,26 +278,33 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                     saw_no_bracket = true;
                     continue;
                 }
-                // Each bracket is one candidate ray. The engine's single-hop
-                // bisection is NOT run on it: what has to be driven to zero is
-                // the error at the END of the whole N-hop path, not at the end
-                // of the first hop, so `home_terminal` refines the bracket
-                // directly against that. Skipping the single-hop refinement
-                // also drops its failure mode - on a caustic bracket it spends
-                // its full 25-iteration budget and then reports no convergence,
-                // which cost real time and lost the hop count entirely.
                 for bracket in brackets {
+                    work.push((hops, bracket));
+                }
+            }
+
+            let limits = (base_config.elev_min.get(), base_config.elev_max.get());
+            let outcomes: Vec<Candidate> = work
+                .par_iter()
+                .map(|&(hops, bracket)| {
+                    // The search runs on the loose tracer. Nothing it computes
+                    // is reported: it returns a launch elevation, and the path
+                    // that gets measured is the one `propagate` traces at the
+                    // engine's own tolerance below. The acceptance test is
+                    // applied to THAT path's terminal miss rather than to the
+                    // search's estimate of it, so the guarantee - this ray ends
+                    // at the receiver - is made on the trajectory whose numbers
+                    // the operator actually sees.
                     let Some(homed) = home_terminal(
-                        &tracer,
+                        &search_tracer,
                         &tx,
                         &rx,
                         hops,
-                        bracket,
-                        (base_config.elev_min.get(), base_config.elev_max.get()),
+                        0.5 * (bracket.0 + bracket.1),
+                        limits,
                         terminal_tol,
                     ) else {
-                        saw_no_bracket = true;
-                        continue;
+                        return Candidate::NoBracket;
                     };
                     let (details, ends, note) = propagate(
                         &tracer,
@@ -271,11 +325,22 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                     // on the map as a line shooting past the receiver and out
                     // the far side of the world.
                     if let Some(n) = &note {
-                        errors.push(format!("{} mode, {hops} hop(s): {n}", mode_label(mode)));
-                        continue;
+                        return Candidate::Failed(format!(
+                            "{} mode, {hops} hop(s): {n}",
+                            mode_label(mode)
+                        ));
+                    }
+                    // The terminal miss of the REPORTED path, at the engine's
+                    // own tolerance. The search converged on a looser
+                    // integrator, so this re-measures rather than trusts it.
+                    let terminal_miss_m = ends.last().map_or(f64::INFINITY, |e| {
+                        central_angle(e, &rx).get() * EARTH_RADIUS_M
+                    });
+                    if terminal_miss_m.partial_cmp(&terminal_tol) != Some(Ordering::Less) {
+                        return Candidate::NoBracket;
                     }
                     let apex_km = details.first().map_or(f64::NAN, |h| h.apex_alt_km);
-                    let candidate = assemble(
+                    Candidate::Solved(Box::new(assemble(
                         mode,
                         classify_deterministic(apex_km),
                         1.0,
@@ -283,22 +348,37 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                         details,
                         &ends,
                         &rx,
-                        homed.miss_m,
+                        terminal_miss_m,
                         note,
                         inputs.freq_mhz,
                         link_settings,
-                    );
-                    // Two brackets of the equal-hop scan can converge onto the
-                    // same ray once the terminal point is what is being homed,
-                    // because the scan brackets a quantity the refinement no
-                    // longer targets. That is one propagation mode, so it is
-                    // listed once - keeping whichever landed closer.
-                    match solutions.iter_mut().find(|s| is_same_ray(s, &candidate)) {
-                        Some(existing) if candidate.homing_miss_m < existing.homing_miss_m => {
-                            *existing = candidate;
+                    )))
+                })
+                .collect();
+
+            for outcome in outcomes {
+                match outcome {
+                    Candidate::Solved(candidate) => {
+                        // Two brackets of the equal-hop scan can converge onto
+                        // the same ray once the terminal point is what is being
+                        // homed, because the scan brackets a quantity the
+                        // refinement no longer targets. That is one propagation
+                        // mode, so it is listed once - keeping whichever landed
+                        // closer.
+                        match solutions.iter_mut().find(|s| is_same_ray(s, &candidate)) {
+                            Some(existing)
+                                if candidate.homing_miss_m < existing.homing_miss_m =>
+                            {
+                                *existing = *candidate;
+                            }
+                            Some(_) => {}
+                            None => solutions.push(*candidate),
                         }
-                        Some(_) => {}
-                        None => solutions.push(candidate),
+                    }
+                    Candidate::NoBracket => saw_no_bracket = true,
+                    Candidate::Failed(msg) => {
+                        saw_trace_failure = true;
+                        errors.push(msg);
                     }
                 }
             }
@@ -307,10 +387,47 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
             solutions,
             saw_no_bracket,
             saw_trace_failure,
+            errors,
         }
+            })
+            .collect();
+
+        let mut merged = StackOutcome {
+            solutions: Vec::new(),
+            saw_no_bracket: false,
+            saw_trace_failure: false,
+            errors: Vec::new(),
+        };
+        for out in per_mode {
+            merged.solutions.extend(out.solutions);
+            merged.saw_no_bracket |= out.saw_no_bracket;
+            merged.saw_trace_failure |= out.saw_trace_failure;
+            errors.extend(out.errors);
+        }
+        merged
     };
 
-    let deterministic = run_stack(models.density_dyn(), StepTuning::DEFAULT, &mut errors);
+    // The two density stacks share nothing but the read-only models, so the
+    // deterministic pass and the sporadic-E pass run side by side. Their
+    // diagnostics stay in separate lists and are merged below in a fixed order,
+    // with the Es pass's messages tagged as they always were.
+    let es_tuning = StepTuning::for_thin_sheet(a.sporadic_e.semi_thickness_km * 1e3);
+    let (deterministic, es_pass) = rayon::join(
+        || {
+            let mut errs = Vec::new();
+            let out = run_stack(models.density_dyn(), StepTuning::DEFAULT, &mut errs);
+            (out, errs)
+        },
+        || {
+            models.density_with_es_dyn().map(|d| {
+                let mut errs = Vec::new();
+                let out = run_stack(d, es_tuning, &mut errs);
+                (out, errs)
+            })
+        },
+    );
+    let (deterministic, det_errors) = deterministic;
+    errors.extend(det_errors);
     let mut solutions = deterministic.solutions;
 
     // The probabilistic pass. Only reflections that actually turn in the Es
@@ -321,11 +438,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     let mut es_solutions = Vec::new();
     let mut es_saw_no_bracket = false;
     let mut es_saw_trace_failure = false;
-    if let Some(es_density) = models.density_with_es_dyn() {
-        let mut es_errors = Vec::new();
-        // The thin-sheet step control; see `StepTuning`.
-        let tuning = StepTuning::for_thin_sheet(a.sporadic_e.semi_thickness_km * 1e3);
-        let out = run_stack(es_density, tuning, &mut es_errors);
+    if let Some((out, es_errors)) = es_pass {
         es_saw_no_bracket = out.saw_no_bracket;
         es_saw_trace_failure = out.saw_trace_failure;
         for mut s in out.solutions {
@@ -675,7 +788,11 @@ mod tests {
     /// the solved absorption stay meaningfully non-zero.
     #[test]
     fn terminator_d_region_is_not_cut() {
-        use skipzone::density::ElectronDensity;
+        use std::cmp::Ordering;
+
+use rayon::prelude::*;
+
+use skipzone::density::ElectronDensity;
         use skipzone::geo::SphericalPoint;
         use skipzone::units::{Meters, Radians};
 

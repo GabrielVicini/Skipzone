@@ -459,25 +459,25 @@ pub struct Models {
 impl Models {
     /// Trait-object views, so the tracer can be built uniformly whether or not
     /// a magnetic field is enabled (the engine's generics are `?Sized`).
-    pub fn density_dyn(&self) -> &dyn ElectronDensity {
+    pub fn density_dyn(&self) -> &(dyn ElectronDensity + Sync) {
         &self.density
     }
 
     /// The Es-bearing stack, when there is one.
-    pub fn density_with_es_dyn(&self) -> Option<&dyn ElectronDensity> {
+    pub fn density_with_es_dyn(&self) -> Option<&(dyn ElectronDensity + Sync)> {
         self.density_with_es
             .as_ref()
-            .map(|d| d as &dyn ElectronDensity)
+            .map(|d| d as &(dyn ElectronDensity + Sync))
     }
 
-    pub fn field_dyn(&self) -> &dyn MagneticField {
+    pub fn field_dyn(&self) -> &(dyn MagneticField + Sync) {
         match &self.field {
             Some(igrf) => igrf,
             None => &skipzone::mag::ZeroField,
         }
     }
 
-    pub fn collisions_dyn(&self) -> &dyn CollisionFrequency {
+    pub fn collisions_dyn(&self) -> &(dyn CollisionFrequency + Sync) {
         &self.collisions
     }
 }

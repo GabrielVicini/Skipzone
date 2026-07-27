@@ -212,6 +212,10 @@ impl MagneticField for IgrfModel {
             sm[m] = sm[m - 1] * cp + cm[m - 1] * sp;
         }
 
+        // sin(theta) is loop-invariant; its reciprocal is formed once so the
+        // B_phi terms multiply instead of dividing, 273 divisions per call.
+        let inv_st = 1.0 / st;
+        let inv_st2 = inv_st * inv_st;
         let ar = IGRF_REFERENCE_RADIUS / r;
         let mut b = [0.0; 3];
         let mut db = [[0.0; 3]; 3];
@@ -248,11 +252,11 @@ impl MagneticField for IgrfModel {
                 db[1][2] += rn * mf * o * dp;
 
                 if m > 0 {
-                    let pos = pp / st;
+                    let pos = pp * inv_st;
                     let bp_t = rn * mf * o * pos;
                     b[2] += bp_t;
                     db[2][0] += dfr * bp_t;
-                    db[2][1] += rn * mf * o * (dp / st - pp * ct / (st * st));
+                    db[2][1] += rn * mf * o * (dp * inv_st - pp * ct * inv_st2);
                     db[2][2] += rn * mf * mf * e * pos;
                 }
             }

@@ -128,25 +128,60 @@ fn main() {
     for (name, inputs) in scenarios() {
         let a = scenario::resolve(&inputs);
         let models = scenario::build_models(&inputs, &a).expect("models");
-        let before = counts();
-        let t = Instant::now();
-        let out = skipzone_app::solve::solve(&inputs, &a, &models);
-        let el = t.elapsed();
-        let after = counts();
+        // Repeat and report the median: the first solve in a process pays for
+        // the rayon pool's threads being created.
+        let mut runs = Vec::new();
+        let mut out = skipzone_app::solve::solve(&inputs, &a, &models);
+        for _ in 0..7 {
+            let t = Instant::now();
+            out = skipzone_app::solve::solve(&inputs, &a, &models);
+            runs.push(t.elapsed().as_secs_f64() * 1e3);
+        }
+        runs.sort_by(f64::total_cmp);
         println!(
-            "  {:<48} {:>8.3} s   solutions {}  es {}  near-miss {}  density evals {}",
+            "  {:<44} {:>8.1} ms  (min {:>7.1}, max {:>7.1})  solutions {}  es {}  near-miss {}",
             name,
-            el.as_secs_f64(),
+            runs[runs.len() / 2],
+            runs[0],
+            runs[runs.len() - 1],
             out.solutions.len(),
             out.es_solutions.len(),
             out.near_misses.len(),
-            after.0 - before.0
         );
     }
 
     let inputs = Inputs::default();
     let a = scenario::resolve(&inputs);
     let models = scenario::build_models(&inputs, &a).expect("models");
+
+    println!("\n== FIXED PER-SOLVE OVERHEAD (not ray tracing) ==");
+    {
+        use skipzone_app::antenna::Ground;
+        let f_hz = inputs.freq_mhz * 1e6;
+        let g = Ground::Lossy {
+            eps_r: 13.0,
+            sigma_s_per_m: 0.005,
+        };
+        let t = Instant::now();
+        let mut guard = 0.0;
+        for _ in 0..20 {
+            guard += inputs.tx_antenna.curve(g, f_hz).gain_dbi(0.3);
+            guard += inputs.rx_antenna.curve(g, f_hz).gain_dbi(0.3);
+        }
+        println!(
+            "  both antenna curves   {:>8.3} ms   (guard {guard:.3})",
+            t.elapsed().as_secs_f64() * 1e3 / 20.0
+        );
+        let t = Instant::now();
+        for _ in 0..20 {
+            let _ = scenario::build_models(&inputs, &a);
+        }
+        println!(
+            "  build_models          {:>8.3} ms",
+            t.elapsed().as_secs_f64() * 1e3 / 20.0
+        );
+    }
+
     println!(
         "\nes_solved = {}, max_hops = {}, use_field = {}",
         a.es_solved, inputs.max_hops, inputs.use_field
@@ -315,3 +350,7 @@ fn main() {
         77 * (inputs.max_hops - 1)
     );
 }
+
+// Appended probe: fixed per-solve overhead that is not ray tracing.
+#[allow(dead_code)]
+fn probe_overhead() {}

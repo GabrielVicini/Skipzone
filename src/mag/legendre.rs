@@ -6,6 +6,8 @@
 //! callers dividing by sin(theta) (the B_phi terms) must stay away from the
 //! coordinate poles.
 
+use std::sync::LazyLock;
+
 /// Maximum spherical-harmonic degree carried by the crate (IGRF-14 truncates
 /// at 13; nothing here needs more).
 pub const NMAX: usize = 13;
@@ -27,8 +29,65 @@ pub struct SchmidtTable {
     pub d2p: [f64; TABLE_LEN],
 }
 
-#[must_use]
+/// Recurrence coefficients, which depend only on the degree and order.
+///
+/// These used to be recomputed inside [`schmidt`] on every call: 12 square
+/// roots on the diagonal and two more for each of the 91 (n, m) pairs of the
+/// vertical recurrence, 194 in all. `schmidt` runs once per field evaluation
+/// and the field is evaluated ~7 times per accepted integrator step, so that
+/// was 194 square roots of compile-time constants per step of every ray in
+/// every trace. Hoisting them changes no arithmetic - `sqrt` is exactly
+/// rounded, so a value computed once is the same f64 the loop was recomputing -
+/// and `schmidt_matches_recomputed_coefficients` pins that to the last bit.
+struct Coefficients {
+    /// `alpha_m` of the diagonal recurrence, indexed by m.
+    alpha: [f64; NMAX + 1],
+    /// `(2n-1)`, `beta` and the RECIPROCAL of `gamma` for the vertical
+    /// recurrence, at `idx(n, m)`. The reciprocal is stored rather than
+    /// `gamma` itself so the recurrence multiplies where it used to divide:
+    /// three divisions per (n, m) pair, 273 per call, on the critical path of
+    /// every field evaluation. This is the one place in the hoist that is not
+    /// bit-identical - `v * (1/gamma)` carries two roundings where `v / gamma`
+    /// carries one, so results move by at most an ulp per term.
+    a: [f64; TABLE_LEN],
+    beta: [f64; TABLE_LEN],
+    inv_gamma: [f64; TABLE_LEN],
+}
+
 #[allow(clippy::cast_precision_loss)] // n, m <= 13: exact in f64
+fn coefficients() -> Coefficients {
+    let mut c = Coefficients {
+        alpha: [0.0; NMAX + 1],
+        a: [0.0; TABLE_LEN],
+        beta: [0.0; TABLE_LEN],
+        inv_gamma: [0.0; TABLE_LEN],
+    };
+    for m in 1..=NMAX {
+        c.alpha[m] = if m == 1 {
+            1.0
+        } else {
+            ((2 * m - 1) as f64 / (2 * m) as f64).sqrt()
+        };
+    }
+    for m in 0..=NMAX {
+        for n in (m + 1)..=NMAX {
+            let i = idx(n, m);
+            c.a[i] = (2 * n - 1) as f64;
+            c.beta[i] = (((n - 1) * (n - 1)) as f64 - (m * m) as f64).sqrt();
+            c.inv_gamma[i] = 1.0 / ((n * n - m * m) as f64).sqrt();
+        }
+    }
+    c
+}
+
+/// Built on first use rather than as a `const`, deliberately: the values must
+/// be the ones `f64::sqrt` returns, and a `const`-evaluable Newton iteration
+/// lands a ulp away from correctly-rounded on at least one of them (alpha_10).
+/// One relaxed atomic load per `schmidt` call is nothing against the ~190
+/// square roots it removes.
+static COEFFS: LazyLock<Coefficients> = LazyLock::new(coefficients);
+
+#[must_use]
 pub fn schmidt(theta: f64) -> SchmidtTable {
     let mut t = SchmidtTable {
         p: [0.0; TABLE_LEN],
@@ -36,16 +95,13 @@ pub fn schmidt(theta: f64) -> SchmidtTable {
         d2p: [0.0; TABLE_LEN],
     };
     let (s, x) = theta.sin_cos();
+    let c = &*COEFFS;
 
     t.p[idx(0, 0)] = 1.0;
     // Diagonal: S_m^m = alpha_m sin(theta) S_{m-1}^{m-1}, alpha_1 = 1,
     // alpha_m = sqrt((2m-1)/(2m)); derivatives from the product rule.
     for m in 1..=NMAX {
-        let alpha = if m == 1 {
-            1.0
-        } else {
-            ((2 * m - 1) as f64 / (2 * m) as f64).sqrt()
-        };
+        let alpha = c.alpha[m];
         let i = idx(m, m);
         let j = idx(m - 1, m - 1);
         t.p[i] = alpha * s * t.p[j];
@@ -57,10 +113,8 @@ pub fn schmidt(theta: f64) -> SchmidtTable {
     // S_{m-1}^m never contributes), gamma = sqrt(n^2 - m^2).
     for m in 0..=NMAX {
         for n in (m + 1)..=NMAX {
-            let a = (2 * n - 1) as f64;
-            let beta = (((n - 1) * (n - 1)) as f64 - (m * m) as f64).sqrt();
-            let gamma = ((n * n - m * m) as f64).sqrt();
             let i = idx(n, m);
+            let (a, beta, inv_gamma) = (c.a[i], c.beta[i], c.inv_gamma[i]);
             let j = idx(n - 1, m);
             let (pk, dpk, d2pk) = if n >= m + 2 {
                 let k = idx(n - 2, m);
@@ -68,9 +122,10 @@ pub fn schmidt(theta: f64) -> SchmidtTable {
             } else {
                 (0.0, 0.0, 0.0)
             };
-            t.p[i] = (a * x * t.p[j] - beta * pk) / gamma;
-            t.dp[i] = (a * (-s * t.p[j] + x * t.dp[j]) - beta * dpk) / gamma;
-            t.d2p[i] = (a * (-x * t.p[j] - 2.0 * s * t.dp[j] + x * t.d2p[j]) - beta * d2pk) / gamma;
+            t.p[i] = (a * x * t.p[j] - beta * pk) * inv_gamma;
+            t.dp[i] = (a * (-s * t.p[j] + x * t.dp[j]) - beta * dpk) * inv_gamma;
+            t.d2p[i] =
+                (a * (-x * t.p[j] - 2.0 * s * t.dp[j] + x * t.d2p[j]) - beta * d2pk) * inv_gamma;
         }
     }
     t
@@ -79,6 +134,38 @@ pub fn schmidt(theta: f64) -> SchmidtTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hoisted recurrence coefficients are the SAME f64 the hot loop used
+    /// to recompute. `sqrt` is exactly rounded, so this is an identity rather
+    /// than an approximation - but it is the identity the whole optimisation
+    /// rests on, so it is checked rather than assumed, `const_sqrt` against
+    /// `f64::sqrt` for every coefficient the table holds.
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn schmidt_matches_recomputed_coefficients() {
+        for m in 1..=NMAX {
+            let want = if m == 1 {
+                1.0
+            } else {
+                ((2 * m - 1) as f64 / (2 * m) as f64).sqrt()
+            };
+            assert_eq!(COEFFS.alpha[m].to_bits(), f64::to_bits(want), "alpha[{m}]");
+        }
+        for m in 0..=NMAX {
+            for n in (m + 1)..=NMAX {
+                let i = idx(n, m);
+                let beta = (((n - 1) * (n - 1)) as f64 - (m * m) as f64).sqrt();
+                let inv_gamma = 1.0 / ((n * n - m * m) as f64).sqrt();
+                assert_eq!(COEFFS.a[i].to_bits(), f64::to_bits((2 * n - 1) as f64));
+                assert_eq!(COEFFS.beta[i].to_bits(), beta.to_bits(), "beta({n},{m})");
+                assert_eq!(
+                    COEFFS.inv_gamma[i].to_bits(),
+                    inv_gamma.to_bits(),
+                    "inv_gamma({n},{m})"
+                );
+            }
+        }
+    }
 
     /// Hand-expanded Schmidt functions (derivation doc, section 3 checks).
     #[test]
