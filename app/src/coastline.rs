@@ -27,14 +27,22 @@
 //! a lake-island hole crosses the outer ring and the inner ring, an even count,
 //! and so reads as outside - which is what the data means.
 
-use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::scenario::GroundType;
 
-/// File names expected in the project root.
+/// The two datasets, compiled into the binary rather than read from disk at
+/// startup.
+///
+/// They used to be opened by path under `CARGO_MANIFEST_DIR`, which meant the
+/// build machine's source tree had to still exist at the same path when the app
+/// ran. Embedding removes that (and is what makes the data reachable at all in
+/// the web build, where there is no filesystem to read). About 1.4 MB together -
+/// the same bytes that were being read at startup anyway.
 const LAND_FILE: &str = "ne_50m_land.shp";
 const LAKES_FILE: &str = "ne_50m_lakes.shp";
+const LAND_BYTES: &[u8] = include_bytes!("assets/ne_50m_land.shp");
+const LAKES_BYTES: &[u8] = include_bytes!("assets/ne_50m_lakes.shp");
 
 /// Target point count per ring for the map overlay. The classification always
 /// uses the full-detail rings; only the drawing is thinned, since the overlay
@@ -113,8 +121,6 @@ pub struct Coastline {
     /// Thinned rings for the debug overlay.
     land_outlines: Vec<Outline>,
     lake_outlines: Vec<Outline>,
-    /// Where the two files were actually found, for the UI to show.
-    source_dir: PathBuf,
 }
 
 impl Coastline {
@@ -161,10 +167,9 @@ impl Coastline {
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
-            "{} land polygons, {} lake polygons, loaded from {}",
+            "{} land polygons, {} lake polygons, from embedded {LAND_FILE} / {LAKES_FILE}",
             self.land.len(),
             self.lakes.len(),
-            self.source_dir.display()
         )
     }
 }
@@ -210,11 +215,11 @@ fn thin(ring: &[(f64, f64)]) -> Outline {
     Outline { bounds, points }
 }
 
-fn read_polygons(path: &Path) -> Result<Vec<Poly>, String> {
-    let shapes = shapefile::ShapeReader::from_path(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?
+fn read_polygons(name: &str, bytes: &'static [u8]) -> Result<Vec<Poly>, String> {
+    let shapes = shapefile::ShapeReader::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("{name}: {e}"))?
         .read()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+        .map_err(|e| format!("{name}: {e}"))?;
 
     let mut polys = Vec::new();
     for shape in shapes {
@@ -239,29 +244,14 @@ fn read_polygons(path: &Path) -> Result<Vec<Poly>, String> {
         });
     }
     if polys.is_empty() {
-        return Err(format!("{}: no polygon shapes", path.display()));
+        return Err(format!("{name}: no polygon shapes"));
     }
     Ok(polys)
 }
 
-/// Where the two shapefiles are shipped, relative to this crate's manifest:
-/// baked into the binary at compile time via `CARGO_MANIFEST_DIR`, so the data
-/// is found wherever the binary is actually run from.
-fn assets_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/assets")
-}
-
 fn load() -> Result<Coastline, String> {
-    let dir = assets_dir();
-    if !dir.join(LAND_FILE).is_file() || !dir.join(LAKES_FILE).is_file() {
-        return Err(format!(
-            "{LAND_FILE} and {LAKES_FILE} not found in {}",
-            dir.display()
-        ));
-    }
-
-    let land = read_polygons(&dir.join(LAND_FILE))?;
-    let lakes = read_polygons(&dir.join(LAKES_FILE))?;
+    let land = read_polygons(LAND_FILE, LAND_BYTES)?;
+    let lakes = read_polygons(LAKES_FILE, LAKES_BYTES)?;
     let land_outlines = land
         .iter()
         .flat_map(|p| p.rings.iter().map(|r| thin(r)))
@@ -276,7 +266,6 @@ fn load() -> Result<Coastline, String> {
         lakes,
         land_outlines,
         lake_outlines,
-        source_dir: dir.clone(),
     })
 }
 

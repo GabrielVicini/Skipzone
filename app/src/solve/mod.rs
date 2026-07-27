@@ -99,7 +99,7 @@ fn classify_deterministic(apex_alt_km: f64) -> LayerMode {
 }
 
 pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome {
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     let tx = ground_point(inputs.tx_lat, inputs.tx_lon);
     let rx = ground_point(inputs.rx_lat, inputs.rx_lon);
     let total_arc = central_angle(&tx, &rx);
