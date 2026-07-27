@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Mesh, Pos2, Response, Shape, Stroke, Ui, pos
 use walkers::{MapMemory, Plugin, Projector, lat_lon};
 
 use crate::coastline::Outline;
-use crate::coverage::CoverageCell;
+use crate::coverage::{CoverageCell, LAT_LIMIT_DEG};
 use crate::solve::Solution;
 use crate::ui::theme;
 
@@ -249,19 +249,17 @@ impl Plugin for CoveragePlugin<'_> {
         let view = response.rect;
         for cell in self.cells {
             let half = 0.5 * cell.step_deg;
-            let (sw, ne) = (
-                screen(projector, cell.lat - half, cell.lon - half),
-                screen(projector, cell.lat + half, cell.lon + half),
+            // Clamp the drawn edges to the Mercator latitude limit. A row is
+            // only computed if its *centre* is inside the limit, so a coarse
+            // grid's outermost rows still reach half a step past it - and past
+            // the pole itself at the widest step, where `tan(lat).asinh()`
+            // flips sign and throws the edge to the opposite hemisphere. That
+            // is what turned the polar rows into full-height bars running off
+            // the map. Clamping keeps the tile, which was genuinely computed.
+            let (lat_s, lat_n) = (
+                (cell.lat - half).max(-LAT_LIMIT_DEG),
+                (cell.lat + half).min(LAT_LIMIT_DEG),
             );
-            // A cell straddling the antimeridian projects to a rectangle the
-            // width of the world; skip it rather than smear it across the map.
-            if (ne.x - sw.x).abs() > view.width() {
-                continue;
-            }
-            let rect = egui::Rect::from_two_pos(sw, ne);
-            if !rect.intersects(view) {
-                continue;
-            }
             // Three answers, three hues. A deterministic path takes the SNR
             // ramp at full saturation; a position only sporadic E can reach
             // takes the Es hue, faded by how likely that opening is; nothing at
@@ -274,16 +272,72 @@ impl Plugin for CoveragePlugin<'_> {
             } else {
                 theme::coverage_color(cell.snr_db)
             };
-            // Expand by half a pixel: adjacent cells then meet exactly, so the
-            // grid reads as tiles rather than as a dotted lattice with seams.
-            // This changes no value - only whether neighbours touch.
-            painter.rect_filled(
-                rect.expand(0.5),
-                0.0,
-                base.gamma_multiply(f32::from(self.alpha) / 255.0),
-            );
+            let color = base.gamma_multiply(f32::from(self.alpha) / 255.0);
+            // A cell whose span crosses the antimeridian is drawn as its two
+            // real halves, one against each edge of the world. The previous
+            // guard skipped any tile wider than the viewport, which both left a
+            // hole at the date line and failed to fire when zoomed out far
+            // enough that the whole world is narrower than the panel - the
+            // wrapped tile then smeared right across the map.
+            let (lon_w, lon_e) = (cell.lon - half, cell.lon + half);
+            if lon_w < -180.0 {
+                fill(painter, projector, view, lat_s, lat_n, -180.0, lon_e, color);
+                fill(
+                    painter,
+                    projector,
+                    view,
+                    lat_s,
+                    lat_n,
+                    lon_w + 360.0,
+                    180.0,
+                    color,
+                );
+            } else if lon_e > 180.0 {
+                fill(painter, projector, view, lat_s, lat_n, lon_w, 180.0, color);
+                fill(
+                    painter,
+                    projector,
+                    view,
+                    lat_s,
+                    lat_n,
+                    -180.0,
+                    lon_e - 360.0,
+                    color,
+                );
+            } else {
+                fill(painter, projector, view, lat_s, lat_n, lon_w, lon_e, color);
+            }
         }
     }
+}
+
+/// Paint one lat/lon box, culled against the visible rect.
+///
+/// The box is expanded by half a pixel so adjacent cells meet exactly and the
+/// grid reads as tiles rather than as a dotted lattice with seams. That changes
+/// no value - only whether neighbours touch.
+#[allow(clippy::too_many_arguments)]
+fn fill(
+    painter: &egui::Painter,
+    projector: &Projector,
+    view: egui::Rect,
+    lat_s: f64,
+    lat_n: f64,
+    lon_w: f64,
+    lon_e: f64,
+    color: Color32,
+) {
+    if lat_n <= lat_s || lon_e <= lon_w {
+        return;
+    }
+    let rect = egui::Rect::from_two_pos(
+        screen(projector, lat_s, lon_w),
+        screen(projector, lat_n, lon_e),
+    );
+    if !rect.intersects(view) {
+        return;
+    }
+    painter.rect_filled(rect.expand(0.5), 0.0, color);
 }
 
 pub struct PathPlugin<'a> {

@@ -120,7 +120,22 @@ impl MapView {
                 let projector = Projector::new(response.rect, &self.memory, centre);
                 let position = projector.unproject(pointer.to_vec2());
                 let (lat, lon) = (position.y(), position.x());
-                (lat.is_finite() && lon.is_finite()).then(|| (lat.clamp(-89.9, 89.9), lon))
+                // A click that is not on the map does not move the station.
+                //
+                // Both axes are rejected outright rather than folded back onto
+                // the map. Walkers does not repeat the world horizontally - the
+                // void either side of the sheet is void, not another copy of it
+                // - so wrapping a click there to a legal longitude lands the
+                // marker at a place the operator never clicked, which reads as
+                // the station jumping around at random. Clamping to the edge
+                // has the same flaw in the other direction. Past the Mercator
+                // latitude cut-off there is no basemap at all.
+                let limit = crate::coverage::LAT_LIMIT_DEG;
+                let on_map = lat.is_finite()
+                    && lon.is_finite()
+                    && lat.abs() <= limit
+                    && (-180.0..=180.0).contains(&lon);
+                on_map.then_some((lat, lon))
             })
             .inner
     }

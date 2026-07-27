@@ -70,7 +70,11 @@ impl LocationEntry {
     pub fn parsed_lat_lon(&self) -> Option<(f64, f64)> {
         let lat: f64 = self.lat_text.trim().parse().ok()?;
         let lon: f64 = self.lon_text.trim().parse().ok()?;
-        ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon)).then_some((lat, lon))
+        // The Mercator limit, not the pole: past it there is no basemap to put
+        // a station on, and a typed position must be reachable the same way a
+        // clicked one is.
+        let limit = crate::coverage::LAT_LIMIT_DEG;
+        ((-limit..=limit).contains(&lat) && (-180.0..=180.0).contains(&lon)).then_some((lat, lon))
     }
 
     /// Is the text currently on screen valid in the active notation? Drives the

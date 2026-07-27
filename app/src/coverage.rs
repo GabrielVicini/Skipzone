@@ -39,7 +39,12 @@ pub const MIN_RANGE_KM: f64 = 25.0;
 
 /// Highest latitude a grid row may sit at. Web Mercator diverges at the poles
 /// and the tile would be unrenderable, so the row is simply not computed.
-const LAT_LIMIT_DEG: f64 = 85.0;
+///
+/// Public because the map plugin clamps a *tile's* drawn edges to the same
+/// limit: a row centred just inside it still extends half a step past it, and
+/// Web Mercator's `tan(lat).asinh()` changes sign beyond the pole, which throws
+/// the rectangle to the far side of the world.
+pub const LAT_LIMIT_DEG: f64 = 85.0;
 
 /// The user-controlled grid: how far out from the transmitter to go, and how
 /// finely to sample.
@@ -84,6 +89,36 @@ impl CoverageConfig {
         n.clamp(1, 70)
     }
 
+    /// The half-span the run will actually cover, which is the requested one
+    /// only until the [`MAX_POINTS`] cap bites.
+    ///
+    /// [`half_steps`](Self::half_steps) clamps the lattice at 70 steps either
+    /// way, so a fine resolution silently shrinks the box: 180 degrees at 4
+    /// pts/deg is really 17.5. Exposed so the control can say so rather than
+    /// leaving the operator to wonder why most of the map came back empty.
+    #[must_use]
+    pub fn effective_half_span_deg(self) -> f64 {
+        f64::from(self.half_steps()) * self.step_deg()
+    }
+
+    /// Longitude columns to generate, centred on the transmitter.
+    ///
+    /// The naive `2 * half_steps() + 1` columns can span more than 360 degrees -
+    /// at the widest extent and coarsest resolution it spans 380 - and because
+    /// column longitudes are wrapped into [-180, 180), the surplus lands back on
+    /// top of columns already generated. Those duplicate positions are solved
+    /// twice and, since the tiles are drawn with alpha, painted twice: the
+    /// doubled column reads as a dark stripe across the map. Capping the count
+    /// at one full turn of longitude removes the overlap without leaving a gap,
+    /// because a whole number of steps short of 360 still closes the ring.
+    #[must_use]
+    pub fn columns(self) -> i32 {
+        let step = self.step_deg();
+        #[allow(clippy::cast_possible_truncation)]
+        let full_turn = (360.0 / step).floor() as i32;
+        (2 * self.half_steps() + 1).min(full_turn.max(1))
+    }
+
     /// The receiver positions to solve, in row-major order from the south-west
     /// corner. Positions past the latitude limit or inside [`MIN_RANGE_KM`] of
     /// the transmitter are omitted, so this is the exact count of solves the run
@@ -92,6 +127,10 @@ impl CoverageConfig {
     pub fn grid(self, tx_lat: f64, tx_lon: f64) -> Vec<(f64, f64)> {
         let step = self.step_deg();
         let n = self.half_steps();
+        let cols = self.columns();
+        // Keep the columns centred on the transmitter when one has been dropped
+        // to close the ring: the extra column comes off the eastern end.
+        let (j0, j1) = (-(cols / 2), -(cols / 2) + cols - 1);
         let tx = scenario::ground_point(tx_lat, tx_lon);
         let mut points = Vec::new();
         for i in -n..=n {
@@ -99,7 +138,7 @@ impl CoverageConfig {
             if lat.abs() > LAT_LIMIT_DEG {
                 continue;
             }
-            for j in -n..=n {
+            for j in j0..=j1 {
                 let lon = wrap_lon(tx_lon + f64::from(j) * step);
                 let rx = scenario::ground_point(lat, lon);
                 let km = skipzone::geo::central_angle(&tx, &rx).get() * EARTH_RADIUS_M / 1e3;
@@ -362,6 +401,90 @@ mod tests {
             points_per_deg: 8.0,
         };
         assert!(absurd.grid(0.0, 0.0).len() <= MAX_POINTS);
+    }
+
+    /// The widest extent at the coarsest resolution used to generate 19 columns
+    /// of 20 degrees - 380 degrees - so one column wrapped back onto another and
+    /// was solved and painted twice. No grid may contain a duplicate position,
+    /// and the ring must still close.
+    #[test]
+    fn columns_never_wrap_onto_themselves() {
+        for &(half_span, res) in &[
+            (180.0, 0.05),
+            (180.0, 0.25),
+            (180.0, 1.0),
+            (90.0, 0.1),
+            (170.0, 0.06),
+        ] {
+            let cfg = CoverageConfig {
+                half_span_deg: half_span,
+                points_per_deg: res,
+            };
+            for &(tx_lat, tx_lon) in &[(39.74, -104.99), (0.0, 178.0), (55.0, 0.0)] {
+                let points = cfg.grid(tx_lat, tx_lon);
+                let mut seen: Vec<(u64, u64)> = points
+                    .iter()
+                    .map(|&(lat, lon)| (lat.to_bits(), lon.to_bits()))
+                    .collect();
+                let before = seen.len();
+                seen.sort_unstable();
+                seen.dedup();
+                assert_eq!(
+                    seen.len(),
+                    before,
+                    "duplicate grid position at half_span {half_span}, res {res}, tx {tx_lat},{tx_lon}"
+                );
+                // Never more than one full turn of longitude...
+                let span = f64::from(cfg.columns()) * cfg.step_deg();
+                assert!(span <= 360.0 + 1e-9, "span {span} at res {res}");
+                // ...and never a gap left in one, when a full turn was both
+                // asked for and actually granted. A run the point cap has
+                // truncated covers less than the requested extent by design,
+                // and `effective_half_span_deg` is what reports that.
+                if 2.0 * cfg.effective_half_span_deg() >= 360.0 {
+                    assert!(
+                        span > 360.0 - cfg.step_deg() - 1e-9,
+                        "gap left in the ring: {span} at res {res}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every computed row is drawn as a band half a step tall either side of its
+    /// centre. Clamped to the Mercator limit that band must stay a real,
+    /// non-empty piece of the map - the plugin relies on it.
+    #[test]
+    fn tile_bands_stay_inside_the_mercator_limit() {
+        let cfg = CoverageConfig {
+            half_span_deg: 180.0,
+            points_per_deg: 0.05,
+        };
+        let half = 0.5 * cfg.step_deg();
+        for &tx_lat in &[39.74, 55.0, 5.0, -60.0] {
+            for (lat, _) in cfg.grid(tx_lat, 0.0) {
+                let south = (lat - half).max(-LAT_LIMIT_DEG);
+                let north = (lat + half).min(LAT_LIMIT_DEG);
+                assert!(north > south, "empty band at {lat} (tx {tx_lat})");
+                assert!(south >= -LAT_LIMIT_DEG && north <= LAT_LIMIT_DEG);
+            }
+        }
+    }
+
+    #[test]
+    fn effective_half_span_reports_the_point_cap() {
+        let uncapped = CoverageConfig {
+            half_span_deg: 180.0,
+            points_per_deg: 0.05,
+        };
+        assert!((uncapped.effective_half_span_deg() - 180.0).abs() < 1e-9);
+
+        let capped = CoverageConfig {
+            half_span_deg: 180.0,
+            points_per_deg: 4.0,
+        };
+        assert!(capped.effective_half_span_deg() < 180.0);
+        assert!((capped.effective_half_span_deg() - 17.5).abs() < 1e-9);
     }
 
     #[test]
