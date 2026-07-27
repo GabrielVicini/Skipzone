@@ -121,6 +121,22 @@ fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
             .color(MUTED),
         );
     });
+    // The point cap can shrink the box well below what Extent asks for, and an
+    // unannounced 17-degree run in place of a requested 180 just looks like the
+    // map failed to fill in.
+    let effective = cfg.effective_half_span_deg();
+    if effective < cfg.half_span_deg - 1e-9 {
+        ui.label(
+            RichText::new(format!(
+                "Capped at {effective:.1} deg by the {} point limit - lower the resolution to \
+                 reach {:.0} deg.",
+                crate::coverage::MAX_POINTS,
+                cfg.half_span_deg
+            ))
+            .small()
+            .color(MUTED),
+        );
+    }
     if points >= LARGE_GRID {
         ui.label(
             RichText::new(format!(
