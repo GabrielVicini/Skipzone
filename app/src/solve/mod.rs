@@ -28,7 +28,7 @@ pub use types::{LayerMode, LayerStatus, ModeReport, Solution, SolveOutcome, mode
 /// Shared by every caller that has to reduce a whole solve to one number - the
 /// frequency sweep and the coverage grid - so the two can never disagree about
 /// which mode a scenario is being judged by. Sporadic E is deliberately not
-/// considered here; see [`best_including_es`].
+/// considered here; see [`best_with_es_fallback`].
 #[must_use]
 pub fn best_by_snr(out: &SolveOutcome) -> Option<&Solution> {
     out.solutions
@@ -46,16 +46,36 @@ pub fn best_es(out: &SolveOutcome) -> Option<&Solution> {
         .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
 }
 
-/// The strongest path of ANY kind - what a listener would hear on a day when
-/// everything the model allows is present. Callers that use this must also
-/// carry the winner's `probability`, or they are back to folding a probabilistic
-/// opening into a deterministic verdict.
+/// The path to report when a single answer is needed: the best DETERMINISTIC
+/// path if one closed, and only otherwise the best Es-supported one.
+///
+/// # Why this is not simply the strongest SNR of the two lists
+///
+/// It used to be, and that was a selection bug rather than a preference. An Es
+/// reflection at 100 km has a shorter ray path than the F2 alternative, less
+/// spreading loss, and a shorter slant transit of the absorbing D region, so on
+/// raw SNR it wins **by construction** wherever it is geometrically possible -
+/// not because the ionosphere favoured it. Ordering the two lists together by
+/// SNR therefore does not compare two hypotheses; it just prefers the lower
+/// layer, and it does so while silently discarding the one piece of information
+/// that distinguishes them, namely that F2 is there every day and Es is there
+/// [`SporadicE::probability`](crate::sporadic_e::SporadicE) of the time.
+///
+/// Folding that probability into the SNR is not the fix either - it would put a
+/// likelihood into a quantity measured in dB, which is the false equivalence the
+/// two separate solution lists exist to prevent. So the rule is ordinal instead:
+/// a path that is simply there outranks a path that might be there, and Es is
+/// consulted only when nothing deterministic closed at all. That is also the
+/// case Es was added for - a 17 m signal at 400 km, where F2 genuinely has no
+/// solution - so the fallback keeps the capability it was built for while
+/// removing its ability to outbid a perfectly good F2 path.
+///
+/// Callers must still carry the winner's `probability`: an Es answer returned
+/// here is a "maybe", and reporting it as an opening without its occurrence
+/// figure is the same conflation one step further down.
 #[must_use]
-pub fn best_including_es(out: &SolveOutcome) -> Option<&Solution> {
-    out.solutions
-        .iter()
-        .chain(&out.es_solutions)
-        .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
+pub fn best_with_es_fallback(out: &SolveOutcome) -> Option<&Solution> {
+    best_by_snr(out).or_else(|| best_es(out))
 }
 
 use std::cmp::Ordering;
@@ -446,6 +466,23 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
             if apex >= es_band_lo && apex <= es_band_hi {
                 s.layer = LayerMode::Es;
                 s.probability = a.sporadic_e.probability;
+                // Every hop of this path bounced off the sheet once, and each
+                // bounce leaks the fraction that tunnels through it. Charged per
+                // hop from that hop's own turning point, because a 4-hop path
+                // reflects at a steeper incidence and so turns deeper.
+                s.es_reflection_loss_db = s
+                    .hop_details
+                    .iter()
+                    .map(|h| a.sporadic_e.reflection_loss_db(h.apex_alt_km))
+                    .sum();
+                // Re-derive the two figures that depend on the loss total. The
+                // link budget is a pure function of the system loss, so this is
+                // a recomputation, not a second model.
+                s.total_system_loss_db += s.es_reflection_loss_db;
+                s.link = crate::noise::LinkBudget::from_settings(
+                    link_settings,
+                    s.total_system_loss_db - s.total_gain_db,
+                );
                 es_solutions.push(s);
             }
         }
@@ -1304,11 +1341,29 @@ mod tests {
                 assert_eq!(s.probability, a_probability(&inputs));
             }
 
-            // `best_by_snr` is deterministic-only; `best_including_es` is not.
+            // `best_by_snr` is deterministic-only.
             assert!(best_by_snr(&out).is_none_or(|s| s.layer != LayerMode::Es));
-            if let Some(all) = best_including_es(&out) {
-                let det = best_by_snr(&out).map_or(f64::NEG_INFINITY, |s| s.link.snr_db);
-                assert!(all.link.snr_db >= det);
+            // `best_with_es_fallback` is ORDINAL, not a joint SNR maximum: a
+            // deterministic path outranks an Es one however strong the Es one
+            // looks, because an Es reflection at 100 km beats an F2 path on raw
+            // SNR by construction rather than on the merits. Es appears here
+            // only when nothing deterministic closed.
+            match (best_by_snr(&out), best_with_es_fallback(&out)) {
+                (Some(det), Some(any)) => {
+                    assert_eq!(
+                        any.link.snr_db.to_bits(),
+                        det.link.snr_db.to_bits(),
+                        "a deterministic path existed, so it must be the reported one"
+                    );
+                    assert!(any.layer != LayerMode::Es);
+                }
+                (None, Some(any)) => assert_eq!(
+                    any.layer,
+                    LayerMode::Es,
+                    "with nothing deterministic, only Es can answer"
+                ),
+                (None, None) => assert!(out.es_solutions.is_empty()),
+                (Some(_), None) => panic!("a deterministic path must never be dropped"),
             }
         }
     }

@@ -555,15 +555,20 @@ pub const FOE_OVERHEAD_QUIET_MHZ: f64 = 3.30;
 pub const FOE_SOLAR_COEFF: f64 = 0.009_4;
 
 /// Overhead-sun (chi = 0) foE [MHz] at a sunspot number.
+///
+/// `quiet_mhz` is the [`FOE_OVERHEAD_QUIET_MHZ`] anchor, passed in rather than
+/// read from the constant so a calibration run can move it. The solar scaling
+/// exponent and [`FOE_SOLAR_COEFF`] are the standard law and are not calibration
+/// targets.
 #[must_use]
-pub fn foe_overhead(ssn: f64) -> f64 {
-    FOE_OVERHEAD_QUIET_MHZ * (1.0 + FOE_SOLAR_COEFF * ssn.max(0.0)).powf(0.25)
+pub fn foe_overhead(ssn: f64, quiet_mhz: f64) -> f64 {
+    quiet_mhz * (1.0 + FOE_SOLAR_COEFF * ssn.max(0.0)).powf(0.25)
 }
 
 /// Overhead-sun peak density of the E layer, m^-3.
 #[must_use]
-pub fn e_layer_peak_ne(ssn: f64) -> f64 {
-    density_at_critical_frequency(Hertz::new(foe_overhead(ssn) * 1e6)).get()
+pub fn e_layer_peak_ne(ssn: f64, quiet_mhz: f64) -> f64 {
+    density_at_critical_frequency(Hertz::new(foe_overhead(ssn, quiet_mhz) * 1e6)).get()
 }
 
 #[cfg(test)]
@@ -863,21 +868,21 @@ mod tests {
     /// documented 3-4 MHz band across a realistic solar cycle.
     #[test]
     fn foe_is_in_range_and_rises_with_solar_activity() {
-        assert!((foe_overhead(0.0) - FOE_OVERHEAD_QUIET_MHZ).abs() < 1e-12);
-        let mut prev = foe_overhead(0.0);
+        assert!((foe_overhead(0.0, FOE_OVERHEAD_QUIET_MHZ) - FOE_OVERHEAD_QUIET_MHZ).abs() < 1e-12);
+        let mut prev = foe_overhead(0.0, FOE_OVERHEAD_QUIET_MHZ);
         for ssn in 1..=250 {
-            let v = foe_overhead(f64::from(ssn));
+            let v = foe_overhead(f64::from(ssn), FOE_OVERHEAD_QUIET_MHZ);
             assert!(v > prev);
             prev = v;
         }
         assert!(
-            (3.0..4.5).contains(&foe_overhead(150.0)),
+            (3.0..4.5).contains(&foe_overhead(150.0, FOE_OVERHEAD_QUIET_MHZ)),
             "foE at SSN 150 = {}",
-            foe_overhead(150.0)
+            foe_overhead(150.0, FOE_OVERHEAD_QUIET_MHZ)
         );
         // Nm follows foE^2, so the round trip must close.
-        let ne = e_layer_peak_ne(70.0);
+        let ne = e_layer_peak_ne(70.0, FOE_OVERHEAD_QUIET_MHZ);
         let back = skipzone::density::critical_frequency(skipzone::units::PerCubicMeter::new(ne));
-        assert!((back.get() / 1e6 - foe_overhead(70.0)).abs() < 1e-6);
+        assert!((back.get() / 1e6 - foe_overhead(70.0, FOE_OVERHEAD_QUIET_MHZ)).abs() < 1e-6);
     }
 }

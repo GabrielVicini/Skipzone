@@ -31,11 +31,18 @@
 
 pub mod antenna;
 pub mod app;
+pub mod calib;
 pub mod chapman;
 pub mod clock;
 pub mod coastline;
 pub mod compute;
+/// A saved, reproducible WSPR corpus for calibration. Harness-only.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod corpus;
 pub mod coverage;
+/// Two-way fixed-effects calibration against measured WSPR spots. Harness-only.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fit;
 pub mod fof2;
 pub mod grid;
 /// Outbound HTTP, used only by the validation harnesses. Not built for the web

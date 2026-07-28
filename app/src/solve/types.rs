@@ -183,6 +183,12 @@ pub struct Solution {
     pub free_space_loss_db: f64,
     /// Summed Fresnel loss over the intermediate ground reflections, dB.
     pub ground_reflection_loss_db: f64,
+    /// Summed loss at the sporadic-E reflections, dB: the fraction of each
+    /// bounce that tunnels through the sheet rather than reflecting from it.
+    /// Always 0 for a deterministic path, which has no sheet to bounce off; see
+    /// [`SporadicE::tunnelling_fraction`](crate::sporadic_e::SporadicE::tunnelling_fraction)
+    /// for why it is usually 0 for an Es path too.
+    pub es_reflection_loss_db: f64,
     /// Number of intermediate ground reflections (hops - 1 for a landed path).
     pub num_ground_reflections: u32,
     /// Basic transmission loss = free-space + absorption + ground reflection, dB.

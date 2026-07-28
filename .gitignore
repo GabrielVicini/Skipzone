@@ -1,1 +1,12 @@
 /target
+/corpus/calib_week.txt
+/corpus/fit.log
+/corpus/fit.tsv
+/corpus/fit_check.tsv
+/corpus/fit_neg.tsv
+/corpus/holdout_month.log
+/corpus/tiny.tsv
+/corpus/negatives.tsv
+/corpus/holdout_week.tsv
+/corpus/holdout_week.log
+/corpus/holdout_month.tsv

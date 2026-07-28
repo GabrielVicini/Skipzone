@@ -57,6 +57,9 @@ pub enum Window {
     Recent { minutes: u32 },
     /// A fixed instant, `minutes` wide, centred on `YYYY-MM-DD HH:MM` UTC.
     At { utc: String, minutes: u32 },
+    /// A whole UTC day, `YYYY-MM-DD`. Used when counting which stations were
+    /// busiest over a span, where a 20-minute sample would rank stations by luck.
+    Day { utc_date: String },
 }
 
 impl Window {
@@ -72,6 +75,10 @@ impl Window {
                 "time >= toDateTime('{utc}:00') - INTERVAL {half} MINUTE \
                  AND time < toDateTime('{utc}:00') + INTERVAL {half} MINUTE",
                 half = minutes.div_ceil(2)
+            ),
+            Self::Day { utc_date } => format!(
+                "time >= toDateTime('{utc_date} 00:00:00') \
+                 AND time < toDateTime('{utc_date} 00:00:00') + INTERVAL 1 DAY"
             ),
         }
     }
@@ -91,6 +98,9 @@ impl Window {
                 "{minutes} minutes centred on {utc} UTC (a settled past window; no ingest-lag \
                  allowance is needed)"
             ),
+            Self::Day { utc_date } => {
+                format!("the whole UTC day {utc_date} (settled; no ingest-lag allowance is needed)")
+            }
         }
     }
 }
@@ -349,6 +359,9 @@ impl Query {
         let lag = i64::from(INGEST_LAG_MINUTES) * 60;
         let width = i64::from(match &self.window {
             Window::Recent { minutes } | Window::At { minutes, .. } => *minutes,
+            // A whole day, in minutes. `completeness` is only meaningful for a
+            // live window anyway; a settled day needs no lag allowance.
+            Window::Day { .. } => 24 * 60,
         }) * 60;
         let win_hi = newest - lag;
         let win_lo = win_hi - width;
@@ -375,6 +388,391 @@ impl Query {
             settled_median: median(settled),
         })
     }
+}
+
+// --- Calibration corpus ---------------------------------------------------
+//
+// The live [`Query`] above is right for SCORING and wrong for FITTING, in two
+// specific ways that both matter enough to justify a second query type rather
+// than a flag on the first.
+//
+// * `ORDER BY rand()` returns a different sample every run. Fitting against that
+//   is optimising against a moving target: a parameter change and a resample are
+//   indistinguishable in the result.
+// * `code >= 0` keeps message types 2 and 3, the compound and hashed-callsign
+//   forms. That is right for scoring - they carry an SNR on the same scale - and
+//   wrong here, because a two-way fixed-effects model needs to know WHICH
+//   station a spot came from, and a hashed callsign is ambiguous by construction.
+//
+// A corpus query therefore differs from a scoring query in being reproducible
+// and in insisting on identifiable stations and locatable endpoints.
+
+/// Lowest claimed transmit power to accept, dBm. Below 0 dBm (1 mW) the claim is
+/// almost always a mis-set radio rather than a real QRP station.
+pub const MIN_PLAUSIBLE_TX_DBM: i32 = 0;
+/// Highest claimed transmit power to accept, dBm. 47 dBm is 50 W, well above any
+/// legitimate WSPR level; above it the field is being misused.
+pub const MAX_PLAUSIBLE_TX_DBM: i32 = 47;
+
+/// The WSPR message type a fixed-effects fit can use.
+///
+/// Type 1 is `callsign + 4-character grid + power`. Types 2 and 3 carry compound
+/// and hashed callsigns respectively; a hash does not identify a station
+/// uniquely, so a station effect estimated across hashed rows is estimated
+/// across an unknown mixture of stations.
+pub const IDENTIFIABLE_MESSAGE_CODE: i32 = 1;
+
+/// A reproducible, hygiene-filtered query for one time window.
+///
+/// Sampling is by `cityHash64` of the row's identity rather than by `rand()`:
+/// still a uniform sample uncorrelated with upload order, but the SAME sample
+/// every time the query is issued, which is what makes a fit against it
+/// meaningful. `salt` varies it deliberately when a different draw is wanted.
+#[derive(Clone, Debug)]
+pub struct CorpusQuery {
+    pub window: Window,
+    pub min_km: u32,
+    pub max_km: u32,
+    pub max_mhz: f64,
+    pub limit: u32,
+    /// Restrict to one band centre in MHz, or `None` for every band.
+    ///
+    /// A whole-archive sample follows real band activity, which loads 20 m and
+    /// 40 m and leaves 160 m and 10 m almost unrepresented. Targeting a band
+    /// explicitly is how the corpus gets the frequency spread that identifies the
+    /// absorption law; without it the frequency dependence would be fitted from
+    /// two bands.
+    pub band_mhz: Option<f64>,
+    /// Restrict both ends to the busiest stations, or `None` for any station.
+    pub busiest: Option<BusiestFilter>,
+    /// Changes which rows the deterministic sample selects, without making the
+    /// selection unpredictable. Same salt, same rows, always.
+    pub salt: u32,
+}
+
+/// Restrict a corpus to the busiest stations at each end, ranked over one
+/// reference day.
+///
+/// # Why a corpus has to be restricted to busy stations
+///
+/// A two-way fixed-effects model needs enough spots per station to pin that
+/// station's effect - see [`crate::corpus::MIN_SPOTS_PER_STATION`]. WSPR has
+/// thousands of active stations, so a uniform sample of a few thousand spots
+/// gives almost every one of them two or three rows, and then EVERY station
+/// effect is unidentified and the whole corpus is unusable. Measured against this
+/// archive: 224 uniformly-sampled spots spanned 173 stations, and requiring ten
+/// spots per station removed all 224.
+///
+/// Concentrating on the busiest stations fixes that, and the cost has to be
+/// stated rather than absorbed: busy stations are better sited, better equipped
+/// and electrically quieter than the WSPR population as a whole. So the station
+/// effects this yields describe the ACTIVE CORE of the network, not its median
+/// member, and the physics identified from within-station variation is identified
+/// over that subpopulation.
+///
+/// # Why a subquery rather than a list of callsigns
+///
+/// Both. The ranking is available as a list through [`busiest_stations`], which
+/// is what the report prints. But putting 500 callsigns into the data query's
+/// `IN` clause produced a URL the endpoint rejected with HTTP 414, so the query
+/// itself carries the ranking as a SUBQUERY over the reference day. Same
+/// selection, and it stays the same selection however many stations are asked
+/// for.
+#[derive(Clone, Debug)]
+pub struct BusiestFilter {
+    /// UTC date the ranking is computed over, `YYYY-MM-DD`.
+    ///
+    /// ONE day for the whole corpus, deliberately: ranking per window would let
+    /// the set of stations drift between windows, and a station effect estimated
+    /// over a drifting membership is not a fixed effect.
+    pub census_date: String,
+    pub top_tx: u32,
+    pub top_rx: u32,
+}
+
+/// Which end of a path a station census counts.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StationEnd {
+    Transmitter,
+    Receiver,
+}
+
+impl StationEnd {
+    fn column(self) -> &'static str {
+        match self {
+            Self::Transmitter => "tx_sign",
+            Self::Receiver => "rx_sign",
+        }
+    }
+}
+
+impl CorpusQuery {
+    /// The band window, or nothing when every band is wanted.
+    fn band_predicate(&self) -> String {
+        match self.band_mhz {
+            Some(mhz) => format!(
+                " AND frequency BETWEEN {} AND {}",
+                ((mhz - 0.1) * 1e6).round() as i64,
+                ((mhz + 0.1) * 1e6).round() as i64
+            ),
+            None => String::new(),
+        }
+    }
+
+    /// `AND <col> IN (<the busiest N at that end over the reference day>)`, or
+    /// nothing when the corpus is not restricted.
+    ///
+    /// The subquery repeats the hygiene and range predicates, so a station is
+    /// ranked by the spots it produced that this corpus would ACCEPT, not by its
+    /// total traffic. A receiver whose volume is all sub-300 km ground wave is
+    /// not a busy station for these purposes.
+    fn busiest_predicate(&self, end: StationEnd) -> String {
+        let Some(b) = &self.busiest else {
+            return String::new();
+        };
+        let (col, limit) = match end {
+            StationEnd::Transmitter => ("tx_sign", b.top_tx),
+            StationEnd::Receiver => ("rx_sign", b.top_rx),
+        };
+        if limit == 0 {
+            return String::new();
+        }
+        format!(
+            " AND {col} IN (SELECT {col} FROM wspr.rx WHERE {} AND {} \
+             AND distance BETWEEN {} AND {} AND frequency <= {} \
+             GROUP BY {col} ORDER BY count() DESC, {col} ASC LIMIT {limit})",
+            Window::Day {
+                utc_date: b.census_date.clone()
+            }
+            .predicate(),
+            self.hygiene_sql(),
+            self.min_km,
+            self.max_km,
+            (self.max_mhz * 1e6).round() as i64,
+        )
+    }
+
+    /// The hygiene predicates, shared with the cycle census so the negatives are
+    /// drawn from the same population as the positives. A negative built from a
+    /// station the positives filter out would not be a comparable observation.
+    fn hygiene_sql(&self) -> String {
+        format!(
+            "code = {IDENTIFIABLE_MESSAGE_CODE} \
+             AND length(tx_loc) >= 6 AND length(rx_loc) >= 6 \
+             AND power >= {MIN_PLAUSIBLE_TX_DBM} AND power <= {MAX_PLAUSIBLE_TX_DBM}"
+        )
+    }
+
+    /// One line naming every filter in force, for the corpus file's provenance
+    /// header. A saved corpus that does not record how it was selected cannot be
+    /// interpreted later.
+    #[must_use]
+    pub fn describe_filter(&self) -> String {
+        format!(
+            "{} to {} km, at or below {:.0} MHz, WSPR message code {} only \
+             (plain callsigns: types 2 and 3 are compound and hashed, and a hashed \
+             call cannot carry a station effect), 6-character grids at BOTH ends \
+             (a 4-character grid is +/-70 km, which on a 400 km path is a 17 % error \
+             in the very quantity being fitted), claimed power {} to {} dBm, \
+             deterministic sample of up to {} by cityHash64 with salt {}{}",
+            self.min_km,
+            self.max_km,
+            self.max_mhz,
+            IDENTIFIABLE_MESSAGE_CODE,
+            MIN_PLAUSIBLE_TX_DBM,
+            MAX_PLAUSIBLE_TX_DBM,
+            self.limit,
+            self.salt,
+            match &self.busiest {
+                Some(b) => format!(
+                    ", restricted to the {} busiest transmitters and {} busiest receivers                      ranked over {} - NOT a representative sample of WSPR stations, but the                      only way a per-station fixed effect is identified at all",
+                    b.top_tx, b.top_rx, b.census_date
+                ),
+                None => String::new(),
+            }
+        )
+    }
+
+    /// The SQL. Projection pinned to the nine columns
+    /// [`crate::wspr::parse_spots`] reads, in its order, exactly as [`Query`]
+    /// does - so a corpus file and a live fetch go through one parser.
+    #[must_use]
+    pub fn sql(&self) -> String {
+        format!(
+            "SELECT formatDateTime(time, '%Y-%m-%d %H:%i') AS ts, tx_sign, \
+             round(frequency / 1000000, 6) AS mhz, snr, tx_loc, power, rx_sign, rx_loc, distance \
+             FROM wspr.rx \
+             WHERE {} AND {} AND distance BETWEEN {} AND {} AND frequency <= {}{}{}{} \
+             ORDER BY cityHash64(concat(toString(time), tx_sign, rx_sign, \
+             toString(frequency), toString({}))) LIMIT {} FORMAT TSV",
+            self.window.predicate(),
+            self.hygiene_sql(),
+            self.min_km,
+            self.max_km,
+            (self.max_mhz * 1e6).round() as i64,
+            self.band_predicate(),
+            self.busiest_predicate(StationEnd::Transmitter),
+            self.busiest_predicate(StationEnd::Receiver),
+            self.salt,
+            self.limit
+        )
+    }
+
+    /// Fetch this window's rows as the TSV the spot parser reads.
+    ///
+    /// # Errors
+    /// Transport failures, and any error the archive reports for the query.
+    pub fn fetch_tsv(&self) -> Result<String, NetError> {
+        fetch_rows(&self.sql())
+    }
+
+    /// How many rows each hygiene filter removed from this window, so the corpus
+    /// can state the size of what it discarded rather than only what it kept.
+    ///
+    /// Counted in ONE pass with `countIf`, because six separate queries against a
+    /// live archive would each see a slightly different table.
+    ///
+    /// # Errors
+    /// Transport failures, and any error the archive reports.
+    pub fn hygiene_census(&self) -> Result<HygieneCensus, NetError> {
+        let sql = format!(
+            "SELECT count() AS total, \
+             countIf(code != {IDENTIFIABLE_MESSAGE_CODE}) AS not_type1, \
+             countIf(length(tx_loc) < 6) AS short_tx_grid, \
+             countIf(length(rx_loc) < 6) AS short_rx_grid, \
+             countIf(power < {MIN_PLAUSIBLE_TX_DBM} OR power > {MAX_PLAUSIBLE_TX_DBM}) AS bad_power, \
+             countIf({}) AS kept \
+             FROM wspr.rx WHERE {} AND distance BETWEEN {} AND {} AND frequency <= {}{}{}{} \
+             FORMAT TSV",
+            self.hygiene_sql(),
+            self.window.predicate(),
+            self.min_km,
+            self.max_km,
+            (self.max_mhz * 1e6).round() as i64,
+            self.band_predicate(),
+            self.busiest_predicate(StationEnd::Transmitter),
+            self.busiest_predicate(StationEnd::Receiver),
+        );
+        let body = fetch_rows(&sql)?;
+        let f: Vec<u64> = body
+            .trim()
+            .split('\t')
+            .map(|v| v.trim().parse().unwrap_or(0))
+            .collect();
+        if f.len() < 6 {
+            return Err(NetError::Data(format!(
+                "unexpected hygiene census reply: {body:?}"
+            )));
+        }
+        Ok(HygieneCensus {
+            total: f[0],
+            not_type1: f[1],
+            short_tx_grid: f[2],
+            short_rx_grid: f[3],
+            bad_power: f[4],
+            kept: f[5],
+        })
+    }
+}
+
+/// What the hygiene filters removed from one window. Counts overlap - a row can
+/// fail several tests at once - so they explain rather than partition.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HygieneCensus {
+    pub total: u64,
+    pub not_type1: u64,
+    pub short_tx_grid: u64,
+    pub short_rx_grid: u64,
+    pub bad_power: u64,
+    pub kept: u64,
+}
+
+impl HygieneCensus {
+    /// Accumulate another window's counts into this one.
+    pub fn add(&mut self, other: Self) {
+        self.total += other.total;
+        self.not_type1 += other.not_type1;
+        self.short_tx_grid += other.short_tx_grid;
+        self.short_rx_grid += other.short_rx_grid;
+        self.bad_power += other.bad_power;
+        self.kept += other.kept;
+    }
+}
+
+/// EVERY spot in one two-minute cycle on one band, subject to the same hygiene
+/// filters as the corpus.
+///
+/// This is the query the negatives set is built from, and it is deliberately
+/// unfiltered by distance: deciding whether a receiver was healthy in a cycle
+/// means counting everything it heard, including the short paths a calibration
+/// corpus would not score.
+///
+/// # Errors
+/// Transport failures, and any error the archive reports.
+pub fn cycle_census_tsv(utc_cycle: &str, band_mhz: f64) -> Result<String, NetError> {
+    let hz = |mhz: f64| (mhz * 1e6).round() as i64;
+    let sql = format!(
+        "SELECT formatDateTime(time, '%Y-%m-%d %H:%i') AS ts, tx_sign, \
+         round(frequency / 1000000, 6) AS mhz, snr, tx_loc, power, rx_sign, rx_loc, distance \
+         FROM wspr.rx \
+         WHERE time = toDateTime('{utc_cycle}:00') \
+         AND code = {IDENTIFIABLE_MESSAGE_CODE} \
+         AND length(tx_loc) >= 6 AND length(rx_loc) >= 6 \
+         AND power >= {MIN_PLAUSIBLE_TX_DBM} AND power <= {MAX_PLAUSIBLE_TX_DBM} \
+         AND frequency BETWEEN {} AND {} FORMAT TSV",
+        hz(band_mhz - 0.1),
+        hz(band_mhz + 0.1),
+    );
+    fetch_rows(&sql)
+}
+
+/// The busiest stations at one end of a path over a window, most active first.
+///
+/// This is how a corpus finds the stations whose fixed effects can actually be
+/// estimated; see [`CorpusQuery::restrict_tx`] for why that restriction is
+/// necessary and what it costs in representativeness.
+///
+/// # Errors
+/// Transport failures, and any error the archive reports.
+pub fn busiest_stations(
+    window: &Window,
+    min_km: u32,
+    max_km: u32,
+    max_mhz: f64,
+    end: StationEnd,
+    limit: u32,
+) -> Result<Vec<String>, NetError> {
+    let sql = format!(
+        "SELECT {col}, count() AS n FROM wspr.rx \
+         WHERE {} AND code = {IDENTIFIABLE_MESSAGE_CODE} \
+         AND length(tx_loc) >= 6 AND length(rx_loc) >= 6 \
+         AND power >= {MIN_PLAUSIBLE_TX_DBM} AND power <= {MAX_PLAUSIBLE_TX_DBM} \
+         AND distance BETWEEN {min_km} AND {max_km} AND frequency <= {} \
+         GROUP BY {col} ORDER BY n DESC, {col} ASC LIMIT {limit} FORMAT TSV",
+        window.predicate(),
+        (max_mhz * 1e6).round() as i64,
+        col = end.column(),
+    );
+    let body = fetch_rows(&sql)?;
+    Ok(body
+        .lines()
+        .filter_map(|l| l.split('\t').next())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
+/// Issue one query and reject a body that is a ClickHouse error rather than rows.
+fn fetch_rows(sql: &str) -> Result<String, NetError> {
+    let url = format!("{ENDPOINT}?query={}", urlencode(sql));
+    let body = net::get_text(&url)?;
+    if body.starts_with("Code:") || body.contains("DB::Exception") {
+        return Err(NetError::Data(format!(
+            "wspr.live rejected the query: {}",
+            body.lines().next().unwrap_or(&body)
+        )));
+    }
+    Ok(body)
 }
 
 /// Percent-encode everything that is not unreserved, so a query containing

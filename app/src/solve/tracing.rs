@@ -774,6 +774,9 @@ pub(super) fn assemble(
         total_absorption_db,
         free_space_loss_db,
         ground_reflection_loss_db,
+        // Set by the Es pass when a solution is attributed to the sheet; a
+        // deterministic path has no sheet reflection to charge for.
+        es_reflection_loss_db: 0.0,
         num_ground_reflections,
         total_system_loss_db,
         tx_gain_dbi,
