@@ -76,6 +76,9 @@ run -p skipzone-app --bin skipzone-app
 ```
 Keep an eye out on the other tools the repo can offer like ``wspr_calibrate``! See Docs
 
+## Supported Platforms
+Currently, it should theoretically support most modern operating systems such as Windows (+ Arm), MacOS, Linux — however, only Windows 11 has been tested. It also does have support for WebASM for browser support although it's not the main focus and is a proof of concept.
+
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE).
