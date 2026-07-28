@@ -23,7 +23,7 @@
 - [License](#license)
 
 ## Important Message!
-Currently, the engine is in a non production state as I fine-tune it and verify it's accuracy and work out minor inputs bugs. Do not expect the results as of 7/28/26 to be accurate!
+Currently, the engine is in a non production state as I fine-tune it and verify it's accuracy and work out minor inputs bugs. I also plan on adding a full wiki of app function, releases, etc. Right now, everything is pre-alpha.
 
 ## About
 
@@ -80,7 +80,7 @@ run -p skipzone-app --bin skipzone-app
 Keep an eye out on the other tools the repo can offer like ``wspr_calibrate``! See Docs
 
 ## Supported Platforms
-Currently, it should theoretically support most modern operating systems such as Windows (+ Arm), MacOS, Linux — however, only Windows 11 has been tested. It also does have support for WebASM for browser support although it's not the main focus and is a proof of concept.
+Currently, it should support most modern operating systems such as Windows (+ Arm), MacOS, Linux — however, only Windows 11 has been tested. It also does have support for WebASM for browser support although it's not the main focus and is a proof of concept.
 
 ## License
 
