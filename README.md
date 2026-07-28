@@ -13,9 +13,6 @@
 [![build](https://img.shields.io/github/actions/workflow/status/USER/skipzone/ci.yml?branch=main)](#)
 [![docs](https://img.shields.io/badge/docs-derivations-1D76DB)](docs/derivations)
 
-## Important Message!
-Currently, the engine is in a non production state as I fine-tune it and verify it's accuracy and work out minor inputs bugs. Do not expect the results as of 7/28/26 to be accurate!
-
 ⭐ Star us on GitHub if this is useful to you!
 
 ## Table of Contents
@@ -24,6 +21,9 @@ Currently, the engine is in a non production state as I fine-tune it and verify 
 - [Accuracy Report](#accuracy-report)
 - [Building](#building)
 - [License](#license)
+
+## Important Message!
+Currently, the engine is in a non production state as I fine-tune it and verify it's accuracy and work out minor inputs bugs. Do not expect the results as of 7/28/26 to be accurate!
 
 ## About
 
