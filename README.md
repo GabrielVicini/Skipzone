@@ -85,3 +85,4 @@ Currently, it should theoretically support most modern operating systems such as
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE).
+For any licensing concerns or questions, feel free to email ``hello@vicini.io``. Additionally, I suggest putting "shortwave" in the body so it can be routed correctly and reduce the chance of ending up in the spam folder.
