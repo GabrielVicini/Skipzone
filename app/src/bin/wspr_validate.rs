@@ -150,7 +150,7 @@ fn score(spot: &WsprSpot, base: &Inputs) -> SpotResult {
 
     let deterministic_snr_db = solve::best_by_snr(&out).map(|s| s.link.snr_db);
     let es = solve::best_es(&out).map(|s| (s.link.snr_db, s.probability));
-    let best = solve::best_including_es(&out);
+    let best = solve::best_with_es_fallback(&out);
 
     SpotResult {
         spot: spot.clone(),

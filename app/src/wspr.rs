@@ -29,7 +29,7 @@
 //! for, and not skill.
 
 use crate::grid;
-use crate::noise::{NoiseEnvironment, OperatingMode};
+use crate::noise::OperatingMode;
 use crate::scenario::Inputs;
 
 /// Reference bandwidth WSPR SNRs are quoted in, Hz.
@@ -77,7 +77,19 @@ impl WsprSpot {
     /// it, everything it does not state is left to `base`.
     ///
     /// The bandwidth and threshold are overridden unconditionally, because a
-    /// WSPR SNR only means anything in 2500 Hz.
+    /// WSPR SNR only means anything in 2500 Hz. Those two are properties of the
+    /// measurement and are not negotiable.
+    ///
+    /// The receiver's NOISE ENVIRONMENT is not in that category and is left to
+    /// `base`. It used to be pinned to [`NoiseEnvironment::Rural`] here, next to
+    /// the bandwidth, which put an assumption about every receiver's local noise
+    /// in the same place as a fact about the measurement and made it unreachable
+    /// from any harness. It is worth roughly 10 dB between city and quiet rural,
+    /// it is chosen rather than known, and a calibration must be able to say so
+    /// out loud rather than fitting around it. Note that it is also very nearly
+    /// UNIDENTIFIABLE from WSPR: the environment is a constant per receiver, so a
+    /// two-way fixed-effects fit absorbs it into that receiver's effect almost
+    /// exactly (see [`crate::fit`]).
     #[must_use]
     pub fn inputs_for(&self, base: &Inputs) -> Inputs {
         Inputs {
@@ -94,7 +106,6 @@ impl WsprSpot {
             bandwidth_hz: WSPR_REFERENCE_BANDWIDTH_HZ,
             snr_threshold_db: WSPR_DECODE_THRESHOLD_DB,
             op_mode: OperatingMode::Ft8,
-            noise_env: NoiseEnvironment::Rural,
             ..base.clone()
         }
     }
@@ -319,6 +330,7 @@ fn percentile(sorted: &[f64], q: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::noise::NoiseEnvironment;
 
     const SAMPLE: &str = "\
 # a comment
@@ -366,6 +378,19 @@ mod tests {
         let got = spots[0].inputs_for(&base);
         assert!((got.bandwidth_hz - WSPR_REFERENCE_BANDWIDTH_HZ).abs() < 1e-9);
         assert!((got.snr_threshold_db - WSPR_DECODE_THRESHOLD_DB).abs() < 1e-9);
+        // The noise environment is an ASSUMPTION about the receiver, not a
+        // property of the measurement, so it must come from the caller and be
+        // changeable. Pinning it here would hide a ~10 dB choice.
+        let city = Inputs {
+            noise_env: NoiseEnvironment::City,
+            ..base.clone()
+        };
+        assert_eq!(spots[0].inputs_for(&city).noise_env, NoiseEnvironment::City);
+        assert_eq!(
+            spots[0].inputs_for(&base).noise_env,
+            base.noise_env,
+            "the environment must be inherited, not overridden"
+        );
         // Everything the spot does not state is inherited untouched.
         assert!((got.ssn - 42.0).abs() < 1e-9);
         // Everything it does state is taken from it.

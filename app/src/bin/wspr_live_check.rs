@@ -467,7 +467,7 @@ fn score(spot: &WsprSpot, base: &Inputs) -> SpotResult {
     let out = solve::solve(&inputs, &a, &models);
     let det = solve::best_by_snr(&out);
     let es = solve::best_es(&out);
-    let best = solve::best_including_es(&out);
+    let best = solve::best_with_es_fallback(&out);
     SpotResult {
         spot: spot.clone(),
         solved_km: out.great_circle_km,

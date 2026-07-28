@@ -267,7 +267,7 @@ pub fn solve_cell(
             |r| r.status,
         );
 
-    if let Some(best) = solve::best_including_es(&out) {
+    if let Some(best) = solve::best_with_es_fallback(&out) {
         CoverageCell {
             lat,
             lon,
@@ -333,7 +333,7 @@ mod tests {
             let models = scenario::build_models(&reference_inputs, &a).expect("models");
             let out = solve::solve(&reference_inputs, &a, &models);
 
-            let (state, snr, prx, hops) = solve::best_including_es(&out).map_or(
+            let (state, snr, prx, hops) = solve::best_with_es_fallback(&out).map_or(
                 (
                     PathState::NoPath,
                     f64::NEG_INFINITY,

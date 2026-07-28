@@ -28,6 +28,7 @@ use skipzone::mag::{Igrf, IgrfModel, MagneticField};
 use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
 use crate::antenna::{AntennaConfig, Ground};
+use crate::calib::Anchors;
 use crate::chapman::{ConstantPeak, SlantFactor, SolarChapmanLayer};
 use crate::fof2::{self, Fof2Backend, Fof2Grid, GriddedF2Peak};
 use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
@@ -279,6 +280,11 @@ pub struct Inputs {
     pub bandwidth_hz: f64,
     /// SNR in `bandwidth_hz` required to call the path usable, dB.
     pub snr_threshold_db: f64,
+
+    /// The unverified anchors of the ionosphere and noise models. `Default`
+    /// reproduces the module constants exactly, so an ordinary run never needs
+    /// to touch this; a calibration run varies it. See [`crate::calib`].
+    pub anchors: Anchors,
 }
 
 impl Default for Inputs {
@@ -318,6 +324,7 @@ impl Default for Inputs {
             op_mode: OperatingMode::Ssb,
             bandwidth_hz: OperatingMode::Ssb.defaults().0,
             snr_threshold_db: OperatingMode::Ssb.defaults().1,
+            anchors: Anchors::default(),
         }
     }
 }
@@ -402,6 +409,7 @@ pub fn noise_floor_at(inputs: &Inputs, a: &Assumptions, f_mhz: f64) -> NoiseFloo
         a.rx_is_day,
         a.rx_season,
         inputs.rx_lat,
+        inputs.anchors.atmospheric,
     )
 }
 
@@ -521,10 +529,11 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     let chi_deg = solar.zenith_angle_deg;
     let mid_colat = Radians::from_degrees(90.0 - mid_lat).get();
     let mid_lon_rad = Radians::from_degrees(mid_lon).get();
+    let ion = inputs.anchors.ionosphere;
     let d_disp = SolarChapmanLayer::d_region(
-        D_REGION_PEAK_NE_OVERHEAD,
-        EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
-        D_REGION_SCALE_HEIGHT_KM * 1e3,
+        ion.d_peak_ne_overhead.value,
+        EARTH_RADIUS_M + ion.d_peak_alt_km.value * 1e3,
+        ion.d_scale_height_km.value * 1e3,
         solar.declination_deg,
         inputs.utc_hours,
     );
@@ -532,31 +541,35 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     // "Active" now means "producing at the midpoint", tied to the SAME
     // sun-above-horizon test as is_day(), so the panel can no longer disagree
     // with itself about day vs night (the old 85 deg / 90 deg split).
-    let d_region_active = solar.is_day() && d_region_peak_ne > 1e-3 * D_REGION_PEAK_NE_OVERHEAD;
+    let d_region_active = solar.is_day() && d_region_peak_ne > 1e-3 * ion.d_peak_ne_overhead.value;
     let rise_km = d_disp.realised_peak_rise(mid_colat, mid_lon_rad) / 1e3;
     let d_region_peak_alt_km = if rise_km.is_finite() {
-        D_REGION_PEAK_ALT_KM + rise_km
+        ion.d_peak_alt_km.value + rise_km
     } else {
-        D_REGION_PEAK_ALT_KM
+        ion.d_peak_alt_km.value
     };
     let d_region_source = format!(
         "alpha-Chapman with Chapman grazing function Ch(X, chi) at midpoint \
          chi = {chi_deg:.2} deg: realised peak Nm/sqrt(Ch) at +H ln(Ch), staying finite \
          through the terminator. Evaluated at the LOCAL zenith angle at every point on \
          the ray, so a path crossing the terminator is absorbed only on its sunlit part. \
-         Overhead anchor {D_REGION_PEAK_NE_OVERHEAD:.1e} m^-3 at {D_REGION_PEAK_ALT_KM:.0} km \
-         (order-of-magnitude, not a fitted model)"
+         Overhead anchor {:.1e} m^-3 at {:.0} km \
+         (order-of-magnitude, not a fitted model)",
+        ion.d_peak_ne_overhead.value, ion.d_peak_alt_km.value
     );
 
     // E region: the same generalised layer on the same grazing branch, so foE
     // follows (cos chi)^{1/4} without ever touching the engine's plane-parallel
     // 85 deg limit. The overhead anchor is the only free number.
-    let foe_overhead_mhz = fof2::foe_overhead(inputs.ssn);
+    let foe_overhead_mhz = fof2::foe_overhead(inputs.ssn, ion.foe_overhead_quiet_mhz.value);
     let e_disp = SolarChapmanLayer::new(
-        Box::new(ConstantPeak(fof2::e_layer_peak_ne(inputs.ssn))),
+        Box::new(ConstantPeak(fof2::e_layer_peak_ne(
+            inputs.ssn,
+            ion.foe_overhead_quiet_mhz.value,
+        ))),
         SlantFactor::solar(solar.declination_deg, inputs.utc_hours),
-        EARTH_RADIUS_M + E_REGION_PEAK_ALT_KM * 1e3,
-        E_REGION_SCALE_HEIGHT_KM * 1e3,
+        EARTH_RADIUS_M + ion.e_peak_alt_km.value * 1e3,
+        ion.e_scale_height_km.value * 1e3,
     );
     let foe_midpoint_mhz = critical_frequency(PerCubicMeter::new(
         e_disp.realised_peak_ne(mid_colat, mid_lon_rad),
@@ -567,17 +580,25 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         "overhead foE {foe_overhead_mhz:.2} MHz from SSN = {:.0} via \
          foE^4 proportional to (1 + {:.4} R), realised as foE (cos chi)^(1/4) BY THE LAYER \
          through the same Chapman grazing function the D region uses - so it thins smoothly \
-         through the terminator instead of being cut off at 85 deg. Peak {E_REGION_PEAK_ALT_KM:.0} km, \
-         scale {E_REGION_SCALE_HEIGHT_KM:.0} km (order-of-magnitude anchors, not a fitted model)",
+         through the terminator instead of being cut off at 85 deg. Peak {:.0} km, \
+         scale {:.0} km (order-of-magnitude anchors, not a fitted model)",
         inputs.ssn,
         fof2::FOE_SOLAR_COEFF,
+        ion.e_peak_alt_km.value,
+        ion.e_scale_height_km.value,
     );
 
     // Sporadic E: probabilistic, so it never enters the deterministic verdict.
     let sporadic = if inputs.es_manual {
         SporadicE::manual(inputs.foes_mhz, inputs.es_probability)
     } else {
-        SporadicE::derive(season, lst, mid_lat)
+        SporadicE::derive(
+            season,
+            lst,
+            mid_lat,
+            ion.es_foes_max_mhz.value,
+            ion.es_peak_probability.value,
+        )
     };
     let es_solved = inputs.es_enabled && sporadic.is_worth_solving();
 
@@ -604,13 +625,14 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         )
     } else {
         (
-            NU_REF_PER_S,
-            NU_REF_ALT_KM,
-            NU_SCALE_HEIGHT_KM,
+            ion.nu_ref_per_s.value,
+            ion.nu_ref_alt_km.value,
+            ion.nu_scale_height_km.value,
             format!(
-                "neutral-atmosphere exponential, {NU_REF_PER_S:.1e} /s at {NU_REF_ALT_KM:.0} km, \
-                 scale {NU_SCALE_HEIGHT_KM:.1} km (order-of-magnitude anchor). nu follows neutral \
-                 density and is NOT a function of solar zenith angle"
+                "neutral-atmosphere exponential, {:.1e} /s at {:.0} km, \
+                 scale {:.1} km (order-of-magnitude anchor). nu follows neutral \
+                 density and is NOT a function of solar zenith angle",
+                ion.nu_ref_per_s.value, ion.nu_ref_alt_km.value, ion.nu_scale_height_km.value
             ),
         )
     };
@@ -630,7 +652,7 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         foe_overhead_mhz,
         foe_midpoint_mhz,
         foe_source,
-        e_region_peak_alt_km: E_REGION_PEAK_ALT_KM,
+        e_region_peak_alt_km: ion.e_peak_alt_km.value,
         sporadic_e: sporadic,
         es_solved,
         hmf2_km: hmf2,
@@ -769,10 +791,11 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     // Chapman grazing function at the local solar zenith angle of each sampled
     // point, self-zeroing smoothly on the night side rather than being switched
     // off at a midpoint zenith-angle threshold (docs/derivations/chapman-grazing.md).
+    let ion = inputs.anchors.ionosphere;
     let d = SolarChapmanLayer::d_region(
-        D_REGION_PEAK_NE_OVERHEAD,
-        EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
-        D_REGION_SCALE_HEIGHT_KM * 1e3,
+        ion.d_peak_ne_overhead.value,
+        EARTH_RADIUS_M + ion.d_peak_alt_km.value * 1e3,
+        ion.d_scale_height_km.value * 1e3,
         a.solar.declination_deg,
         inputs.utc_hours,
     );
@@ -781,10 +804,13 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     // paths somewhere to reflect from in daylight when F2 has no solution at
     // that geometry.
     let e = SolarChapmanLayer::new(
-        Box::new(ConstantPeak(fof2::e_layer_peak_ne(inputs.ssn))),
+        Box::new(ConstantPeak(fof2::e_layer_peak_ne(
+            inputs.ssn,
+            ion.foe_overhead_quiet_mhz.value,
+        ))),
         SlantFactor::solar(a.solar.declination_deg, inputs.utc_hours),
-        EARTH_RADIUS_M + E_REGION_PEAK_ALT_KM * 1e3,
-        E_REGION_SCALE_HEIGHT_KM * 1e3,
+        EARTH_RADIUS_M + ion.e_peak_alt_km.value * 1e3,
+        ion.e_scale_height_km.value * 1e3,
     );
 
     let layers: Vec<Box<dyn ElectronDensity + Send + Sync>> =
@@ -818,15 +844,18 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
                 a.scale_height_km * 1e3,
             )),
             Box::new(SolarChapmanLayer::new(
-                Box::new(ConstantPeak(fof2::e_layer_peak_ne(inputs.ssn))),
+                Box::new(ConstantPeak(fof2::e_layer_peak_ne(
+                    inputs.ssn,
+                    ion.foe_overhead_quiet_mhz.value,
+                ))),
                 SlantFactor::solar(a.solar.declination_deg, inputs.utc_hours),
-                EARTH_RADIUS_M + E_REGION_PEAK_ALT_KM * 1e3,
-                E_REGION_SCALE_HEIGHT_KM * 1e3,
+                EARTH_RADIUS_M + ion.e_peak_alt_km.value * 1e3,
+                ion.e_scale_height_km.value * 1e3,
             )),
             Box::new(SolarChapmanLayer::d_region(
-                D_REGION_PEAK_NE_OVERHEAD,
-                EARTH_RADIUS_M + D_REGION_PEAK_ALT_KM * 1e3,
-                D_REGION_SCALE_HEIGHT_KM * 1e3,
+                ion.d_peak_ne_overhead.value,
+                EARTH_RADIUS_M + ion.d_peak_alt_km.value * 1e3,
+                ion.d_scale_height_km.value * 1e3,
                 a.solar.declination_deg,
                 inputs.utc_hours,
             )),

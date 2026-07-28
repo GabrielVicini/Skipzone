@@ -33,6 +33,7 @@
 //! across; this models a uniform blanket, which is why the occurrence
 //! probability is reported rather than a yes/no.
 
+use skipzone::constants::SPEED_OF_LIGHT;
 use skipzone::density::{ProfileError, QuasiParabolicLayer, density_at_critical_frequency};
 use skipzone::units::{Hertz, Meters, PerCubicMeter};
 
@@ -130,11 +131,24 @@ pub struct SporadicE {
 impl SporadicE {
     /// Derive foEs and its occurrence probability from local season, local
     /// solar time and latitude.
+    ///
+    /// `foes_max_mhz` and `peak_probability` are the [`ES_FOES_MAX_MHZ`] and
+    /// [`ES_PEAK_PROBABILITY`] anchors, passed in rather than read from the
+    /// constants so a calibration run can move them. The SHAPE they scale -
+    /// [`es_shape`], the summer maximum, the twin diurnal peaks and the
+    /// temperate-latitude weighting - is the documented climatology and is not a
+    /// calibration target.
     #[must_use]
-    pub fn derive(season: Season, lst_h: f64, lat_deg: f64) -> Self {
+    pub fn derive(
+        season: Season,
+        lst_h: f64,
+        lat_deg: f64,
+        foes_max_mhz: f64,
+        peak_probability: f64,
+    ) -> Self {
         let shape = es_shape(season, lst_h, lat_deg).clamp(0.0, 1.0);
-        let probability = ES_PEAK_PROBABILITY * shape;
-        let foes_mhz = ES_FOES_MIN_MHZ + (ES_FOES_MAX_MHZ - ES_FOES_MIN_MHZ) * shape;
+        let probability = peak_probability * shape;
+        let foes_mhz = ES_FOES_MIN_MHZ + (foes_max_mhz - ES_FOES_MIN_MHZ) * shape;
         Self {
             foes_mhz,
             probability,
@@ -150,7 +164,7 @@ impl SporadicE {
                  not modelled",
                 season.label(),
                 100.0 * shape,
-                100.0 * ES_PEAK_PROBABILITY,
+                100.0 * peak_probability,
             ),
         }
     }
@@ -192,6 +206,104 @@ impl SporadicE {
         )
     }
 
+    /// Power fraction that TUNNELS THROUGH the sheet instead of reflecting from
+    /// it, for a ray whose turning point the tracer placed at `apex_alt_km`.
+    ///
+    /// # Why an Es reflection is not automatically total
+    ///
+    /// The tracer is a geometric-optics tracer: it turns a ray where the local
+    /// plasma condition is met and calls that a reflection, with no loss at all.
+    /// For a *thick* layer that is right. For a thin sheet it is not, because the
+    /// evanescent region above the turning point has FINITE width - the density
+    /// falls back through the same value on the far side of the peak - so the
+    /// wave does not decay forever. It decays across a barrier and re-emerges
+    /// above the sheet. That transmitted fraction is energy the reflected ray
+    /// never carries, and it is the one reflection loss an Es sheet has that
+    /// follows from the model's own geometry rather than from a fitted constant.
+    ///
+    /// # Derivation
+    ///
+    /// Take the sheet in its plane-stratified limit, which is where the barrier
+    /// integral is analytic (the engine's [`QuasiParabolicLayer`] is the
+    /// spherical-Earth form of the same profile):
+    ///
+    /// ```text
+    ///   fp^2(z) = foEs^2 [1 - u^2],   u = (z - h) / a
+    /// ```
+    ///
+    /// with `h` the peak height and `a` the semi-thickness. By the Martyn
+    /// equivalence an oblique ray at incidence `i` behaves like a vertical wave
+    /// at the equivalent vertical frequency `f_v = f cos i`, and it turns where
+    /// `fp = f_v`. Writing `r = f_v / foEs`, the turning point sits at
+    /// `u_t = -sqrt(1 - r^2)` and the evanescent region is `|u| < sqrt(1 - r^2)`,
+    /// symmetric about the peak. In the WKB (Gamow) approximation the
+    /// transmitted power fraction across it is `T = exp(-2 int kappa dz)` with
+    /// `kappa = (2 pi / c) sqrt(fp^2 - f_v^2)`, and that integral is a
+    /// semicircle:
+    ///
+    /// ```text
+    ///   2 int kappa dz = (4 pi / c) foEs a int_-s^s sqrt(s^2 - u^2) du
+    ///                  = (2 pi^2 / c) foEs a (1 - r^2),      s = sqrt(1 - r^2)
+    /// ```
+    ///
+    /// so the barrier opacity is [`Self::barrier_opacity`] and the reflection
+    /// loss is `-10 log10(1 - T)`.
+    ///
+    /// The one thing needed from the ray is `1 - r^2`, and that is read straight
+    /// off the traced geometry rather than re-derived from a secant law: in the
+    /// parabolic profile `1 - r^2 = u_t^2`, i.e. the turning point's depth below
+    /// the peak measured in semi-thicknesses. So the apex altitude the ENGINE
+    /// reported is the whole input, and no incidence angle has to be
+    /// reconstructed. (`tests::opacity_from_apex_matches_the_frequency_form`
+    /// pins that identity against the `f_v/foEs` route.)
+    ///
+    /// # What it measures out at, which is the finding
+    ///
+    /// `(2 pi^2 / c) foEs a` is about 790 for a 8 MHz sheet 1.5 km semi-thick,
+    /// so the barrier is hundreds of e-foldings opaque unless the ray turns
+    /// within ~0.1 % of the peak density. Over the geometries the tracer
+    /// actually produces this term is therefore ZERO to many decimal places, and
+    /// that is a result rather than a disappointment: **a 1.5 km Es sheet really
+    /// is a near-perfect mirror at HF**, so an Es bias measured against real
+    /// spots cannot be blamed on a missing reflection loss. It has to come from
+    /// the selection rule, from [`Self::foes_mhz`], or from
+    /// [`Self::probability`]. The term is kept because it is derived, costs
+    /// nothing, and makes the Es MUF cut off with the sharpness the sheet
+    /// thickness implies instead of by fiat.
+    #[must_use]
+    pub fn tunnelling_fraction(&self, apex_alt_km: f64) -> f64 {
+        (-self.barrier_opacity(apex_alt_km)).exp()
+    }
+
+    /// The dimensionless barrier opacity `2 int kappa dz` of
+    /// [`Self::tunnelling_fraction`], for a turning point at `apex_alt_km`.
+    ///
+    /// Zero (fully transparent) when the ray turned at or above the peak, where
+    /// there is no barrier left to cross.
+    #[must_use]
+    pub fn barrier_opacity(&self, apex_alt_km: f64) -> f64 {
+        if !apex_alt_km.is_finite() || self.semi_thickness_km <= 0.0 {
+            return f64::INFINITY;
+        }
+        // Depth of the turning point below the peak, in semi-thicknesses. This
+        // is |u_t|, and u_t^2 is the `1 - r^2` of the derivation.
+        let depth = ((self.height_km - apex_alt_km) / self.semi_thickness_km).clamp(0.0, 1.0);
+        2.0 * std::f64::consts::PI.powi(2) / SPEED_OF_LIGHT
+            * (self.foes_mhz * 1e6)
+            * (self.semi_thickness_km * 1e3)
+            * depth
+            * depth
+    }
+
+    /// Reflection loss at ONE bounce off the sheet, dB, for a ray the tracer
+    /// turned at `apex_alt_km`. See [`Self::tunnelling_fraction`] for the
+    /// derivation and for why this is almost always 0.
+    #[must_use]
+    pub fn reflection_loss_db(&self, apex_alt_km: f64) -> f64 {
+        let reflected = 1.0 - self.tunnelling_fraction(apex_alt_km);
+        -10.0 * reflected.clamp(1e-12, 1.0).log10()
+    }
+
     /// Altitude band a reflection has to sit in to be attributed to Es, km.
     /// Deliberately wider than the sheet: a ray turns a little below the peak,
     /// and the QP layer's upper zero sits above it.
@@ -218,7 +330,7 @@ mod tests {
     /// equator and the pole.
     #[test]
     fn occurrence_trends_are_as_documented() {
-        let at = |season, lst, lat| SporadicE::derive(season, lst, lat).probability;
+        let at = |season, lst, lat| SporadicE::derive(season, lst, lat, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability;
 
         // Season, at the summer diurnal peak and latitude.
         let summer = at(Season::Summer, ES_MORNING_PEAK_LST_H, ES_PEAK_LAT_DEG);
@@ -264,16 +376,16 @@ mod tests {
     fn diurnal_cycle_wraps_at_midnight() {
         assert!((lst_separation(23.5, 0.5) - 1.0).abs() < 1e-12);
         assert!((lst_separation(1.0, 23.0) - 2.0).abs() < 1e-12);
-        let before = SporadicE::derive(Season::Summer, 23.9, 40.0).probability;
-        let after = SporadicE::derive(Season::Summer, 0.1, 40.0).probability;
+        let before = SporadicE::derive(Season::Summer, 23.9, 40.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability;
+        let after = SporadicE::derive(Season::Summer, 0.1, 40.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability;
         assert!((before - after).abs() < 0.02, "{before} vs {after}");
     }
 
     /// foEs tracks occurrence and stays in the anchored band.
     #[test]
     fn foes_tracks_occurrence_within_its_band() {
-        let strong = SporadicE::derive(Season::Summer, ES_MORNING_PEAK_LST_H, ES_PEAK_LAT_DEG);
-        let weak = SporadicE::derive(Season::Winter, 3.0, 5.0);
+        let strong = SporadicE::derive(Season::Summer, ES_MORNING_PEAK_LST_H, ES_PEAK_LAT_DEG, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
+        let weak = SporadicE::derive(Season::Winter, 3.0, 5.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
         assert!(strong.foes_mhz > weak.foes_mhz);
         for s in [&strong, &weak] {
             assert!(
@@ -295,7 +407,7 @@ mod tests {
     /// and nowhere else.
     #[test]
     fn layer_is_a_thin_sheet_at_the_stated_height() {
-        let es = SporadicE::derive(Season::Summer, 10.0, 45.0);
+        let es = SporadicE::derive(Season::Summer, 10.0, 45.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
         let layer = es.layer(R0).expect("engine accepts the Es geometry");
         let at = |alt_km: f64| {
             layer
@@ -331,12 +443,79 @@ mod tests {
     /// can never be misfiled as an E-layer reflection.
     #[test]
     fn attribution_band_contains_the_sheet() {
-        let es = SporadicE::derive(Season::Summer, 10.0, 45.0);
+        let es = SporadicE::derive(Season::Summer, 10.0, 45.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
         let (lo, hi) = es.attribution_band_km();
         assert!(lo < ES_HEIGHT_KM - ES_SEMI_THICKNESS_KM);
         assert!(hi > ES_HEIGHT_KM + ES_SEMI_THICKNESS_KM);
         // ...and it does not reach the E layer's own peak at 105-110 km.
         assert!(hi < 110.0, "band top {hi} would swallow the E layer");
+    }
+
+    /// The barrier opacity read off the traced apex must equal the one derived
+    /// from the equivalent vertical frequency. Two routes to `1 - r^2`: the
+    /// turning point's depth below the peak (what the code uses, because the
+    /// engine reports the apex) and `1 - (f_v/foEs)^2` (what the derivation is
+    /// written in). In a parabolic sheet they are the same number, and if they
+    /// ever stop being the same the profile assumption has drifted.
+    #[test]
+    fn opacity_from_apex_matches_the_frequency_form() {
+        let es = SporadicE::manual(8.0, 0.4);
+        for depth in [0.1, 0.372, 0.5, 0.928, 1.0] {
+            let apex = es.height_km - depth * es.semi_thickness_km;
+            // Parabolic profile: fp(apex)/foEs = sqrt(1 - depth^2), and the ray
+            // turns where f_v = fp, so r = sqrt(1 - depth^2) and 1 - r^2 = depth^2.
+            let r = (1.0 - depth * depth).sqrt();
+            let expected = 2.0 * std::f64::consts::PI.powi(2) / SPEED_OF_LIGHT
+                * (es.foes_mhz * 1e6)
+                * (es.semi_thickness_km * 1e3)
+                * (1.0 - r * r);
+            let got = es.barrier_opacity(apex);
+            assert!(
+                (got - expected).abs() < 1e-9 * expected.max(1.0),
+                "depth {depth}: {got} vs {expected}"
+            );
+        }
+    }
+
+    /// The magnitude that makes this a FINDING rather than a knob: a sheet of
+    /// the modelled thickness is hundreds of e-foldings opaque, so the loss is
+    /// zero everywhere except within a whisker of the peak. If a future change
+    /// to the sheet geometry makes this term start to bite, this test is where
+    /// that shows up.
+    #[test]
+    fn the_sheet_is_an_almost_perfect_mirror() {
+        let es = SporadicE::manual(8.0, 0.4);
+        // The scale factor of the derivation, quoted in the doc comment as ~790.
+        let full = es.barrier_opacity(es.height_km - es.semi_thickness_km);
+        assert!((700.0..900.0).contains(&full), "opacity scale {full}");
+
+        // A ray turning where the tracer actually puts them - a good fraction of
+        // a semi-thickness below the peak - loses nothing measurable.
+        let typical = es.reflection_loss_db(98.6);
+        assert!(typical < 1e-9, "{typical} dB at a typical Es apex");
+
+        // The loss only reaches 1 dB when the turning point is within about
+        // 0.1 % of the peak DENSITY, i.e. ~5 % of a semi-thickness below the
+        // peak in height. That sharpness is the sheet thickness talking.
+        let depth_for_1db = (1.58 / full).sqrt();
+        let apex_1db = es.height_km - depth_for_1db * es.semi_thickness_km;
+        assert!(
+            (es.reflection_loss_db(apex_1db) - 1.0).abs() < 0.2,
+            "{} dB at apex {apex_1db}",
+            es.reflection_loss_db(apex_1db)
+        );
+        assert!(depth_for_1db < 0.06, "transition width {depth_for_1db}");
+
+        // Monotone: turning deeper can only mean a thicker barrier.
+        let mut previous = f64::INFINITY;
+        for depth in [0.0, 0.02, 0.05, 0.1, 0.3, 1.0] {
+            let loss = es.reflection_loss_db(es.height_km - depth * es.semi_thickness_km);
+            assert!(loss <= previous + 1e-12, "not monotone at depth {depth}");
+            previous = loss;
+        }
+        // Turning at or above the peak leaves no barrier: total transmission.
+        assert!(es.tunnelling_fraction(es.height_km) > 0.999);
+        assert!(es.tunnelling_fraction(es.height_km + 1.0) > 0.999);
     }
 
     /// A manual override is used verbatim and says so.

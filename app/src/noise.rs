@@ -40,6 +40,7 @@
 //! the boundaries - see [`dbm_from_watts`] and [`noise_power_dbm`].
 
 use crate::antenna::GainCurve;
+use crate::calib::AtmosphericAnchors;
 use crate::scenario::Season;
 
 /// Boltzmann's constant, J/K. The value P.372-9 itself states under eq. (2).
@@ -82,7 +83,7 @@ pub fn noise_power_dbm(fa_db: f64, bandwidth_hz: f64) -> f64 {
 }
 
 /// Man-made noise environment: the categories of P.372-9 Table 1.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NoiseEnvironment {
     City,
     Residential,
@@ -183,25 +184,34 @@ pub const ATM_POLAR_OFFSET_DB: f64 = 6.0;
 /// `Fa_atm = F1 + season + latitude - slope * log10(f_MHz)`
 /// with `F1` and `slope` selected by day/night. **Approximation - see the
 /// module docs. Not P.372 map data.**
+///
+/// The seven absolute anchors arrive in `anchors` rather than being read from
+/// the constants directly, so that a calibration run can move them; the constants
+/// remain the source of [`AtmosphericAnchors::default`], so a default `anchors`
+/// reproduces this function's original behaviour exactly. The SHAPE - log-linear
+/// in frequency, additive day/night, season and latitude terms - is not a
+/// calibration target and stays hard-coded here.
 #[must_use]
 pub fn atmospheric_noise_figure_db(
     f_mhz: f64,
     is_day: bool,
     season: Season,
     latitude_deg: f64,
+    anchors: AtmosphericAnchors,
 ) -> f64 {
     let (f1, slope) = if is_day {
-        (ATM_1MHZ_DAY_DB, ATM_SLOPE_DAY_DB)
+        (anchors.f1_day_db.value, anchors.slope_day_db.value)
     } else {
-        (ATM_1MHZ_NIGHT_DB, ATM_SLOPE_NIGHT_DB)
+        (anchors.f1_night_db.value, anchors.slope_night_db.value)
     };
     let season_db = match season {
-        Season::Summer => ATM_SEASON_SWING_DB,
-        Season::Winter => -ATM_SEASON_SWING_DB,
+        Season::Summer => anchors.season_swing_db.value,
+        Season::Winter => -anchors.season_swing_db.value,
         Season::Equinox => 0.0,
     };
     let cos_lat = latitude_deg.to_radians().cos().abs().clamp(0.0, 1.0);
-    let lat_db = ATM_TROPICAL_BOOST_DB * cos_lat.powi(3) - ATM_POLAR_OFFSET_DB;
+    let lat_db =
+        anchors.tropical_boost_db.value * cos_lat.powi(3) - anchors.polar_offset_db.value;
     f1 + season_db + lat_db - slope * f_mhz.max(1e-6).log10()
 }
 
@@ -243,8 +253,10 @@ impl NoiseFloor {
         is_day: bool,
         season: Season,
         latitude_deg: f64,
+        anchors: AtmosphericAnchors,
     ) -> Self {
-        let atmospheric_db = atmospheric_noise_figure_db(f_mhz, is_day, season, latitude_deg);
+        let atmospheric_db =
+            atmospheric_noise_figure_db(f_mhz, is_day, season, latitude_deg, anchors);
         let man_made_db = man_made_noise_figure_db(env, f_mhz);
         let galactic_db = galactic_noise_figure_db(f_mhz);
         let total_fa_db = combine_noise_figures_db(&[atmospheric_db, man_made_db, galactic_db]);
@@ -555,7 +567,7 @@ mod tests {
         let mut prev = f64::INFINITY;
         let mut f = 2.0;
         while f <= 30.0 {
-            let v = atmospheric_noise_figure_db(f, night, Season::Equinox, mid);
+            let v = atmospheric_noise_figure_db(f, night, Season::Equinox, mid, AtmosphericAnchors::default());
             assert!(v < prev, "not falling at {f} MHz");
             prev = v;
             f += 0.5;
@@ -563,23 +575,23 @@ mod tests {
         // Night is louder than day at the same frequency.
         for f in [3.5, 7.0, 14.0, 28.0] {
             assert!(
-                atmospheric_noise_figure_db(f, night, Season::Equinox, mid)
-                    > atmospheric_noise_figure_db(f, day, Season::Equinox, mid),
+                atmospheric_noise_figure_db(f, night, Season::Equinox, mid, AtmosphericAnchors::default())
+                    > atmospheric_noise_figure_db(f, day, Season::Equinox, mid, AtmosphericAnchors::default()),
                 "night should exceed day at {f} MHz"
             );
         }
         // Summer louder than winter, by the full documented swing.
-        let s = atmospheric_noise_figure_db(7.0, night, Season::Summer, mid);
-        let w = atmospheric_noise_figure_db(7.0, night, Season::Winter, mid);
+        let s = atmospheric_noise_figure_db(7.0, night, Season::Summer, mid, AtmosphericAnchors::default());
+        let w = atmospheric_noise_figure_db(7.0, night, Season::Winter, mid, AtmosphericAnchors::default());
         assert!((s - w - 2.0 * ATM_SEASON_SWING_DB).abs() < 1e-9);
         // Tropics louder than poles.
         assert!(
-            atmospheric_noise_figure_db(7.0, night, Season::Equinox, 0.0)
-                > atmospheric_noise_figure_db(7.0, night, Season::Equinox, 80.0)
+            atmospheric_noise_figure_db(7.0, night, Season::Equinox, 0.0, AtmosphericAnchors::default())
+                > atmospheric_noise_figure_db(7.0, night, Season::Equinox, 80.0, AtmosphericAnchors::default())
         );
         // Sign of latitude must not matter.
-        let n = atmospheric_noise_figure_db(7.0, night, Season::Equinox, 35.0);
-        let s = atmospheric_noise_figure_db(7.0, night, Season::Equinox, -35.0);
+        let n = atmospheric_noise_figure_db(7.0, night, Season::Equinox, 35.0, AtmosphericAnchors::default());
+        let s = atmospheric_noise_figure_db(7.0, night, Season::Equinox, -35.0, AtmosphericAnchors::default());
         assert!((n - s).abs() < 1e-12);
     }
 
@@ -590,14 +602,14 @@ mod tests {
     #[test]
     fn atmospheric_dominates_low_hf_galactic_dominates_high_hf() {
         let env = NoiseEnvironment::QuietRural;
-        let low = NoiseFloor::compute(2.0, 2400.0, env, false, Season::Equinox, 50.0);
+        let low = NoiseFloor::compute(2.0, 2400.0, env, false, Season::Equinox, 50.0, AtmosphericAnchors::default());
         assert!(
             low.atmospheric_db > low.galactic_db + 10.0,
             "at 2 MHz atmospheric {} should dominate galactic {}",
             low.atmospheric_db,
             low.galactic_db
         );
-        let high = NoiseFloor::compute(28.0, 2400.0, env, true, Season::Equinox, 50.0);
+        let high = NoiseFloor::compute(28.0, 2400.0, env, true, Season::Equinox, 50.0, AtmosphericAnchors::default());
         assert!(
             high.galactic_db > high.atmospheric_db,
             "at 28 MHz daytime galactic {} should dominate atmospheric {}",
@@ -621,6 +633,7 @@ mod tests {
             true,
             Season::Equinox,
             50.0,
+            AtmosphericAnchors::default(),
         );
         let lb = LinkBudget::new(100.0, 140.0, noise, 10.0);
         assert!((lb.tx_power_dbm - 50.0).abs() < 1e-9);
@@ -646,6 +659,7 @@ mod tests {
             true,
             Season::Equinox,
             50.0,
+            AtmosphericAnchors::default(),
         );
         // Pick the loss that lands SNR exactly on a 10 dB threshold.
         let exact_loss = dbm_from_watts(100.0) - noise.power_dbm - 10.0;
@@ -671,6 +685,7 @@ mod tests {
             true,
             Season::Equinox,
             50.0,
+            AtmosphericAnchors::default(),
         );
         assert!(
             LinkBudget::new(100.0, 165.0, quiet, thr).state() == PathState::Usable,

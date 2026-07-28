@@ -419,7 +419,7 @@ mod tests {
     /// rather than an error of zero. Those mean opposite things.
     #[test]
     fn a_cut_that_found_nothing_reports_no_error_not_a_zero_error() {
-        let results = vec![result(21.0, -10.0, None, 9000.0), result(21.0, -12.0, None, 9000.0)];
+        let results = [result(21.0, -10.0, None, 9000.0), result(21.0, -12.0, None, 9000.0)];
         let cut = Cut::of("15 m".into(), &results.iter().collect::<Vec<_>>());
         assert_eq!(cut.closed, 0);
         assert!((cut.hit_rate - 0.0).abs() < 1e-12);
