@@ -113,7 +113,7 @@ at the source (typed error); else m = sqrt(n0^2) k_hat, which puts the state
 exactly on shell (n depends only on direction, so no iteration is needed).
 H = 0 is then a conserved diagnostic; its drift measures integrator error.
 
-## 7. Conditioning near reflection (spec-required statement)
+## 7. Conditioning near reflection
 
 At an O-mode apex n^2 -> 0: v -> m -> 0, so d(position)/dsigma -> 0 while
 dm/dsigma -> (1/2) grad n^2, finite. The trajectory is smooth in sigma; this
