@@ -67,13 +67,14 @@ nothing beyond `std`.
 Coming soon — a validation report against real-world propagation data will
 be published once the project reaches its first tagged release.
 
-## Building
-
+## Building (To run the GUI)
+Make sure you have the repo downloaded!
 ```
 cargo build --release
 cargo test
-cargo run -p skipzone-app
+run -p skipzone-app --bin skipzone-app
 ```
+Keep an eye out on the other tools the repo can offer like ``wspr_calibrate``! See Docs
 
 ## License
 
