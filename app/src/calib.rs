@@ -108,6 +108,10 @@ pub struct IonosphereAnchors {
     pub d_peak_alt_km: Bounded,
     /// D-region Chapman scale height, km.
     pub d_scale_height_km: Bounded,
+    /// Residual night-time D-region density, as a fraction of the overhead-sun
+    /// peak. See [`crate::chapman::SolarChapmanLayer::with_night_floor`] for why
+    /// an alpha-Chapman layer cannot derive this and must be given it.
+    pub d_night_floor_fraction: Bounded,
     /// Electron-neutral collision frequency at `nu_ref_alt_km`, s^-1.
     pub nu_ref_per_s: Bounded,
     /// Reference altitude for `nu_ref_per_s`, km.
@@ -135,6 +139,7 @@ impl Default for IonosphereAnchors {
             d_peak_ne_overhead: Bounded::new(s::D_REGION_PEAK_NE_OVERHEAD, 3.0e8, 3.0e9),
             d_peak_alt_km: Bounded::new(s::D_REGION_PEAK_ALT_KM, 80.0, 90.0),
             d_scale_height_km: Bounded::new(s::D_REGION_SCALE_HEIGHT_KM, 4.0, 10.0),
+            d_night_floor_fraction: Bounded::new(s::D_REGION_NIGHT_FLOOR_FRACTION, 0.0, 0.25),
             nu_ref_per_s: Bounded::new(s::NU_REF_PER_S, 1.0e6, 2.0e7),
             nu_ref_alt_km: Bounded::new(s::NU_REF_ALT_KM, 65.0, 80.0),
             nu_scale_height_km: Bounded::new(s::NU_SCALE_HEIGHT_KM, 5.0, 9.0),
@@ -159,14 +164,19 @@ impl Default for IonosphereAnchors {
 /// polar winter night and an equatorial summer night.
 #[derive(Clone, Copy, Debug)]
 pub struct AtmosphericAnchors {
-    /// `Fa` at 1 MHz, night, mid-latitude, equinox, dB above kT0b.
-    pub f1_night_db: Bounded,
     /// `Fa` at 1 MHz, day, mid-latitude, equinox, dB above kT0b.
     pub f1_day_db: Bounded,
-    /// Night fall-off with frequency, dB per decade.
-    pub slope_night_db: Bounded,
     /// Day fall-off with frequency, dB per decade.
     pub slope_day_db: Bounded,
+    /// Day -> night step at 1 MHz, dB. See
+    /// [`crate::noise::atmospheric_noise_figure_db`] for why the night curve is a
+    /// step on the day curve rather than a second independent line.
+    pub step_1mhz_db: Bounded,
+    /// Linear frequency dependence of that step, dB per decade. Negative narrows
+    /// the step with rising frequency; POSITIVE inverts it.
+    pub step_slope_db: Bounded,
+    /// Curvature of the step in `log10(f)`, dB per decade squared.
+    pub step_curve_db: Bounded,
     /// Summer / winter offset about the equinox value, dB.
     pub season_swing_db: Bounded,
     /// Equatorial excess over the polar value, dB.
@@ -179,10 +189,60 @@ impl Default for AtmosphericAnchors {
     fn default() -> Self {
         use crate::noise as n;
         Self {
-            f1_night_db: Bounded::new(n::ATM_1MHZ_NIGHT_DB, 80.0, 110.0),
             f1_day_db: Bounded::new(n::ATM_1MHZ_DAY_DB, 55.0, 90.0),
-            slope_night_db: Bounded::new(n::ATM_SLOPE_NIGHT_DB, 35.0, 65.0),
             slope_day_db: Bounded::new(n::ATM_SLOPE_DAY_DB, 30.0, 60.0),
+            // The three step bounds are drawn around a CONTRAST, not around an
+            // absolute level, which is the whole point of the reparameterisation.
+            //
+            // Do not restore level-shaped bounds here. The old night anchors were
+            // boxed by what an absolute atmospheric Fa may plausibly be
+            // (80..110 dB at 1 MHz, 35..65 dB/decade), and the fit railed all of
+            // them because it was steering a DIFFERENCE through boxes drawn around
+            // LEVELS. Raising the night slope ceiling from 65 to 90 was tried on
+            // the whole corpus: it railed again, Fa night stayed pinned, the
+            // absorption scale stayed pinned, and RMS with station effects removed
+            // moved 7.81 -> 7.83 dB. The extra range was not the missing thing.
+            //
+            // 0 dB of step is allowed deliberately: "no day/night contrast at all"
+            // has to be reachable, or the surrogate cannot represent a band whose
+            // floor is set by the man-made and galactic curves underneath it,
+            // which above ~10 MHz is every band.
+            step_1mhz_db: Bounded::new(n::ATM_STEP_1MHZ_DB, 0.0, 40.0),
+            // Spans both signs. Negative is the published behaviour - the day and
+            // night atmospheric curves converge as frequency rises. Positive is an
+            // INVERTED step, unreachable under the old bounds, and the measured
+            // step over 7-14 MHz is the reason it must be reachable.
+            step_slope_db: Bounded::new(n::ATM_STEP_SLOPE_DB, -45.0, 25.0),
+            // Curvature, so the step may bend rather than being forced straight.
+            // The corpus carries six bands with a legal cell on both sides of the
+            // terminator, so three step parameters are comfortably identified -
+            // but see `THE STEP AT THE TERMINATOR`: the three lowest of those six
+            // have a daytime side made almost entirely of E-layer paths, which
+            // carry a defect of their own. Do not add a fourth step parameter to
+            // chase them.
+            step_curve_db: Bounded::new(n::ATM_STEP_CURVE_DB, -25.0, 25.0),
+            // MEASURED, and the reason not to keep tuning this surrogate.
+            //
+            // Three noise parameterisations were fitted to the full 9126-spot
+            // corpus: the original two lines; the same with the night slope
+            // ceiling raised 65 -> 90; and this step form, which the fit drove to
+            // a FLAT INVERTED step of about -8 dB (night quieter than day on every
+            // band) by railing all three step parameters at once. Their day/night
+            // steps differ by more than 20 dB. They score:
+            //
+            //   RMS, effects removed   7.81   7.83   7.88 dB
+            //   AUC decode/non-decode  0.771  0.776  0.775
+            //
+            // The objective is FLAT along this whole direction. The step form did
+            // what it was built to do - it more than halved the spread of the
+            // residual's day/night structure across bands, from a 21 dB range to
+            // 9 dB - and the model got no better at predicting anything.
+            //
+            // That is the AUC section's warning arriving: with IQR ~10.4 dB about
+            // the residual, this model is limited by per-path SPREAD, not by any
+            // smooth systematic term. Fitting more smooth systematic parameters
+            // cannot move it. Anything further spent here is spent on the wrong
+            // thing.
             season_swing_db: Bounded::new(n::ATM_SEASON_SWING_DB, 0.0, 15.0),
             tropical_boost_db: Bounded::new(n::ATM_TROPICAL_BOOST_DB, 0.0, 30.0),
             polar_offset_db: Bounded::new(n::ATM_POLAR_OFFSET_DB, 0.0, 15.0),
@@ -229,6 +289,11 @@ impl Anchors {
                 |a| a.d_scale_height_km,
                 |a, v| a.d_scale_height_km = v,
             ),
+            (
+                "D night floor [fraction]",
+                |a| a.d_night_floor_fraction,
+                |a, v| a.d_night_floor_fraction = v,
+            ),
             ("nu at ref alt [1/s]", |a| a.nu_ref_per_s, |a, v| {
                 a.nu_ref_per_s = v;
             }),
@@ -273,17 +338,20 @@ impl Anchors {
         fn(&mut AtmosphericAnchors, Bounded),
     )> {
         vec![
-            ("atm Fa 1 MHz night [dB]", |a| a.f1_night_db, |a, v| {
-                a.f1_night_db = v;
-            }),
             ("atm Fa 1 MHz day [dB]", |a| a.f1_day_db, |a, v| {
                 a.f1_day_db = v;
             }),
-            ("atm slope night [dB/dec]", |a| a.slope_night_db, |a, v| {
-                a.slope_night_db = v;
-            }),
             ("atm slope day [dB/dec]", |a| a.slope_day_db, |a, v| {
                 a.slope_day_db = v;
+            }),
+            ("atm day->night step [dB]", |a| a.step_1mhz_db, |a, v| {
+                a.step_1mhz_db = v;
+            }),
+            ("atm step slope [dB/dec]", |a| a.step_slope_db, |a, v| {
+                a.step_slope_db = v;
+            }),
+            ("atm step curve [dB/dec2]", |a| a.step_curve_db, |a, v| {
+                a.step_curve_db = v;
             }),
             ("atm season swing [dB]", |a| a.season_swing_db, |a, v| {
                 a.season_swing_db = v;
@@ -314,6 +382,10 @@ mod tests {
         assert!((i.d_peak_ne_overhead.value - crate::scenario::D_REGION_PEAK_NE_OVERHEAD).abs() < 1.0);
         assert!((i.d_peak_alt_km.value - crate::scenario::D_REGION_PEAK_ALT_KM).abs() < 1e-12);
         assert!((i.d_scale_height_km.value - crate::scenario::D_REGION_SCALE_HEIGHT_KM).abs() < 1e-12);
+        assert!(
+            (i.d_night_floor_fraction.value - crate::scenario::D_REGION_NIGHT_FLOOR_FRACTION).abs()
+                < 1e-12
+        );
         assert!((i.nu_ref_per_s.value - crate::scenario::NU_REF_PER_S).abs() < 1.0);
         assert!((i.nu_ref_alt_km.value - crate::scenario::NU_REF_ALT_KM).abs() < 1e-12);
         assert!((i.nu_scale_height_km.value - crate::scenario::NU_SCALE_HEIGHT_KM).abs() < 1e-12);
@@ -326,10 +398,22 @@ mod tests {
         );
 
         let n = a.atmospheric;
-        assert!((n.f1_night_db.value - crate::noise::ATM_1MHZ_NIGHT_DB).abs() < 1e-12);
         assert!((n.f1_day_db.value - crate::noise::ATM_1MHZ_DAY_DB).abs() < 1e-12);
-        assert!((n.slope_night_db.value - crate::noise::ATM_SLOPE_NIGHT_DB).abs() < 1e-12);
         assert!((n.slope_day_db.value - crate::noise::ATM_SLOPE_DAY_DB).abs() < 1e-12);
+        assert!((n.step_1mhz_db.value - crate::noise::ATM_STEP_1MHZ_DB).abs() < 1e-12);
+        assert!((n.step_slope_db.value - crate::noise::ATM_STEP_SLOPE_DB).abs() < 1e-12);
+        assert!((n.step_curve_db.value - crate::noise::ATM_STEP_CURVE_DB).abs() < 1e-12);
+        // The step constants are the OLD night anchors, re-expressed. If either
+        // side of that identity is edited alone the surrogate silently stops
+        // reproducing the two-line form it replaced.
+        assert!(
+            (n.f1_day_db.value + n.step_1mhz_db.value - crate::noise::ATM_1MHZ_NIGHT_DB).abs()
+                < 1e-12
+        );
+        assert!(
+            (n.slope_day_db.value - n.step_slope_db.value - crate::noise::ATM_SLOPE_NIGHT_DB).abs()
+                < 1e-12
+        );
         assert!((n.season_swing_db.value - crate::noise::ATM_SEASON_SWING_DB).abs() < 1e-12);
         assert!((n.tropical_boost_db.value - crate::noise::ATM_TROPICAL_BOOST_DB).abs() < 1e-12);
         assert!((n.polar_offset_db.value - crate::noise::ATM_POLAR_OFFSET_DB).abs() < 1e-12);

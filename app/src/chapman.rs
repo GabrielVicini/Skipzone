@@ -275,6 +275,8 @@ pub struct SolarChapmanLayer {
     scale_height: f64,
     /// X = r_peak / H, the (constant) Chapman-function argument.
     big_x: f64,
+    /// Residual peak density that survives the night, m^-3. See [`Self::floor_at`].
+    night_floor_nm: f64,
 }
 
 impl SolarChapmanLayer {
@@ -293,7 +295,57 @@ impl SolarChapmanLayer {
             r_peak,
             scale_height,
             big_x: r_peak / scale_height,
+            night_floor_nm: 0.0,
         }
+    }
+
+    /// This layer with a residual peak density [m^-3] that survives the night.
+    ///
+    /// # Why an alpha-Chapman layer needs this and does not derive it
+    ///
+    /// `Ch(X, chi)` diverges past the terminator, so a pure photochemical layer
+    /// goes to EXACTLY zero in darkness - not small, zero. For the F2 region that
+    /// is why the layer is not built this way at all (it is transport-dominated).
+    /// For the D region it is a real defect: the night D region does not vanish,
+    /// it settles onto a residual maintained by galactic cosmic rays and by
+    /// scattered Lyman-alpha on NO, neither of which switches off at sunset.
+    /// Photochemical equilibrium under a source the sun does not supply is simply
+    /// outside what a Chapman layer describes, so the floor is an INPUT to the
+    /// derivation rather than an output of it.
+    ///
+    /// The consequence of leaving it at zero is not subtle. Absorption is
+    /// proportional to `Ne nu`, so a layer that is exactly zero contributes
+    /// exactly no absorption, and the model then has NO absorption at all at
+    /// night on any band. Measured: 0.00 dB at 7 and 14 MHz on a midnight path.
+    /// Every night-time residual then has to be explained by something else, and
+    /// in a calibration the only other band-shaped terms are the atmospheric
+    /// noise anchors - which is exactly where this model's fit was driving them,
+    /// to their bounds, on the night-worked low bands.
+    #[must_use]
+    pub fn with_night_floor(mut self, night_floor_nm: f64) -> Self {
+        self.night_floor_nm = night_floor_nm.max(0.0);
+        self
+    }
+
+    /// The residual night layer at radius `r`: `(Ne, dNe/dr)`.
+    ///
+    /// Same alpha-Chapman SHAPE as the sunlit layer and the same peak height -
+    /// the residual sits where the ionisation is, and the profile either side of
+    /// a peak is set by the neutral scale height, which does not care what made
+    /// the ions. Only the amplitude differs, and it carries no zenith dependence
+    /// because its source is not the sun.
+    fn floor_at(&self, r: f64) -> (f64, f64) {
+        if self.night_floor_nm <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let z = (r - self.r_peak) / self.scale_height;
+        let emz = (-z).exp();
+        let f = 0.5 * (1.0 - z - emz);
+        if f < -700.0 {
+            return (0.0, 0.0);
+        }
+        let ne = self.night_floor_nm * f.exp();
+        (ne, ne * 0.5 * (emz - 1.0) / self.scale_height)
     }
 
     /// The D-region layer as it has always been built: a constant overhead
@@ -307,6 +359,7 @@ impl SolarChapmanLayer {
         scale_height: f64,
         declination_deg: f64,
         utc_hours: f64,
+        night_floor_fraction: f64,
     ) -> Self {
         Self::new(
             Box::new(ConstantPeak(nm)),
@@ -314,6 +367,7 @@ impl SolarChapmanLayer {
             r_peak,
             scale_height,
         )
+        .with_night_floor(nm * night_floor_fraction)
     }
 
     /// Local solar zenith angle chi (radians) at a colatitude/longitude
@@ -402,7 +456,13 @@ impl ElectronDensity for SolarChapmanLayer {
             }
         };
         if !ch.is_finite() {
-            return DensitySample::VACUUM; // deep night: no layer
+            // Deep night: the photochemical layer is gone, and what is left is
+            // the residual the sun did not make.
+            let (ne, dne_dr) = self.floor_at(p.r.get());
+            return DensitySample {
+                ne,
+                d_ne: [dne_dr, 0.0, 0.0],
+            };
         }
 
         let peak = self.source.peak(theta, phi);
@@ -410,10 +470,28 @@ impl ElectronDensity for SolarChapmanLayer {
         let emz = (-z).exp();
         let f = 0.5 * (1.0 - z - ch * emz);
         if f < -700.0 {
-            return DensitySample::VACUUM; // underflow: negligible density
+            // Underflow: the sunlit layer is negligible here, so whatever the
+            // residual holds is all there is.
+            let (ne, dne_dr) = self.floor_at(p.r.get());
+            return DensitySample {
+                ne,
+                d_ne: [dne_dr, 0.0, 0.0],
+            };
         }
         let ef = f.exp();
         let ne = peak.nm * ef;
+        // The floor is a LOWER BOUND on the ionisation, so it takes over wherever
+        // the sunlit layer has fallen below it - continuously, and on both sides
+        // of the terminator rather than only past it. Taking the larger of the
+        // two rather than summing them keeps a fully sunlit layer bit-identical
+        // to what it was before this existed.
+        let (floor_ne, floor_dr) = self.floor_at(p.r.get());
+        if floor_ne > ne {
+            return DensitySample {
+                ne: floor_ne,
+                d_ne: [floor_dr, 0.0, 0.0],
+            };
+        }
 
         // dNe/dr = Ne * 1/2 (Ch e^{-z} - 1)/H (derivation eq. 7).
         let dne_dr = ne * 0.5 * (ch * emz - 1.0) / self.scale_height;
@@ -446,6 +524,60 @@ impl ElectronDensity for SolarChapmanLayer {
 
 #[cfg(test)]
 mod tests {
+    /// The defect this floor exists to remove, pinned from both sides.
+    ///
+    /// A pure alpha-Chapman layer is EXACTLY zero past the terminator, because
+    /// `Ch` diverges there. Absorption goes as `Ne nu`, so that is not a small
+    /// night-time absorption - it is none at all, on every band. The floor has to
+    /// leave the sunlit layer untouched and leave a real density behind at night.
+    #[test]
+    fn the_night_floor_replaces_an_exactly_zero_night() {
+        let r0 = 6_371_000.0;
+        let r_peak = r0 + 85e3;
+        let nm = 1.0e9;
+        // Midnight at longitude 0 with the sun over the far side.
+        let at = |layer: &SolarChapmanLayer, alt_km: f64, lon_deg: f64| {
+            layer
+                .sample(&SphericalPoint::new(
+                    skipzone::units::Meters::new(r0 + alt_km * 1e3),
+                    skipzone::units::Radians::new(45.0_f64.to_radians()),
+                    skipzone::units::Radians::new(lon_deg.to_radians()),
+                ))
+                .ne
+        };
+        let bare = SolarChapmanLayer::d_region(nm, r_peak, 6e3, 0.0, 0.0, 0.0);
+        let floored = SolarChapmanLayer::d_region(nm, r_peak, 6e3, 0.0, 0.0, 0.10);
+
+        // Night side: the bare layer is exactly zero; the floored one is not.
+        let night_lon = 0.0;
+        assert_eq!(at(&bare, 85.0, night_lon), 0.0, "a bare Chapman night is exact vacuum");
+        let night = at(&floored, 85.0, night_lon);
+        assert!(
+            night > 0.05 * nm && night < 0.15 * nm,
+            "the night floor should sit near its fraction of the peak, got {night:e}"
+        );
+
+        // Day side: the floor must not touch a layer that is well above it.
+        let day_lon = 180.0;
+        let (bare_day, floored_day) = (at(&bare, 85.0, day_lon), at(&floored, 85.0, day_lon));
+        assert!(bare_day > 0.5 * nm, "sanity: the day layer is producing");
+        assert!(
+            (bare_day - floored_day).abs() < 1e-9 * bare_day,
+            "a sunlit layer must be bit-identical: {bare_day:e} vs {floored_day:e}"
+        );
+
+        // And the floor carries the layer's own profile shape, not a slab: it
+        // falls away from the peak in both directions.
+        let peak = at(&floored, 85.0, night_lon);
+        assert!(at(&floored, 70.0, night_lon) < peak);
+        assert!(at(&floored, 100.0, night_lon) < peak);
+
+        // A zero fraction reproduces the old behaviour exactly, so nothing that
+        // relied on it can have changed silently.
+        let off = SolarChapmanLayer::d_region(nm, r_peak, 6e3, 0.0, 0.0, 0.0);
+        assert_eq!(at(&off, 85.0, night_lon), 0.0);
+    }
+
     use super::*;
     use skipzone::units::{Meters, Radians};
 
@@ -595,7 +727,7 @@ mod tests {
     fn terminator_layer_is_finite_and_thinned() {
         // Overhead anchors matching scenario.rs.
         let r0 = 6_371_000.0;
-        let layer = SolarChapmanLayer::d_region(1.0e9, r0 + 85e3, 6e3, 0.0, 12.0);
+        let layer = SolarChapmanLayer::d_region(1.0e9, r0 + 85e3, 6e3, 0.0, 12.0, 0.0);
         // Subsolar point (decl 0, utc 12 => hour_offset 0) is colat 90, lon 0.
         // A point 86 deg away from it sees chi ~ 86 deg: colat 4 deg, lon 0
         // gives cos chi = sin(4 deg) => chi = 86 deg, just past the engine's
@@ -638,7 +770,7 @@ mod tests {
     fn deep_night_is_vacuum() {
         let r0 = 6_371_000.0;
         // Midnight at lon 0.
-        let layer = SolarChapmanLayer::d_region(1.0e9, r0 + 85e3, 6e3, 0.0, 0.0);
+        let layer = SolarChapmanLayer::d_region(1.0e9, r0 + 85e3, 6e3, 0.0, 0.0, 0.0);
         for alt in [60e3, 85e3, 110e3] {
             let s = layer.sample(&point(r0 + alt, FRAC_PI_2, 0.0));
             assert_eq!(s.ne, 0.0, "night Ne at {alt} m");
@@ -651,7 +783,7 @@ mod tests {
     #[test]
     fn horizontal_partials_match_fd() {
         let r0 = 6_371_000.0;
-        let layer = SolarChapmanLayer::d_region(1.0e9, r0 + 85e3, 6e3, 15.0, 12.0);
+        let layer = SolarChapmanLayer::d_region(1.0e9, r0 + 85e3, 6e3, 15.0, 12.0, 0.0);
         let (r, colat, lon) = (r0 + 88e3, 0.9, 0.3);
         let s = layer.sample(&point(r, colat, lon));
         let h = 1e-6;
@@ -754,7 +886,7 @@ mod tests {
             }
         };
 
-        let layer = SolarChapmanLayer::d_region(nm, r_peak, h, 15.0, 12.0);
+        let layer = SolarChapmanLayer::d_region(nm, r_peak, h, 15.0, 12.0, 0.0);
         // Sweep the whole domain the D region is ever sampled over, day and
         // night, including the subsolar point and the deep-night vacuum.
         for ti in 0..=24 {

@@ -162,13 +162,40 @@ pub fn galactic_noise_figure_db(f_mhz: f64) -> f64 {
 // off the maps and NOT traceable to any table. They are surfaced in the UI.
 
 /// Atmospheric `Fa` at 1 MHz, night, mid-latitude, equinox [dB]. Anchor.
+///
+/// Retained as the DERIVATION of [`ATM_STEP_1MHZ_DB`], not as a parameter: the
+/// night curve is now expressed as the day curve plus a step. See
+/// [`atmospheric_noise_figure_db`] for why.
 pub const ATM_1MHZ_NIGHT_DB: f64 = 95.0;
 /// Atmospheric `Fa` at 1 MHz, day, mid-latitude, equinox [dB]. Anchor.
 pub const ATM_1MHZ_DAY_DB: f64 = 70.0;
-/// Night fall-off of atmospheric noise with frequency, dB per decade. Anchor.
+/// Night fall-off of atmospheric noise with frequency, dB per decade. Derivation
+/// of [`ATM_STEP_SLOPE_DB`]; see [`ATM_1MHZ_NIGHT_DB`].
 pub const ATM_SLOPE_NIGHT_DB: f64 = 50.0;
 /// Day fall-off of atmospheric noise with frequency, dB per decade. Anchor.
 pub const ATM_SLOPE_DAY_DB: f64 = 45.0;
+
+// --- The day -> night STEP, which is what the calibration actually identifies -
+//
+// The three constants below are the old night anchors re-expressed as a
+// difference from the day curve. They are DERIVED from the four above rather
+// than written down independently, so the default surrogate is bit-identical to
+// the two-line version it replaces and the identity is visible instead of
+// asserted. `tests::the_step_form_reproduces_the_two_line_form` pins it.
+
+/// Day -> night step at 1 MHz [dB]: how much louder the model makes a band at
+/// night, before any frequency dependence.
+pub const ATM_STEP_1MHZ_DB: f64 = ATM_1MHZ_NIGHT_DB - ATM_1MHZ_DAY_DB;
+/// Linear frequency dependence of that step, dB per decade.
+///
+/// NEGATIVE narrows the step as frequency rises, which is how two independent
+/// log-linear curves with a steeper night slope behave. POSITIVE widens it - an
+/// INVERTED step, which the two-line form could only reach by making the night
+/// curve shallower than the day curve, and which its bounds excluded.
+pub const ATM_STEP_SLOPE_DB: f64 = ATM_SLOPE_DAY_DB - ATM_SLOPE_NIGHT_DB;
+/// Curvature of the step in `log10(f)`, dB per decade squared. Zero by default,
+/// which is exactly the straight-line step the two-line form was locked into.
+pub const ATM_STEP_CURVE_DB: f64 = 0.0;
 /// Summer / winter offset about the equinox value [dB]. Anchor: thunderstorm
 /// activity is the source, so the local summer hemisphere is noisier.
 pub const ATM_SEASON_SWING_DB: f64 = 8.0;
@@ -181,16 +208,49 @@ pub const ATM_POLAR_OFFSET_DB: f64 = 6.0;
 
 /// Atmospheric (lightning) noise figure [dB above kT0b].
 ///
-/// `Fa_atm = F1 + season + latitude - slope * log10(f_MHz)`
-/// with `F1` and `slope` selected by day/night. **Approximation - see the
-/// module docs. Not P.372 map data.**
+/// ```text
+/// L        = log10(f_MHz)
+/// Fa_day   = F1_day - slope_day * L        + season + latitude
+/// Fa_night = Fa_day + step(L)
+/// step(L)  = step_1MHz + step_slope * L + step_curve * L^2
+/// ```
 ///
-/// The seven absolute anchors arrive in `anchors` rather than being read from
-/// the constants directly, so that a calibration run can move them; the constants
-/// remain the source of [`AtmosphericAnchors::default`], so a default `anchors`
-/// reproduces this function's original behaviour exactly. The SHAPE - log-linear
-/// in frequency, additive day/night, season and latitude terms - is not a
-/// calibration target and stays hard-coded here.
+/// **Approximation - see the module docs. Not P.372 map data.**
+///
+/// # Why the night curve is a STEP and not a second line
+///
+/// This replaced a pair of independent log-linear curves, one per day/night
+/// state, and the reason is a measurement rather than a preference.
+///
+/// What a WSPR corpus identifies about a noise floor is never its level - that is
+/// constant per station and absorbed exactly into that station's fixed effect -
+/// but the DIFFERENCE between day and night, band by band. Under two independent
+/// curves that difference is not a parameter at all: it is
+/// `(F1_n - F1_d) - (S_n - S_d) L`, an emergent quantity reached only by moving
+/// two absolute levels, each carrying its own bound justified by what an absolute
+/// atmospheric level may plausibly be. So the fit was being asked to steer a
+/// difference through boxes drawn around levels, and it railed every one of them:
+/// widening the night slope ceiling from 65 to 90 dB/decade moved the fit's RMS
+/// by 0.02 dB and the parameter simply railed again.
+///
+/// Writing the step down directly fixes three things:
+///
+/// * it is bounded as a CONTRAST, which is what the published maps actually
+///   constrain and what this corpus can actually see;
+/// * `step_slope` may be negative, zero or POSITIVE, so the step may narrow with
+///   frequency, stay flat, or invert. The old form could only invert by making
+///   the night curve shallower than the day curve, and its bounds forbade that;
+/// * `step_curve` lets the step bend. The measured step is ~+4 to +6 dB at
+///   7-14 MHz, and a straight line through it and the low bands cannot also
+///   satisfy the top of HF - see `THE STEP AT THE TERMINATOR` in the calibrator.
+///
+/// The default anchors reproduce the two-line form EXACTLY, because the step
+/// constants are derived from the old night anchors rather than re-chosen; see
+/// [`ATM_STEP_1MHZ_DB`] and `tests::the_step_form_reproduces_the_two_line_form`.
+///
+/// The remaining SHAPE - log-linear day curve, additive season and latitude
+/// terms, a day/night state that is a boolean - is not a calibration target and
+/// stays hard-coded here.
 #[must_use]
 pub fn atmospheric_noise_figure_db(
     f_mhz: f64,
@@ -199,11 +259,7 @@ pub fn atmospheric_noise_figure_db(
     latitude_deg: f64,
     anchors: AtmosphericAnchors,
 ) -> f64 {
-    let (f1, slope) = if is_day {
-        (anchors.f1_day_db.value, anchors.slope_day_db.value)
-    } else {
-        (anchors.f1_night_db.value, anchors.slope_night_db.value)
-    };
+    let l = f_mhz.max(1e-6).log10();
     let season_db = match season {
         Season::Summer => anchors.season_swing_db.value,
         Season::Winter => -anchors.season_swing_db.value,
@@ -212,7 +268,24 @@ pub fn atmospheric_noise_figure_db(
     let cos_lat = latitude_deg.to_radians().cos().abs().clamp(0.0, 1.0);
     let lat_db =
         anchors.tropical_boost_db.value * cos_lat.powi(3) - anchors.polar_offset_db.value;
-    f1 + season_db + lat_db - slope * f_mhz.max(1e-6).log10()
+    let day = anchors.f1_day_db.value - anchors.slope_day_db.value * l + season_db + lat_db;
+    if is_day {
+        day
+    } else {
+        day + atmospheric_day_night_step_db(f_mhz, anchors)
+    }
+}
+
+/// The day -> night step of the atmospheric surrogate at one frequency [dB].
+///
+/// Exposed on its own because it is the quantity the calibration identifies and
+/// the quantity the report has to be able to print: a step the model applies but
+/// reality does not take shows up, one for one, as a jump in `modelled - measured`
+/// across the terminator.
+#[must_use]
+pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) -> f64 {
+    let l = f_mhz.max(1e-6).log10();
+    anchors.step_1mhz_db.value + anchors.step_slope_db.value * l + anchors.step_curve_db.value * l * l
 }
 
 /// Combine independent noise sources. Noise POWERS add, so the figures are
@@ -357,6 +430,18 @@ pub struct LinkSettings<'a> {
     pub tx_power_w: f64,
     pub noise: NoiseFloor,
     pub threshold_db: f64,
+    /// Calibrated model bias, dB, SUBTRACTED from the predicted SNR.
+    ///
+    /// This is the part of the model's error that a calibration measured but
+    /// could not attribute to any station: positive means the model reads high.
+    /// It is deliberately not folded into any loss term, because it is not a
+    /// loss: it is an empirical correction, and burying it in the propagation
+    /// budget would make a measured fudge look like physics.
+    ///
+    /// Zero by default, so an uncalibrated run is unchanged. See
+    /// [`crate::fit::StationEffects::global_db`], which is what a calibration
+    /// reports and what belongs here.
+    pub model_bias_db: f64,
     /// Transmitting antenna gain against elevation, at this frequency.
     pub tx_antenna: &'a GainCurve,
     /// Receiving antenna gain against elevation, at this frequency.
@@ -377,6 +462,9 @@ pub struct LinkBudget {
     pub snr_db: f64,
     /// Threshold this SNR was judged against [dB].
     pub threshold_db: f64,
+    /// Calibrated bias subtracted from `snr_db`, dB. Carried so the UI can say
+    /// that a correction was applied rather than silently applying one.
+    pub model_bias_db: f64,
 }
 
 impl LinkBudget {
@@ -403,6 +491,7 @@ impl LinkBudget {
             noise,
             snr_db: rx_power_dbm - noise.power_dbm,
             threshold_db,
+            model_bias_db: 0.0,
         }
     }
 
@@ -413,7 +502,13 @@ impl LinkBudget {
     /// has already subtracted `G_tx + G_rx` from the propagation loss.
     #[must_use]
     pub fn from_settings(s: LinkSettings<'_>, total_system_loss_db: f64) -> Self {
-        Self::new(s.tx_power_w, total_system_loss_db, s.noise, s.threshold_db)
+        let mut lb = Self::new(s.tx_power_w, total_system_loss_db, s.noise, s.threshold_db);
+        // Applied to the SNR alone. `rx_power_dbm` and every loss term stay
+        // exactly what the propagation produced, so the panel that shows the
+        // budget still shows physics and this correction cannot hide inside it.
+        lb.snr_db -= s.model_bias_db;
+        lb.model_bias_db = s.model_bias_db;
+        lb
     }
 
     /// Margin above the threshold [dB]; negative means the path is too weak.
@@ -554,6 +649,92 @@ mod tests {
         let parts = [12.0, 31.5, 8.0];
         let total = combine_noise_figures_db(&parts);
         assert!((31.5..32.0).contains(&total), "{total}");
+    }
+
+    /// The step form must be the two-line form, exactly, at the default anchors.
+    ///
+    /// This is the whole safety argument for the reparameterisation: the night
+    /// curve stopped being an independent pair of numbers and became the day
+    /// curve plus a step, and nothing about the shipped model may move because of
+    /// it. Checked against the two lines written out longhand, at frequencies
+    /// spanning the corpus, in both seasons and at three latitudes.
+    #[test]
+    fn the_step_form_reproduces_the_two_line_form() {
+        let a = AtmosphericAnchors::default();
+        for f in [1.8_f64, 3.5, 5.3, 7.0, 10.1, 14.1, 18.1, 21.1, 28.1] {
+            for season in [Season::Summer, Season::Winter, Season::Equinox] {
+                for lat in [0.0_f64, 45.0, 72.0] {
+                    let season_db = match season {
+                        Season::Summer => ATM_SEASON_SWING_DB,
+                        Season::Winter => -ATM_SEASON_SWING_DB,
+                        Season::Equinox => 0.0,
+                    };
+                    let cos_lat = lat.to_radians().cos().abs();
+                    let lat_db =
+                        ATM_TROPICAL_BOOST_DB * cos_lat.powi(3) - ATM_POLAR_OFFSET_DB;
+                    // The two independent log-linear curves this replaced.
+                    let want_day =
+                        ATM_1MHZ_DAY_DB + season_db + lat_db - ATM_SLOPE_DAY_DB * f.log10();
+                    let want_night =
+                        ATM_1MHZ_NIGHT_DB + season_db + lat_db - ATM_SLOPE_NIGHT_DB * f.log10();
+                    let got_day = atmospheric_noise_figure_db(f, true, season, lat, a);
+                    let got_night = atmospheric_noise_figure_db(f, false, season, lat, a);
+                    assert!(
+                        (got_day - want_day).abs() < 1e-12,
+                        "day {f} MHz: {got_day} vs {want_day}"
+                    );
+                    assert!(
+                        (got_night - want_night).abs() < 1e-12,
+                        "night {f} MHz: {got_night} vs {want_night}"
+                    );
+                    // And the step accessor must be that difference.
+                    assert!(
+                        (atmospheric_day_night_step_db(f, a) - (want_night - want_day)).abs()
+                            < 1e-12
+                    );
+                }
+            }
+        }
+    }
+
+    /// The freedom the reparameterisation exists to provide: a step that is flat
+    /// in frequency, and one that INVERTS. Neither was reachable under the old
+    /// bounds, which boxed two absolute levels rather than their difference.
+    #[test]
+    fn the_step_can_be_flat_or_inverted() {
+        let mut a = AtmosphericAnchors::default();
+        // Flat: same contrast at 1.8 MHz as at 28 MHz.
+        a.step_slope_db.value = 0.0;
+        a.step_curve_db.value = 0.0;
+        let lo = atmospheric_day_night_step_db(1.8, a);
+        let hi = atmospheric_day_night_step_db(28.0, a);
+        assert!((lo - hi).abs() < 1e-12, "flat step: {lo} vs {hi}");
+        assert!((lo - ATM_STEP_1MHZ_DB).abs() < 1e-12);
+
+        // Inverted: the contrast GROWS with frequency, which two log-linear
+        // curves could only do with the night curve shallower than the day one.
+        a.step_slope_db.value = 8.0;
+        let lo = atmospheric_day_night_step_db(1.8, a);
+        let hi = atmospheric_day_night_step_db(28.0, a);
+        assert!(hi > lo + 5.0, "inverted step: {lo} at 1.8 MHz, {hi} at 28 MHz");
+
+        // And the night floor still exceeds the day floor at both ends, so an
+        // inverted SLOPE is not silently an inverted SIGN.
+        for f in [1.8, 28.0] {
+            assert!(
+                atmospheric_noise_figure_db(f, false, Season::Equinox, 45.0, a)
+                    > atmospheric_noise_figure_db(f, true, Season::Equinox, 45.0, a),
+                "night should still be louder at {f} MHz"
+            );
+        }
+
+        // Curvature must be able to bend the step back down, so the shape is not
+        // forced monotone in log f.
+        a.step_slope_db.value = 20.0;
+        a.step_curve_db.value = -20.0;
+        let mid = atmospheric_day_night_step_db(5.0, a);
+        let top = atmospheric_day_night_step_db(28.0, a);
+        assert!(top < mid, "curvature should turn the step over: {mid} -> {top}");
     }
 
     /// The atmospheric surrogate has no reference value to check against, so

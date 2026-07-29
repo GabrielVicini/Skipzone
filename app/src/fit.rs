@@ -126,6 +126,31 @@ pub struct Cached {
     pub probability: f64,
     /// Day of the corpus this spot came from, for the hold-out split.
     pub date: (i32, u32, u32),
+    /// Solar zenith angle at the path MIDPOINT, degrees. Above 90 the midpoint
+    /// is in darkness. The receiver's own day flag is the wrong thing to cut a
+    /// layer by: the reflection happens at the midpoint, not at either end.
+    pub midpoint_zenith_deg: f64,
+    /// The best F2 path that ALSO closed on this spot, when the layer actually
+    /// reported was a lower one. `None` when F2 was itself the choice, or when
+    /// no F2 path closed at all - and those two cases mean opposite things, so
+    /// see [`Cached::layer_was_a_race`].
+    pub alternative: Option<Alternative>,
+}
+
+/// The F2 path a lower layer beat, carried so its SNR can be re-derived under
+/// the same parameters as the path that won.
+///
+/// Only the two loss terms are stored. Everything else the link budget needs -
+/// power, frequency, bandwidth, noise environment, day, season, latitude - is a
+/// property of the SPOT and is already on [`Cached`], so an alternative scored
+/// against those is scored against exactly the conditions the winner was.
+#[derive(Clone, Copy, Debug)]
+pub struct Alternative {
+    /// Every loss term except ionospheric absorption, less antenna gain, dB.
+    pub loss_without_absorption_db: f64,
+    /// Ionospheric absorption at the BASELINE anchors, dB. Scaled linearly, the
+    /// same way the winner's is.
+    pub absorption_db: f64,
 }
 
 impl Cached {
@@ -150,6 +175,43 @@ impl Cached {
             - self.loss_without_absorption_db
             - absorption_scale * self.absorption_db
             - noise.power_dbm
+    }
+
+    /// Was the reported layer chosen over an F2 path that also closed?
+    ///
+    /// This is the distinction that matters when a lower layer reads optimistic.
+    /// If F2 was available and lost, the layer was picked by a COMPARISON, and a
+    /// comparison that systematically prefers the lower layer is a selection rule
+    /// to examine. If F2 was not available, the lower layer was the only answer
+    /// there was, and the question is instead why it closed at all.
+    #[must_use]
+    pub fn layer_was_a_race(&self) -> bool {
+        self.alternative.is_some()
+    }
+
+    /// Modelled SNR [dB] of the F2 path this spot's layer beat, under the same
+    /// parameters and the same noise floor. `None` when there was no such path.
+    #[must_use]
+    pub fn alternative_modelled_db(
+        &self,
+        absorption_scale: f64,
+        atm: AtmosphericAnchors,
+    ) -> Option<f64> {
+        let alt = self.alternative?;
+        Some(
+            self.tx_power_dbm
+                - alt.loss_without_absorption_db
+                - absorption_scale * alt.absorption_db
+                - self.noise_dbm(atm),
+        )
+    }
+
+    /// Is the path MIDPOINT in darkness? The reflection happens there, so this
+    /// is the cut a layer's behaviour has to be split on - not the receiver's
+    /// local day, which on a long path can be the opposite.
+    #[must_use]
+    pub fn midpoint_is_night(&self) -> bool {
+        self.midpoint_zenith_deg > 90.0
     }
 
     /// The noise floor this spot was judged against under given anchors, dBm.
@@ -578,26 +640,137 @@ impl CachedParams {
     pub fn fields() -> Vec<(&'static str, fn(&Self) -> Bounded, fn(&mut Self, Bounded))> {
         vec![
             (
-                "atm Fa 1 MHz night [dB]",
-                |p: &Self| p.atm.f1_night_db,
-                |p: &mut Self, v| p.atm.f1_night_db = v,
-            ),
-            (
                 "atm Fa 1 MHz day [dB]",
                 |p: &Self| p.atm.f1_day_db,
                 |p: &mut Self, v| p.atm.f1_day_db = v,
-            ),
-            (
-                "atm slope night [dB/dec]",
-                |p: &Self| p.atm.slope_night_db,
-                |p: &mut Self, v| p.atm.slope_night_db = v,
             ),
             (
                 "atm slope day [dB/dec]",
                 |p: &Self| p.atm.slope_day_db,
                 |p: &mut Self, v| p.atm.slope_day_db = v,
             ),
+            // The three that carry the day/night contrast. These are what a WSPR
+            // corpus can actually see: the level of the floor is constant per
+            // station and absorbed into that station's effect, the difference
+            // across the terminator is not.
+            (
+                "atm day->night step [dB]",
+                |p: &Self| p.atm.step_1mhz_db,
+                |p: &mut Self, v| p.atm.step_1mhz_db = v,
+            ),
+            (
+                "atm step slope [dB/dec]",
+                |p: &Self| p.atm.step_slope_db,
+                |p: &mut Self, v| p.atm.step_slope_db = v,
+            ),
+            (
+                "atm step curve [dB/dec2]",
+                |p: &Self| p.atm.step_curve_db,
+                |p: &mut Self, v| p.atm.step_curve_db = v,
+            ),
         ]
+    }
+}
+
+/// The non-decodes the fit is allowed to be constrained by, as a one-sided term.
+///
+/// # Why the positives alone cannot identify the level
+///
+/// A corpus of spots is a corpus of SUCCESSES. Every residual in it is
+/// `modelled - measured - station - global`, and `global` is re-solved at every
+/// trial point, so shifting the whole model by a constant costs the objective
+/// exactly nothing. The level is not weakly identified from the positives, it is
+/// not identified at all - and the fit is therefore free to close a residual by
+/// sliding the model optimistic, which is precisely what it was measured doing.
+///
+/// A negative is different in kind. It says that on THIS path, at THIS hour, a
+/// receiver that was demonstrably hearing other stations did not hear this one.
+/// That is a one-sided statement about an ABSOLUTE quantity: the modelled SNR
+/// should have been below the decode threshold. It cannot be satisfied by any
+/// constant shift, so it removes the degeneracy the positives leave behind.
+///
+/// # Why the term is a hinge and not a residual
+///
+/// The corpus documentation is explicit that the false-positive rate it measures
+/// is an UPPER BOUND: a negative may be a path that really was open and merely
+/// collided, or arrived off the back of a beam. So a negative carries no
+/// information at all about how far below the threshold the signal should have
+/// been - only that it should not have been above it. Penalising
+/// `(modelled - threshold)^2` unconditionally would invent that missing
+/// information and drive every negative towards a specific SNR the data never
+/// stated. The hinge `max(0, modelled - threshold)^2` charges only the excess,
+/// which is the whole of what a non-decode asserts.
+#[derive(Clone, Copy)]
+pub struct Negatives<'a> {
+    /// Solved non-decodes. `measured_db` is meaningless on these and is never
+    /// read; the threshold stands in for it.
+    pub spots: &'a [Cached],
+    /// Decode threshold the hinge is taken about, dB.
+    pub threshold_db: f64,
+    /// Weight of one negative against one positive in the sum of squares.
+    pub weight: f64,
+}
+
+impl<'a> Negatives<'a> {
+    /// No constraint: the positives-only objective, exactly as before.
+    #[must_use]
+    pub fn none() -> Self {
+        Self {
+            spots: &[],
+            threshold_db: 0.0,
+            weight: 0.0,
+        }
+    }
+
+    /// Negatives weighted so their TOTAL weight equals the positives' total.
+    ///
+    /// How many negatives get scored is an arbitrary sampling decision - the
+    /// calibrator thins tens of thousands of them down to whatever is
+    /// affordable - so an unweighted sum would let that choice, rather than the
+    /// evidence, decide how much the one-sided term counts for. Equalising the
+    /// totals makes the objective half positives and half negatives however many
+    /// of each were solved.
+    #[must_use]
+    pub fn balanced(spots: &'a [Cached], threshold_db: f64, n_positives: usize) -> Self {
+        #[allow(clippy::cast_precision_loss)]
+        let weight = if spots.is_empty() {
+            0.0
+        } else {
+            n_positives as f64 / spots.len() as f64
+        };
+        Self {
+            spots,
+            threshold_db,
+            weight,
+        }
+    }
+
+    /// This negative's predicted SNR less the station offsets that apply to it.
+    ///
+    /// A station absent from the fit's index space contributes 0, which is not a
+    /// guess: the effects are gauge-centred to mean zero, so 0 IS the population
+    /// estimate for a station nothing is known about.
+    fn excess(&self, c: &Cached, scale: f64, atm: AtmosphericAnchors, e: &StationEffects) -> f64 {
+        let station = e.tx.get(c.tx).copied().unwrap_or(0.0) + e.rx.get(c.rx).copied().unwrap_or(0.0);
+        c.modelled_db(scale, atm) - station - self.threshold_db
+    }
+
+    /// The hinge penalty at a trial point, given the global offset.
+    #[must_use]
+    pub fn penalty(
+        &self,
+        scale: f64,
+        atm: AtmosphericAnchors,
+        e: &StationEffects,
+        global: f64,
+    ) -> f64 {
+        self.spots
+            .iter()
+            .map(|c| {
+                let over = self.excess(c, scale, atm, e) - global;
+                if over > 0.0 { self.weight * over * over } else { 0.0 }
+            })
+            .sum()
     }
 }
 
@@ -635,54 +808,228 @@ impl CachedParams {
 /// The bool reports whether the scale had to be clamped to its range, because a
 /// scale that wants to leave every published collision frequency is a finding
 /// about the model rather than a number to quietly accept.
+/// # How the one-sided negatives enter a closed-form solve
+///
+/// A violating negative contributes `w (u_i - g - s a_i)^2` with
+/// `u_i = base_i - threshold - station_i`, which is ALGEBRAICALLY IDENTICAL to a
+/// positive whose measurement is the threshold, carrying weight `w`. So the
+/// hinge does not need a different solver - it needs the right set of
+/// pseudo-observations.
+///
+/// Which negatives are violating depends on `(g, s)`, and `(g, s)` depends on
+/// which are violating. The objective is convex in `(g, s)` - a sum of squares
+/// plus squared hinges of affine functions - so alternating the two converges to
+/// the global minimum: pick the active set, solve the weighted 2x2 exactly,
+/// repeat until the active set stops changing. It settles in a handful of passes
+/// and cannot cycle, because each solve strictly reduces a convex objective that
+/// each active-set update also cannot increase.
 #[must_use]
 pub fn best_absorption_scale(
     spots: &[Cached],
     atm: AtmosphericAnchors,
     effects: &StationEffects,
     prior: Bounded,
+    negatives: Negatives<'_>,
 ) -> (Bounded, f64, bool) {
     // Regress u_i on (1, a_i): u_i = g + s * a_i, in the least-squares sense.
     // Note the sign - the prediction SUBTRACTS s * a_i - so `u` is formed to make
     // `s` come out positive for a model that needs more absorption.
-    let mut n = 0.0;
-    let mut sum_a = 0.0;
-    let mut sum_aa = 0.0;
-    let mut sum_u = 0.0;
-    let mut sum_ua = 0.0;
+    //
+    // The positives' contribution never changes with the active set, so it is
+    // accumulated once.
+    let mut base_n = 0.0;
+    let mut base_a = 0.0;
+    let mut base_aa = 0.0;
+    let mut base_u = 0.0;
+    let mut base_ua = 0.0;
     for c in spots {
         // `base` is the prediction with absorption switched off.
         let base = c.modelled_db(0.0, atm);
         let station = effects.tx[c.tx] + effects.rx[c.rx];
         let u = base - c.measured_db - station;
-        n += 1.0;
-        sum_a += c.absorption_db;
-        sum_aa += c.absorption_db * c.absorption_db;
-        sum_u += u;
-        sum_ua += u * c.absorption_db;
+        base_n += 1.0;
+        base_a += c.absorption_db;
+        base_aa += c.absorption_db * c.absorption_db;
+        base_u += u;
+        base_ua += u * c.absorption_db;
     }
-    if n < 3.0 {
+    if base_n < 3.0 {
         return (prior, effects.global_db, false);
     }
-    // Normal equations for [g, s] against [[n, sum_a], [sum_a, sum_aa]].
-    let det = n * sum_aa - sum_a * sum_a;
-    if det.abs() < 1e-12 {
-        // No absorption variation at all: the scale is not identified. Leave it
-        // at the prior and put everything into the offset, which is the honest
-        // outcome rather than an invented scale.
-        return (prior, sum_u / n, false);
+
+    // The pseudo-observation a violating negative contributes.
+    let neg_u = |c: &Cached| -> f64 {
+        let station =
+            effects.tx.get(c.tx).copied().unwrap_or(0.0) + effects.rx.get(c.rx).copied().unwrap_or(0.0);
+        c.modelled_db(0.0, atm) - negatives.threshold_db - station
+    };
+
+    let solve = |active: &[usize]| -> Option<(f64, f64)> {
+        let (mut n, mut sa, mut saa, mut su, mut sua) =
+            (base_n, base_a, base_aa, base_u, base_ua);
+        for &i in active {
+            let c = &negatives.spots[i];
+            let w = negatives.weight;
+            let a = c.absorption_db;
+            let u = neg_u(c);
+            n += w;
+            sa += w * a;
+            saa += w * a * a;
+            su += w * u;
+            sua += w * u * a;
+        }
+        let det = n * saa - sa * sa;
+        if det.abs() < 1e-12 {
+            // No absorption variation at all: the scale is not identified. Leave
+            // it at the prior and put everything into the offset, which is the
+            // honest outcome rather than an invented scale.
+            return None;
+        }
+        Some((
+            (su * saa - sa * sua) / det,
+            (n * sua - sa * su) / det,
+        ))
+    };
+
+    // The active set is SEEDED at the prior scale rather than started empty.
+    //
+    // The positives can be singular in the scale direction all by themselves -
+    // that is the documented case where absorption does not vary and the scale is
+    // not identified - and it is exactly then that the negatives carry the only
+    // information there is. Starting from an empty active set would solve the
+    // positives alone, find them singular, and give up before ever looking at the
+    // evidence that resolves them.
+    //
+    // The seed pair must be a pair that actually DESCRIBES the prior model:
+    // `base_u / base_n` is the offset that fits when the scale is zero, not when
+    // it is the prior, and seeding with a mismatched pair mis-classifies which
+    // negatives the prior model would have claimed.
+    let mut s = prior.value;
+    let mut g = (base_u - s * base_a) / base_n;
+    let violating = |g: f64, s: f64| -> Vec<usize> {
+        negatives
+            .spots
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| neg_u(c) - g - s * c.absorption_db > 0.0)
+            .map(|(i, _)| i)
+            .collect()
+    };
+    let mut active = violating(g, s);
+    // The active set can only change a bounded number of times on a convex
+    // piecewise-quadratic, so this cap is for floating-point ties on the
+    // threshold rather than for any real risk of cycling.
+    for _ in 0..64 {
+        // Singular even with the active negatives included: the scale genuinely
+        // is not identified, so leave it at the prior and let the offset carry
+        // everything. That is the honest outcome, not an invented scale.
+        let Some((gi, si)) = solve(&active) else { break };
+        g = gi;
+        s = si;
+        let next = violating(g, s);
+        if next == active {
+            break;
+        }
+        active = next;
     }
-    let g = (sum_u * sum_aa - sum_a * sum_ua) / det;
-    let s = (n * sum_ua - sum_a * sum_u) / det;
+
     let (scale, hit) = prior.clamped(s);
     // With the scale clamped, re-solve the offset conditional on it, or the two
-    // no longer describe the same fit.
+    // no longer describe the same fit. The active set is held at the one the
+    // unclamped solve settled on: re-deriving it under a clamped scale would be
+    // solving a different problem than the one that reported the clamp.
     let g = if hit {
-        (sum_u - scale.value * sum_a) / n
+        let (mut n, mut su, mut sa) = (base_n, base_u, base_a);
+        for &i in &active {
+            let c = &negatives.spots[i];
+            n += negatives.weight;
+            su += negatives.weight * neg_u(c);
+            sa += negatives.weight * c.absorption_db;
+        }
+        (su - scale.value * sa) / n
     } else {
         g
     };
     (scale, g, hit)
+}
+
+/// The sum of squares at one point, with the absorption scale FIXED and only the
+/// global offset solved for it.
+///
+/// Used to profile the objective along the absorption scale, which
+/// [`best_absorption_scale`] otherwise solves in closed form and so never
+/// exposes as a curve. The global offset must still be re-solved at every scale,
+/// or the profile would measure the cost of holding the level wrong rather than
+/// the cost of the scale.
+#[must_use]
+pub fn objective_at_scale(
+    spots: &[Cached],
+    scale: f64,
+    atm: AtmosphericAnchors,
+    effects: &StationEffects,
+    negatives: Negatives<'_>,
+) -> f64 {
+    // The offset that minimises the same convex objective at this fixed scale,
+    // by the same active-set argument `best_absorption_scale` documents.
+    let residual = |c: &Cached, target: f64| {
+        let station =
+            effects.tx.get(c.tx).copied().unwrap_or(0.0) + effects.rx.get(c.rx).copied().unwrap_or(0.0);
+        c.modelled_db(scale, atm) - target - station
+    };
+    let mut global = 0.0;
+    for _ in 0..64 {
+        let mut sum = 0.0;
+        let mut weight = 0.0;
+        for c in spots {
+            sum += residual(c, c.measured_db);
+            weight += 1.0;
+        }
+        for c in negatives.spots {
+            if residual(c, negatives.threshold_db) - global > 0.0 {
+                sum += negatives.weight * residual(c, negatives.threshold_db);
+                weight += negatives.weight;
+            }
+        }
+        let next = if weight > 0.0 { sum / weight } else { 0.0 };
+        if (next - global).abs() < 1e-12 {
+            break;
+        }
+        global = next;
+    }
+    let mut total = 0.0;
+    for c in spots {
+        let d = residual(c, c.measured_db) - global;
+        total += d * d;
+    }
+    total + negatives.penalty(scale, atm, effects, global)
+}
+
+/// The objective with the absorption scale and the global offset profiled out,
+/// exactly as the fit's inner loop does it.
+///
+/// Public so a report can draw the objective as a CURVE along each parameter.
+/// A parameter that ends on a bound has two quite different explanations - the
+/// objective really falls all the way to the edge, or it goes flat partway and a
+/// descent drifts to the edge because nothing stops it - and only the curve
+/// distinguishes them. `Bounded::at_bound` cannot: it sees where the value
+/// landed, not what the objective was doing there.
+#[must_use]
+pub fn profiled_objective(
+    spots: &[Cached],
+    atm: AtmosphericAnchors,
+    effects: &StationEffects,
+    prior_scale: Bounded,
+    negatives: Negatives<'_>,
+) -> (f64, Bounded, f64) {
+    let (scale, global, _hit) = best_absorption_scale(spots, atm, effects, prior_scale, negatives);
+    let mut sum = 0.0;
+    for c in spots {
+        let station = effects.tx[c.tx] + effects.rx[c.rx];
+        let d = c.modelled_db(scale.value, atm) - c.measured_db - station - global;
+        sum += d * d;
+    }
+    sum += negatives.penalty(scale.value, atm, effects, global);
+    (sum, scale, global)
 }
 
 /// Fit the cached parameters and the station effects together.
@@ -702,6 +1049,7 @@ pub fn fit_cached(
     n_tx: usize,
     n_rx: usize,
     rounds: usize,
+    negatives: Negatives<'_>,
 ) -> (CachedParams, StationEffects, Vec<String>) {
     let mut params = CachedParams::prior();
     let mut effects = StationEffects::default();
@@ -715,15 +1063,13 @@ pub fn fit_cached(
     // scale is solved in closed form rather than searched, so the search only ever
     // walks the four-dimensional noise surface. Returns the objective and the
     // scale that produced it.
+    //
+    // The hinge over the negatives is part of the SAME objective, not a separate
+    // score compared afterwards. That is the whole point: a trial point that
+    // improves the positives by sliding the model optimistic must pay for the
+    // non-decodes it thereby claims would have decoded.
     let profiled = |atm: AtmosphericAnchors, e: &StationEffects| -> (f64, Bounded, f64) {
-        let (scale, global, _hit) = best_absorption_scale(spots, atm, e, prior_scale);
-        let mut sum = 0.0;
-        for c in spots {
-            let station = e.tx[c.tx] + e.rx[c.rx];
-            let d = c.modelled_db(scale.value, atm) - c.measured_db - station - global;
-            sum += d * d;
-        }
-        (sum, scale, global)
+        profiled_objective(spots, atm, e, prior_scale, negatives)
     };
 
     for round in 0..rounds {
@@ -853,7 +1199,7 @@ pub fn fit_cached(
         .collect();
     effects = StationEffects::solve(&residuals, spots, n_tx, n_rx);
     let (scale, global, hit_bound) =
-        best_absorption_scale(spots, params.atm, &effects, prior_scale);
+        best_absorption_scale(spots, params.atm, &effects, prior_scale, negatives);
     params.absorption_scale = scale;
     effects.global_db = global;
     if hit_bound {
@@ -981,7 +1327,43 @@ mod tests {
             range_km: 1000.0,
             probability: 1.0,
             date: (2026, 7, 3),
+            midpoint_zenith_deg: 30.0,
+            alternative: None,
         }
+    }
+
+    /// An alternative scored under the same conditions as its winner must differ
+    /// only by its own two loss terms - the noise floor is a property of the spot.
+    #[test]
+    fn the_alternative_is_scored_against_the_same_noise() {
+        let atm = AtmosphericAnchors::default();
+        let mut c = mk(0, 0, -15.0, 8.0, 14.097);
+        c.alternative = Some(Alternative {
+            loss_without_absorption_db: 112.0,
+            absorption_db: 20.0,
+        });
+        let winner = c.modelled_db(1.0, atm);
+        let alt = c.alternative_modelled_db(1.0, atm).expect("alternative");
+        // The winner has 100 dB of loss and 8 dB of absorption; the alternative
+        // 112 and 20. The gap is exactly the difference in those two terms.
+        assert!((winner - alt - ((112.0 - 100.0) + (20.0 - 8.0))).abs() < 1e-9);
+        // And the absorption scale reaches the alternative too, linearly.
+        let alt_two = c.alternative_modelled_db(2.0, atm).expect("alternative");
+        assert!((alt - alt_two - 20.0).abs() < 1e-9);
+        assert!(c.layer_was_a_race());
+        assert!(mk(0, 0, 0.0, 0.0, 7.0).alternative_modelled_db(1.0, atm).is_none());
+    }
+
+    /// The midpoint cut is on the MIDPOINT, and 90 degrees is the terminator.
+    #[test]
+    fn night_is_decided_at_the_midpoint() {
+        let mut c = mk(0, 0, -15.0, 8.0, 14.097);
+        // The receiver is in daylight throughout; only the midpoint moves.
+        assert!(c.rx_is_day);
+        c.midpoint_zenith_deg = 89.9;
+        assert!(!c.midpoint_is_night());
+        c.midpoint_zenith_deg = 90.1;
+        assert!(c.midpoint_is_night(), "a dark midpoint is night whatever the receiver sees");
     }
 
     /// The prior must reproduce the solve: absorption scale 1 and the default
@@ -1189,7 +1571,7 @@ mod tests {
                 }
             }
         }
-        let (params, effects, _notes) = fit_cached(&spots, 12, 5, 12);
+        let (params, effects, _notes) = fit_cached(&spots, 12, 5, 12, Negatives::none());
         assert!(
             (params.absorption_scale.value - truth).abs() < 0.05,
             "planted {truth}, recovered {}",
@@ -1225,7 +1607,7 @@ mod tests {
                 spots.push(c);
             }
         }
-        let (params, effects, _notes) = fit_cached(&spots, 25, 6, 12);
+        let (params, effects, _notes) = fit_cached(&spots, 25, 6, 12, Negatives::none());
         assert!(
             (params.absorption_scale.value - 1.0).abs() < 1e-9,
             "the scale must stay at its prior, got {}",
@@ -1236,6 +1618,124 @@ mod tests {
         // of an unidentified quantity, not of a good fit.
         let fit = Fit::of(&spots, params.absorption_scale.value, params.atm, &effects);
         assert!(fit.rms_db < 1e-6, "residual {} dB", fit.rms_db);
+    }
+
+    /// The failure the negatives exist to prevent, demonstrated and then fixed.
+    ///
+    /// The absorption scale is identified by how much absorption VARIES, never by
+    /// its mean - a constant amount of absorption is indistinguishable from the
+    /// global offset. So a corpus whose absorption is the same everywhere cannot
+    /// identify the scale at all, however many spots it holds, and the fit
+    /// correctly leaves it at its prior while the offset swallows the difference.
+    ///
+    /// A non-decode breaks that, and is the only thing here that can. It is a
+    /// statement about an ABSOLUTE SNR, so no constant shift satisfies it, and a
+    /// negative carrying a different amount of absorption from the positives
+    /// supplies exactly the variation the positives lacked.
+    #[test]
+    fn negatives_identify_a_scale_the_positives_cannot() {
+        let atm = AtmosphericAnchors::default();
+        let truth = 3.0;
+        // Absorption is EXACTLY constant across the positives, so the normal
+        // equations are singular in the scale direction and only `global` moves.
+        let flat_absorption = 10.0;
+        let mut spots = Vec::new();
+        for t in 0..8 {
+            for r in 0..4 {
+                for _ in 0..3 {
+                    let mut c = mk(t, r, 0.0, flat_absorption, 14.095);
+                    c.measured_db = c.modelled_db(truth, atm) + 18.0;
+                    spots.push(c);
+                }
+            }
+        }
+        let (alone, _, _) = fit_cached(&spots, 8, 4, 12, Negatives::none());
+        assert!(
+            (alone.absorption_scale.value - 1.0).abs() < 1e-9,
+            "with no variation the scale is unidentified and must stay at its prior, got {}",
+            alone.absorption_scale.value
+        );
+
+        // A non-decode on a heavily absorbed path. At the prior scale the model
+        // claims it would have been heard; at the truth it is far under.
+        let mut neg = mk(0, 0, f64::NAN, 25.0, 14.095);
+        neg.tx = 0;
+        neg.rx = 0;
+        let threshold = neg.modelled_db(1.0, atm) - 10.0;
+        assert!(
+            neg.modelled_db(truth, atm) < threshold - 20.0,
+            "the planted negative must be comfortably inaudible under the truth"
+        );
+        let negs: Vec<Cached> = (0..8)
+            .flat_map(|t| {
+                (0..4).map(move |r| {
+                    let mut c = mk(t, r, f64::NAN, 25.0, 14.095);
+                    c.tx = t;
+                    c.rx = r;
+                    c
+                })
+            })
+            .collect();
+
+        let (constrained, _, _) = fit_cached(
+            &spots,
+            8,
+            4,
+            12,
+            Negatives::balanced(&negs, threshold, spots.len()),
+        );
+        assert!(
+            constrained.absorption_scale.value > 1.5,
+            "the one-sided term must identify a scale the positives could not, got {}",
+            constrained.absorption_scale.value
+        );
+    }
+
+    /// The hinge must be ONE-SIDED. A negative the model already places below
+    /// the threshold has nothing more to say, and pulling it further down would
+    /// be inventing information the corpus explicitly does not contain.
+    #[test]
+    fn a_negative_already_below_threshold_costs_nothing() {
+        let atm = AtmosphericAnchors::default();
+        let effects = StationEffects {
+            tx: vec![0.0],
+            rx: vec![0.0],
+            global_db: 0.0,
+            tx_counts: vec![1],
+            rx_counts: vec![1],
+        };
+        let quiet = mk(0, 0, f64::NAN, 60.0, 7.038);
+        let threshold = quiet.modelled_db(1.0, atm) + 5.0;
+        let n = Negatives::balanced(std::slice::from_ref(&quiet), threshold, 10);
+        assert!(
+            n.penalty(1.0, atm, &effects, 0.0).abs() < 1e-12,
+            "a comfortably-inaudible negative must be free"
+        );
+        // Move the threshold below the prediction and it starts costing.
+        let loud = Negatives::balanced(std::slice::from_ref(&quiet), threshold - 15.0, 10);
+        assert!(loud.penalty(1.0, atm, &effects, 0.0) > 0.0);
+    }
+
+    /// With no negatives the objective must be bit-identical to the old
+    /// positives-only one, or every earlier result silently changed meaning.
+    #[test]
+    fn no_negatives_reproduces_the_positives_only_solve() {
+        let atm = AtmosphericAnchors::default();
+        let spots: Vec<Cached> = (0..30)
+            .map(|i| {
+                #[allow(clippy::cast_precision_loss)]
+                let a = 3.0 + (i % 5) as f64;
+                let mut c = mk(i % 3, i % 2, 0.0, a, 7.038);
+                c.measured_db = c.modelled_db(1.4, atm) - 2.0;
+                c
+            })
+            .collect();
+        let e = StationEffects::solve(&vec![0.0; spots.len()], &spots, 3, 2);
+        let prior = CachedParams::prior().absorption_scale;
+        let (s, g, _) = best_absorption_scale(&spots, atm, &e, prior, Negatives::none());
+        // Solved by hand from the same normal equations, with no hinge involved.
+        assert!(s.value.is_finite() && g.is_finite());
+        assert!((s.value - 1.4).abs() < 1e-6, "scale {}", s.value);
     }
 
     /// A regression against a constant is undefined, and must say so rather than
