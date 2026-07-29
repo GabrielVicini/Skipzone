@@ -203,6 +203,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
         tx_power_w: inputs.tx_power_w,
         noise,
         threshold_db: inputs.snr_threshold_db,
+        model_bias_db: inputs.model_bias_db,
         tx_antenna: &tx_antenna,
         rx_antenna: &rx_antenna,
     };

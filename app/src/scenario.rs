@@ -65,6 +65,21 @@ pub const D_REGION_PEAK_NE_OVERHEAD: f64 = 1.0e9;
 pub const D_REGION_PEAK_ALT_KM: f64 = 85.0;
 /// D-region Chapman scale height, km.
 pub const D_REGION_SCALE_HEIGHT_KM: f64 = 6.0;
+/// Residual night-time D-region peak density, as a fraction of the overhead-sun
+/// peak. ANCHOR.
+///
+/// An alpha-Chapman layer goes to EXACTLY zero past the terminator, because
+/// `Ch(X, chi)` diverges there. The real night D region does not: galactic cosmic
+/// rays and scattered Lyman-alpha on nitric oxide keep it at roughly 10^8 m^-3
+/// against a daytime peak near 10^9, and neither source switches off at sunset.
+/// Photochemical equilibrium under a source the sun does not supply is outside
+/// what the Chapman derivation covers, so this is an input to it.
+///
+/// It is not cosmetic. Absorption goes as `Ne nu`, so a layer that is exactly
+/// zero absorbs exactly nothing, and before this constant existed the model had
+/// no night-time absorption at all on any band - measured at 0.00 dB on 7 and
+/// 14 MHz over a midnight path.
+pub const D_REGION_NIGHT_FLOOR_FRACTION: f64 = 0.10;
 
 // --- Electron-neutral collision frequency --------------------------------
 //
@@ -280,6 +295,17 @@ pub struct Inputs {
     pub bandwidth_hz: f64,
     /// SNR in `bandwidth_hz` required to call the path usable, dB.
     pub snr_threshold_db: f64,
+    /// Calibrated model bias [dB], subtracted from every predicted SNR.
+    ///
+    /// A calibration against measured spots reports a global offset it cannot
+    /// attribute to any individual station - see the `wspr_calibrate` report.
+    /// Whatever its cause, it is the model's best estimate of its own bias
+    /// against an UNKNOWN station, because the per-station effects are centred on
+    /// zero. Shipping the prediction without it means shipping a bias that has
+    /// been measured and declined.
+    ///
+    /// 0.0 by default, so nothing changes until a calibrated value is set.
+    pub model_bias_db: f64,
 
     /// The unverified anchors of the ionosphere and noise models. `Default`
     /// reproduces the module constants exactly, so an ordinary run never needs
@@ -324,6 +350,7 @@ impl Default for Inputs {
             op_mode: OperatingMode::Ssb,
             bandwidth_hz: OperatingMode::Ssb.defaults().0,
             snr_threshold_db: OperatingMode::Ssb.defaults().1,
+            model_bias_db: 0.0,
             anchors: Anchors::default(),
         }
     }
@@ -536,6 +563,7 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         ion.d_scale_height_km.value * 1e3,
         solar.declination_deg,
         inputs.utc_hours,
+        ion.d_night_floor_fraction.value,
     );
     let d_region_peak_ne = d_disp.realised_peak_ne(mid_colat, mid_lon_rad);
     // "Active" now means "producing at the midpoint", tied to the SAME
@@ -798,6 +826,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
         ion.d_scale_height_km.value * 1e3,
         a.solar.declination_deg,
         inputs.utc_hours,
+        ion.d_night_floor_fraction.value,
     );
 
     // E region: same treatment as D, one region up. This is what gives short
@@ -858,6 +887,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
                 ion.d_scale_height_km.value * 1e3,
                 a.solar.declination_deg,
                 inputs.utc_hours,
+                ion.d_night_floor_fraction.value,
             )),
             Box::new(es),
         ];
