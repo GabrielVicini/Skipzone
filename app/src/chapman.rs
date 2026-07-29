@@ -550,7 +550,11 @@ mod tests {
 
         // Night side: the bare layer is exactly zero; the floored one is not.
         let night_lon = 0.0;
-        assert_eq!(at(&bare, 85.0, night_lon), 0.0, "a bare Chapman night is exact vacuum");
+        assert_eq!(
+            at(&bare, 85.0, night_lon),
+            0.0,
+            "a bare Chapman night is exact vacuum"
+        );
         let night = at(&floored, 85.0, night_lon);
         assert!(
             night > 0.05 * nm && night < 0.15 * nm,

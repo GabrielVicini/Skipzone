@@ -257,7 +257,12 @@ struct Solved {
 /// fix anything, and a run that drops a large fraction of its corpus is not a
 /// calibration to quote. What is dropped is always reported.
 fn drop_es(set: Solved) -> Solved {
-    let kept: Vec<Cached> = set.spots.iter().filter(|c| c.layer != "Es").cloned().collect();
+    let kept: Vec<Cached> = set
+        .spots
+        .iter()
+        .filter(|c| c.layer != "Es")
+        .cloned()
+        .collect();
     let es_excluded = set.spots.len() - kept.len();
     Solved {
         spots: kept,
@@ -474,9 +479,16 @@ fn run(args: &Args) -> Result<(), String> {
     let worst = fit_set
         .spots
         .iter()
-        .map(|c| (c.modelled_db(1.0, AtmosphericAnchors::default()) - c.modelled_db(1.0, prior.atm)).abs())
+        .map(|c| {
+            (c.modelled_db(1.0, AtmosphericAnchors::default()) - c.modelled_db(1.0, prior.atm))
+                .abs()
+        })
         .fold(0.0_f64, f64::max);
-    println!("    largest disagreement over {} spots: {:.2e} dB", fit_set.spots.len(), worst);
+    println!(
+        "    largest disagreement over {} spots: {:.2e} dB",
+        fit_set.spots.len(),
+        worst
+    );
 
     // ------------------------------------------------- negatives, solved EARLY
     // They are solved before the fit rather than after it because they are part
@@ -546,10 +558,20 @@ fn run(args: &Args) -> Result<(), String> {
     };
 
     // -------------------------------------------------------------- baseline
-    let baseline = score_set(&fit_set, 1.0, AtmosphericAnchors::default(), args.trim_tails);
+    let baseline = score_set(
+        &fit_set,
+        1.0,
+        AtmosphericAnchors::default(),
+        args.trim_tails,
+    );
     println!("\n=== BASELINE (the model as it stands) ======================");
     report_fit(&baseline.fit, &fit_set);
-    report_layers(&fit_set, 1.0, AtmosphericAnchors::default(), &baseline.effects);
+    report_layers(
+        &fit_set,
+        1.0,
+        AtmosphericAnchors::default(),
+        &baseline.effects,
+    );
 
     // ------------------------------------------------------------------- fit
     println!("\n=== FITTING ================================================");
@@ -571,7 +593,10 @@ fn run(args: &Args) -> Result<(), String> {
             "\n  ONE-SIDED CONSTRAINT: {} solved non-decode(s) enter the objective as",
             negative_spots.len()
         );
-        println!("  hinges about the WSPR decode threshold, weighted {:.3} each so their total", constraint.weight);
+        println!(
+            "  hinges about the WSPR decode threshold, weighted {:.3} each so their total",
+            constraint.weight
+        );
         println!("  weight equals the positives'. A non-decode is the only thing in this corpus");
         println!("  that constrains an ABSOLUTE level, because no constant shift can satisfy it.");
     }
@@ -600,7 +625,11 @@ fn run(args: &Args) -> Result<(), String> {
         fitted.absorption_scale.value,
         fitted.absorption_scale.min,
         fitted.absorption_scale.max,
-        if fitted.absorption_scale.at_bound() { "YES" } else { "no" }
+        if fitted.absorption_scale.at_bound() {
+            "YES"
+        } else {
+            "no"
+        }
     );
     println!(
         "  {:<28} {:>12.2e} {:>12.2e} {:>5.0e}..{:<5.0e} {:>7}",
@@ -640,21 +669,29 @@ fn run(args: &Args) -> Result<(), String> {
         "    absorption scale   {:.3} to {:.3}  (spread over {} day-deleted refits)",
         ci.min, ci.max, ci.n
     );
-    println!(
-        "    That spread is the parameter's sensitivity to WHICH DAYS are in the corpus,"
-    );
+    println!("    That spread is the parameter's sensitivity to WHICH DAYS are in the corpus,");
     println!("    which is the uncertainty that matters here - far larger than the");
     println!("    within-day sampling error a textbook standard error would report.");
 
     // ------------------------------------------------------------- fit vs holdout
-    let after_fit = score_set(&fit_set, fitted.absorption_scale.value, fitted.atm, args.trim_tails);
+    let after_fit = score_set(
+        &fit_set,
+        fitted.absorption_scale.value,
+        fitted.atm,
+        args.trim_tails,
+    );
     println!("\n=== RESULT: FIT SET vs HOLD-OUT ============================");
     println!(
         "  {:<34} {:>12} {:>12} {:>12}",
         "", "fit before", "fit after", "hold-out after"
     );
     let holdout_after = holdout_set.as_ref().map(|h| {
-        score_set(h, fitted.absorption_scale.value, fitted.atm, args.trim_tails)
+        score_set(
+            h,
+            fitted.absorption_scale.value,
+            fitted.atm,
+            args.trim_tails,
+        )
     });
     let hv = |f: fn(&Fit) -> f64| -> String {
         holdout_after
@@ -678,7 +715,9 @@ fn run(args: &Args) -> Result<(), String> {
     println!("  -- bias and spread --");
     row("median error [dB]", |f| f.residual.median);
     row("IQR of error [dB]", |f| f.residual.iqr());
-    row("median, effects removed [dB]", |f| f.adjusted_residual.median);
+    row("median, effects removed [dB]", |f| {
+        f.adjusted_residual.median
+    });
     row("IQR, effects removed [dB]", |f| f.adjusted_residual.iqr());
     row("RMS, effects removed [dB]", |f| f.rms_db);
 
@@ -703,12 +742,9 @@ fn run(args: &Args) -> Result<(), String> {
 
     // ------------------------------------------------------ per-band, per-cut
     println!("\n--- PER BAND (after the fit) -------------------------------");
-    print_cuts(
-        &fit_set,
-        &after_fit,
-        &baseline,
-        |c| band_label(c.freq_mhz).to_string(),
-    );
+    print_cuts(&fit_set, &after_fit, &baseline, |c| {
+        band_label(c.freq_mhz).to_string()
+    });
     println!("\n--- PER PATH LENGTH (after the fit) ------------------------");
     print_cuts(&fit_set, &after_fit, &baseline, |c| {
         match c.range_km {
@@ -737,7 +773,11 @@ fn run(args: &Args) -> Result<(), String> {
         format!(
             "{:<3} {}",
             c.layer,
-            if c.midpoint_is_night() { "night" } else { "day" }
+            if c.midpoint_is_night() {
+                "night"
+            } else {
+                "day"
+            }
         )
     });
     report_layer_races(&fit_set);
@@ -757,7 +797,11 @@ fn run(args: &Args) -> Result<(), String> {
     print_cuts_min(&fit_set, &after_fit, &baseline, 8, |c| {
         format!(
             "mid {:<5} rx {}",
-            if c.midpoint_is_night() { "night" } else { "day" },
+            if c.midpoint_is_night() {
+                "night"
+            } else {
+                "day"
+            },
             if c.rx_is_day { "day" } else { "night" }
         )
     });
@@ -774,7 +818,9 @@ fn run(args: &Args) -> Result<(), String> {
     println!("\n=== THE STATION-EFFECT DISTRIBUTION ========================");
     println!("  A measurement of the WSPR station population in its own right: how much");
     println!("  better or worse each station is than the model's assumed antenna and");
-    println!("  noise floor. Only stations with at least {MIN_SPOTS_PER_STATION} spots are shown -");
+    println!(
+        "  noise floor. Only stations with at least {MIN_SPOTS_PER_STATION} spots are shown -"
+    );
     println!("  fewer than that and the 'effect' is just that station's own residual.\n");
     if after_fit.trimmed > 0 {
         println!(
@@ -899,11 +945,7 @@ fn scan_resolve_anchors(
     // a hash-ordered sample, so this is a uniform thinning rather than a slice of
     // one day.
     let stride = (corpus_spots.len() / args.scan.max(1)).max(1);
-    let sample: Vec<CorpusSpot> = corpus_spots
-        .iter()
-        .step_by(stride)
-        .cloned()
-        .collect();
+    let sample: Vec<CorpusSpot> = corpus_spots.iter().step_by(stride).cloned().collect();
     println!(
         "  {} spot(s) subsampled from {} (every {}th), re-solved at each value.",
         sample.len(),
@@ -978,7 +1020,10 @@ fn scan_resolve_anchors(
             };
             let solved = main_solve("scan", &sample, &trial_base, pool);
             if solved.spots.len() < 30 {
-                println!("  {:<30} too few paths closed to score", format!("{name} = {v}"));
+                println!(
+                    "  {:<30} too few paths closed to score",
+                    format!("{name} = {v}")
+                );
                 continue;
             }
             let (p, _e, _n) = fit::fit_cached(
@@ -1182,7 +1227,12 @@ fn report_layers(set: &Solved, scale: f64, atm: AtmosphericAnchors, effects: &St
     }
     println!("  layer chosen:");
     for (layer, n) in counts {
-        let group: Vec<Cached> = set.spots.iter().filter(|c| c.layer == layer).cloned().collect();
+        let group: Vec<Cached> = set
+            .spots
+            .iter()
+            .filter(|c| c.layer == layer)
+            .cloned()
+            .collect();
         let f = Fit::of(&group, scale, atm, effects);
         println!(
             "    {layer:<4} {n:>5} spots, median {:+6.1} dB, IQR {:5.1} dB",
@@ -1229,7 +1279,13 @@ fn print_cuts_min(
     // Recompute properly with the fitted parameters rather than the placeholder
     // above, which exists only to keep the two cut lists in the same order.
     let _ = a;
-    let before_cuts = fit::cuts_by(&set.spots, 1.0, AtmosphericAnchors::default(), &before.effects, key);
+    let before_cuts = fit::cuts_by(
+        &set.spots,
+        1.0,
+        AtmosphericAnchors::default(),
+        &before.effects,
+        key,
+    );
     let after_cuts = fit::cuts_by(&set.spots, after.scale, after.atm, &after.effects, key);
     let lookup: BTreeMap<&str, &fit::Cut> =
         before_cuts.iter().map(|c| (c.label.as_str(), c)).collect();
@@ -1246,7 +1302,10 @@ fn print_cuts_min(
             "  {:<20} {:>6} {:>10} {:>9} {:>10} {:>9} {:>8}",
             c.label,
             c.fit.n,
-            b.map_or("-".to_string(), |b| format!("{:+.1}", b.fit.residual.median)),
+            b.map_or("-".to_string(), |b| format!(
+                "{:+.1}",
+                b.fit.residual.median
+            )),
             format!("{:+.1}", c.fit.residual.median),
             b.map_or("-".to_string(), |b| format!("{:.1}", b.fit.residual.iqr())),
             format!("{:.1}", c.fit.residual.iqr()),
@@ -1335,9 +1394,7 @@ fn report_layer_races(set: &Solved) {
         let resid_alt = median_of(
             raced
                 .iter()
-                .filter_map(|c| {
-                    Some(c.alternative_modelled_db(1.0, atm)? - c.measured_db)
-                })
+                .filter_map(|c| Some(c.alternative_modelled_db(1.0, atm)? - c.measured_db))
                 .collect(),
         );
         println!(
@@ -1501,12 +1558,12 @@ fn report_terminator_step(
         // The station correction rides with the measurement, so that d_measured
         // compares like with like when the two cells hold different stations.
         let meas = |g: &[&&Cached]| -> Vec<f64> {
-            g.iter().map(|c| c.measured_db + effects.offset_for(c)).collect()
+            g.iter()
+                .map(|c| c.measured_db + effects.offset_for(c))
+                .collect()
         };
         let d_measured = median(meas(&day)) - median(meas(&night));
-        let absorb = |g: &[&&Cached]| -> Vec<f64> {
-            g.iter().map(|c| c.absorption_db).collect()
-        };
+        let absorb = |g: &[&&Cached]| -> Vec<f64> { g.iter().map(|c| c.absorption_db).collect() };
         let d_absorb = median(absorb(&day)) - median(absorb(&night));
         #[allow(clippy::cast_precision_loss)]
         let f2_frac = day.iter().filter(|c| c.layer == "F2").count() as f64 / day.len() as f64;
@@ -1543,9 +1600,7 @@ fn report_terminator_step(
     for (band, group) in &by_band {
         let resid = |g: &[&&Cached]| -> Vec<f64> {
             g.iter()
-                .map(|c| {
-                    c.modelled_db(scale, fit_atm) - c.measured_db - fit_effects.offset_for(c)
-                })
+                .map(|c| c.modelled_db(scale, fit_atm) - c.measured_db - fit_effects.offset_for(c))
                 .collect()
         };
         let day: Vec<&&Cached> = group.iter().filter(|c| c.rx_is_day).collect();
@@ -1581,9 +1636,8 @@ fn report_terminator_step(
                 .collect()
         };
         let d_measured = median(meas(&day)) - median(meas(&night));
-        let absorb = |g: &[&&Cached]| -> Vec<f64> {
-            g.iter().map(|c| scale * c.absorption_db).collect()
-        };
+        let absorb =
+            |g: &[&&Cached]| -> Vec<f64> { g.iter().map(|c| scale * c.absorption_db).collect() };
         let d_absorb = median(absorb(&day)) - median(absorb(&night));
         #[allow(clippy::cast_precision_loss)]
         let f2_frac = day.iter().filter(|c| c.layer == "F2").count() as f64 / day.len() as f64;
@@ -1629,7 +1683,9 @@ fn report_confound_census(set: &Solved, effects: &StationEffects) {
     println!("  A median is worth quoting only from a cell big enough to have one, and a cell");
     println!("  isolates the variable it is named after only if the OTHER variables are");
     println!("  balanced across it. Both facts, for every cut the daytime residual is read");
-    println!("  from. Cells under {MIN_QUOTABLE} spots print NO median: the corpus cannot answer there.");
+    println!(
+        "  from. Cells under {MIN_QUOTABLE} spots print NO median: the corpus cannot answer there."
+    );
     println!("  'resid' is raw modelled-measured at the BASELINE anchors; 'resid-eff' has the");
     println!("  station effects and the global offset removed, so it is the shape alone.");
 
@@ -1642,7 +1698,14 @@ fn report_confound_census(set: &Solved, effects: &StationEffects) {
     let table = |title: &str, spots: &[&Cached], key: &dyn Fn(&Cached) -> String| {
         println!(
             "\n  {:<20} {:>6} {:>8} {:>10} {:>8} {:>6} {:>6} {:>8} {:>10}",
-            title, "spots", "f [MHz]", "range [km]", "zenith", "hops", "absorb", "resid",
+            title,
+            "spots",
+            "f [MHz]",
+            "range [km]",
+            "zenith",
+            "hops",
+            "absorb",
+            "resid",
             "resid-eff"
         );
         let mut cells: BTreeMap<String, Vec<&Cached>> = BTreeMap::new();
@@ -1746,12 +1809,7 @@ fn report_confound_census(set: &Solved, effects: &StationEffects) {
     println!("\n  Band x layer x midpoint. Frequency AND layer held fixed - the only cut that");
     println!("  separates 'the D region is under-charged' from 'the wrong mode was reported'.");
     table("band x layer x mid", &all, &|c| {
-        format!(
-            "{:<6} {:<3} {}",
-            band_label(c.freq_mhz),
-            c.layer,
-            day(c)
-        )
+        format!("{:<6} {:<3} {}", band_label(c.freq_mhz), c.layer, day(c))
     });
 
     // The zenith block's two legal bins sit at different median frequencies, so
@@ -1792,7 +1850,10 @@ fn report_absorption_range(set: &Solved) {
     let atm = AtmosphericAnchors::default();
     let f2: Vec<&Cached> = set.spots.iter().filter(|c| c.layer == "F2").collect();
     if f2.len() < 20 {
-        println!("  Only {} F2 spot(s); too few to read a shape from.", f2.len());
+        println!(
+            "  Only {} F2 spot(s); too few to read a shape from.",
+            f2.len()
+        );
         return;
     }
 
@@ -1869,7 +1930,11 @@ fn report_absorption_range(set: &Solved) {
             .entry(format!(
                 "{:<6} {}",
                 band_label(c.freq_mhz),
-                if c.midpoint_is_night() { "night" } else { "day" }
+                if c.midpoint_is_night() {
+                    "night"
+                } else {
+                    "day"
+                }
             ))
             .or_default()
             .push(c);
@@ -1996,7 +2061,11 @@ fn report_hop_geometry(set: &Solved) {
         crossed
             .entry(format!(
                 "{bucket:<13}{}",
-                if c.midpoint_is_night() { "night" } else { "day" }
+                if c.midpoint_is_night() {
+                    "night"
+                } else {
+                    "day"
+                }
             ))
             .or_default()
             .push(c);
@@ -2006,8 +2075,10 @@ fn report_hop_geometry(set: &Solved) {
             continue;
         }
         let mut hops: Vec<f64> = group.iter().map(|c| f64::from(c.hops.max(1))).collect();
-        let mut each: Vec<f64> =
-            group.iter().map(|c| c.range_km / f64::from(c.hops.max(1))).collect();
+        let mut each: Vec<f64> = group
+            .iter()
+            .map(|c| c.range_km / f64::from(c.hops.max(1)))
+            .collect();
         let mut hs: Vec<f64> = group.iter().map(|c| height_km(c.layer)).collect();
         hops.sort_by(f64::total_cmp);
         each.sort_by(f64::total_cmp);
@@ -2185,7 +2256,9 @@ fn report_bound_profiles(
     println!("  range - that is the finding the warnings above describe. A parameter whose");
     println!("  objective is FLAT has no minimum to find, and lands on an edge only because a");
     println!("  descent runs out of room: the warning then describes evidence that is not");
-    println!("  there. 'flat %' is how much of the range sits within {FLAT_TOLERANCE_DB} dB of the best.\n");
+    println!(
+        "  there. 'flat %' is how much of the range sits within {FLAT_TOLERANCE_DB} dB of the best.\n"
+    );
     #[allow(clippy::cast_precision_loss)]
     let n = spots.len().max(1) as f64;
     let rms = |sum_sq: f64| (sum_sq / n).sqrt();
@@ -2198,13 +2271,17 @@ fn report_bound_profiles(
 
     // Each row: the objective sampled across the range, as RMS dB.
     let row = |name: &str, b: skipzone_app::calib::Bounded, curve: &[(f64, f64)]| {
-        let (best_at, best) = curve
+        let (best_at, best) =
+            curve
+                .iter()
+                .copied()
+                .fold((f64::NAN, f64::INFINITY), |acc, (v, o)| {
+                    if o < acc.1 { (v, o) } else { acc }
+                });
+        let flat = curve
             .iter()
-            .copied()
-            .fold((f64::NAN, f64::INFINITY), |acc, (v, o)| {
-                if o < acc.1 { (v, o) } else { acc }
-            });
-        let flat = curve.iter().filter(|(_, o)| *o - best <= FLAT_TOLERANCE_DB).count();
+            .filter(|(_, o)| *o - best <= FLAT_TOLERANCE_DB)
+            .count();
         #[allow(clippy::cast_precision_loss)]
         let flat_pct = 100.0 * flat as f64 / curve.len() as f64;
         let at = |target: f64| {
@@ -2261,7 +2338,9 @@ fn report_bound_profiles(
             let v = b.at_unit_position(u).value;
             (
                 v,
-                rms(fit::objective_at_scale(spots, v, fitted.atm, effects, negatives)),
+                rms(fit::objective_at_scale(
+                    spots, v, fitted.atm, effects, negatives,
+                )),
             )
         })
         .collect();
@@ -2305,12 +2384,16 @@ fn report_skill(
 ) {
     println!("\n--- SKILL: CAN IT SEPARATE DECODES FROM NON-DECODES? -------");
     if positives.len() < 20 || negatives.len() < 20 {
-        println!("  Too few on one side to measure: {} decode(s), {} non-decode(s).", positives.len(), negatives.len());
+        println!(
+            "  Too few on one side to measure: {} decode(s), {} non-decode(s).",
+            positives.len(),
+            negatives.len()
+        );
         return;
     }
     let predicted = |c: &Cached| {
-        let station =
-            effects.tx.get(c.tx).copied().unwrap_or(0.0) + effects.rx.get(c.rx).copied().unwrap_or(0.0);
+        let station = effects.tx.get(c.tx).copied().unwrap_or(0.0)
+            + effects.rx.get(c.rx).copied().unwrap_or(0.0);
         c.modelled_db(scale, atm) - station
     };
     let pos: Vec<f64> = positives.iter().map(predicted).collect();
@@ -2341,8 +2424,12 @@ fn report_skill(
         pos.len(),
         neg.len()
     );
-    println!("  median predicted SNR: {:+.1} dB decoded, {:+.1} dB not decoded, gap {:.1} dB",
-        median(&pos), median(&neg), median(&pos) - median(&neg));
+    println!(
+        "  median predicted SNR: {:+.1} dB decoded, {:+.1} dB not decoded, gap {:.1} dB",
+        median(&pos),
+        median(&neg),
+        median(&pos) - median(&neg)
+    );
     println!("\n  AREA UNDER THE ROC CURVE: {auc:.3}");
     let reading = if auc < 0.6 {
         "barely better than a coin toss - the model does not order these paths"
@@ -2367,7 +2454,13 @@ fn report_effects(effects: &StationEffects, set: &Solved, min_spots: usize) {
         println!(
             "  {what:<12} n={:<5} median {:+6.1}  IQR {:5.1}  p10 {:+6.1}  p90 {:+6.1}  \
              min {:+6.1}  max {:+6.1}",
-            s.n, s.median, s.iqr(), s.p10, s.p90, s.min, s.max
+            s.n,
+            s.median,
+            s.iqr(),
+            s.p10,
+            s.p90,
+            s.min,
+            s.max
         );
     };
     show("transmitters", &d.tx);
@@ -2396,7 +2489,12 @@ fn report_effects(effects: &StationEffects, set: &Solved, min_spots: usize) {
             println!("  worst {label:<12} {}", fmt(&v[v.len() - 3..]));
         }
     };
-    extremes(&set.tx_names, &effects.tx, &effects.tx_counts, "transmitters");
+    extremes(
+        &set.tx_names,
+        &effects.tx,
+        &effects.tx_counts,
+        "transmitters",
+    );
     extremes(&set.rx_names, &effects.rx, &effects.rx_counts, "receivers");
 }
 
@@ -2562,7 +2660,6 @@ fn report_negatives(
         println!();
     }
 
-
     // `offset_db` is subtracted from the modelled SNR before the threshold
     // comparison: 0 scores the model exactly as the app would ship it, and the
     // scoring's own global offset scores it with the bias the fit measured but
@@ -2593,16 +2690,9 @@ fn report_negatives(
     let before = score(1.0, prior_atm, 0.0);
     let after = score(fitted.absorption_scale.value, fitted.atm, 0.0);
     let before_matched = score(1.0, prior_atm, levels.before);
-    let after_matched = score(
-        fitted.absorption_scale.value,
-        fitted.atm,
-        levels.after,
-    );
+    let after_matched = score(fitted.absorption_scale.value, fitted.atm, levels.after);
 
-    println!(
-        "  {:<44} {:>12} {:>12}",
-        "", "before fit", "after fit"
-    );
+    println!("  {:<44} {:>12} {:>12}", "", "before fit", "after fit");
     println!(
         "  {:<44} {:>12} {:>12}",
         "negatives constructed", before.n, after.n
@@ -2696,17 +2786,13 @@ fn report_negatives(
                 .map(|c| c.modelled_db(scale, atm) - offset - WSPR_DECODE_THRESHOLD_DB)
                 .collect();
             #[allow(clippy::cast_precision_loss)]
-            let fp = margins.iter().filter(|m| **m >= 0.0).count() as f64 * 100.0
-                / group.len() as f64;
+            let fp =
+                margins.iter().filter(|m| **m >= 0.0).count() as f64 * 100.0 / group.len() as f64;
             margins.sort_by(f64::total_cmp);
             (fp, fit::percentile(&margins, 0.5))
         };
         let (fp_b, _) = rate(1.0, prior_atm, levels.before);
-        let (fp_a, margin_a) = rate(
-            fitted.absorption_scale.value,
-            fitted.atm,
-            levels.after,
-        );
+        let (fp_a, margin_a) = rate(fitted.absorption_scale.value, fitted.atm, levels.after);
         println!(
             "  {:<20} {:>8} {:>8.1} {:>13.1}% {:>13.1}% {:>15.1}",
             label,
@@ -2751,8 +2837,11 @@ fn day_jackknife(set: &Solved, rounds: usize, negatives: &[Cached]) -> Jackknife
         }
         // The negatives are dropped for the same day, so each refit sees one
         // consistent ionosphere's worth of evidence on both sides.
-        let kept_negatives: Vec<Cached> =
-            negatives.iter().filter(|c| c.date != *drop).cloned().collect();
+        let kept_negatives: Vec<Cached> = negatives
+            .iter()
+            .filter(|c| c.date != *drop)
+            .cloned()
+            .collect();
         let (p, _, _) = fit::fit_cached(
             &kept,
             set.tx_names.len(),
@@ -2776,17 +2865,44 @@ fn print_identification_table() {
     println!("  what WSPR contains.\n");
     println!("  {:<40} identifiable here?", "quantity");
     for (q, a) in [
-        ("absorption magnitude", "YES - from its variation, not its mean"),
-        ("absorption vs frequency", "YES - cross-band within a station"),
-        ("absorption vs zenith angle", "YES - diurnal within a station"),
-        ("atmospheric noise day-night difference", "YES - diurnal within a station"),
-        ("atmospheric noise frequency slopes", "YES - cross-band within a station"),
-        ("atmospheric noise absolute level", "NO - a constant, absorbed"),
+        (
+            "absorption magnitude",
+            "YES - from its variation, not its mean",
+        ),
+        (
+            "absorption vs frequency",
+            "YES - cross-band within a station",
+        ),
+        (
+            "absorption vs zenith angle",
+            "YES - diurnal within a station",
+        ),
+        (
+            "atmospheric noise day-night difference",
+            "YES - diurnal within a station",
+        ),
+        (
+            "atmospheric noise frequency slopes",
+            "YES - cross-band within a station",
+        ),
+        (
+            "atmospheric noise absolute level",
+            "NO - a constant, absorbed",
+        ),
         ("receiver noise environment", "NO - constant per receiver"),
-        ("noise model latitude terms", "NO - a station's latitude is fixed"),
+        (
+            "noise model latitude terms",
+            "NO - a station's latitude is fixed",
+        ),
         ("seasonal swing", "NO - one month of corpus"),
-        ("absolute antenna gain, either end", "NO - constant per station"),
-        ("claimed transmit power accuracy", "NO - constant per station"),
+        (
+            "absolute antenna gain, either end",
+            "NO - constant per station",
+        ),
+        (
+            "claimed transmit power accuracy",
+            "NO - constant per station",
+        ),
     ] {
         println!("  {q:<40} {a}");
     }

@@ -751,7 +751,8 @@ impl<'a> Negatives<'a> {
     /// guess: the effects are gauge-centred to mean zero, so 0 IS the population
     /// estimate for a station nothing is known about.
     fn excess(&self, c: &Cached, scale: f64, atm: AtmosphericAnchors, e: &StationEffects) -> f64 {
-        let station = e.tx.get(c.tx).copied().unwrap_or(0.0) + e.rx.get(c.rx).copied().unwrap_or(0.0);
+        let station =
+            e.tx.get(c.tx).copied().unwrap_or(0.0) + e.rx.get(c.rx).copied().unwrap_or(0.0);
         c.modelled_db(scale, atm) - station - self.threshold_db
     }
 
@@ -768,7 +769,11 @@ impl<'a> Negatives<'a> {
             .iter()
             .map(|c| {
                 let over = self.excess(c, scale, atm, e) - global;
-                if over > 0.0 { self.weight * over * over } else { 0.0 }
+                if over > 0.0 {
+                    self.weight * over * over
+                } else {
+                    0.0
+                }
             })
             .sum()
     }
@@ -859,14 +864,13 @@ pub fn best_absorption_scale(
 
     // The pseudo-observation a violating negative contributes.
     let neg_u = |c: &Cached| -> f64 {
-        let station =
-            effects.tx.get(c.tx).copied().unwrap_or(0.0) + effects.rx.get(c.rx).copied().unwrap_or(0.0);
+        let station = effects.tx.get(c.tx).copied().unwrap_or(0.0)
+            + effects.rx.get(c.rx).copied().unwrap_or(0.0);
         c.modelled_db(0.0, atm) - negatives.threshold_db - station
     };
 
     let solve = |active: &[usize]| -> Option<(f64, f64)> {
-        let (mut n, mut sa, mut saa, mut su, mut sua) =
-            (base_n, base_a, base_aa, base_u, base_ua);
+        let (mut n, mut sa, mut saa, mut su, mut sua) = (base_n, base_a, base_aa, base_u, base_ua);
         for &i in active {
             let c = &negatives.spots[i];
             let w = negatives.weight;
@@ -885,10 +889,7 @@ pub fn best_absorption_scale(
             // honest outcome rather than an invented scale.
             return None;
         }
-        Some((
-            (su * saa - sa * sua) / det,
-            (n * sua - sa * su) / det,
-        ))
+        Some(((su * saa - sa * sua) / det, (n * sua - sa * su) / det))
     };
 
     // The active set is SEEDED at the prior scale rather than started empty.
@@ -923,7 +924,9 @@ pub fn best_absorption_scale(
         // Singular even with the active negatives included: the scale genuinely
         // is not identified, so leave it at the prior and let the offset carry
         // everything. That is the honest outcome, not an invented scale.
-        let Some((gi, si)) = solve(&active) else { break };
+        let Some((gi, si)) = solve(&active) else {
+            break;
+        };
         g = gi;
         s = si;
         let next = violating(g, s);
@@ -972,8 +975,8 @@ pub fn objective_at_scale(
     // The offset that minimises the same convex objective at this fixed scale,
     // by the same active-set argument `best_absorption_scale` documents.
     let residual = |c: &Cached, target: f64| {
-        let station =
-            effects.tx.get(c.tx).copied().unwrap_or(0.0) + effects.rx.get(c.rx).copied().unwrap_or(0.0);
+        let station = effects.tx.get(c.tx).copied().unwrap_or(0.0)
+            + effects.rx.get(c.rx).copied().unwrap_or(0.0);
         c.modelled_db(scale, atm) - target - station
     };
     let mut global = 0.0;
@@ -1150,11 +1153,7 @@ pub fn fit_cached(
                     .iter()
                     .map(|(_, get, _)| get(&params).unit_position())
                     .collect();
-                let direction: Vec<f64> = after
-                    .iter()
-                    .zip(&before)
-                    .map(|(a, b)| a - b)
-                    .collect();
+                let direction: Vec<f64> = after.iter().zip(&before).map(|(a, b)| a - b).collect();
                 if direction.iter().all(|d| d.abs() < 1e-15) {
                     continue;
                 }
@@ -1351,7 +1350,11 @@ mod tests {
         let alt_two = c.alternative_modelled_db(2.0, atm).expect("alternative");
         assert!((alt - alt_two - 20.0).abs() < 1e-9);
         assert!(c.layer_was_a_race());
-        assert!(mk(0, 0, 0.0, 0.0, 7.0).alternative_modelled_db(1.0, atm).is_none());
+        assert!(
+            mk(0, 0, 0.0, 0.0, 7.0)
+                .alternative_modelled_db(1.0, atm)
+                .is_none()
+        );
     }
 
     /// The midpoint cut is on the MIDPOINT, and 90 degrees is the terminator.
@@ -1363,7 +1366,10 @@ mod tests {
         c.midpoint_zenith_deg = 89.9;
         assert!(!c.midpoint_is_night());
         c.midpoint_zenith_deg = 90.1;
-        assert!(c.midpoint_is_night(), "a dark midpoint is night whatever the receiver sees");
+        assert!(
+            c.midpoint_is_night(),
+            "a dark midpoint is night whatever the receiver sees"
+        );
     }
 
     /// The prior must reproduce the solve: absorption scale 1 and the default
@@ -1372,10 +1378,8 @@ mod tests {
     fn the_prior_reproduces_the_link_budget() {
         let c = mk(0, 0, -15.0, 8.0, 14.097);
         let atm = AtmosphericAnchors::default();
-        let expected = dbm_from_watts(10.0_f64.powf((23.0 - 30.0) / 10.0))
-            - 100.0
-            - 8.0
-            - c.noise_dbm(atm);
+        let expected =
+            dbm_from_watts(10.0_f64.powf((23.0 - 30.0) / 10.0)) - 100.0 - 8.0 - c.noise_dbm(atm);
         assert!(
             (c.modelled_db(1.0, atm) - expected).abs() < 1e-9,
             "{} vs {expected}",
@@ -1383,8 +1387,16 @@ mod tests {
         );
         // The noise floor really is the one the module composes, not a copy.
         let direct = noise_power_dbm(
-            NoiseFloor::compute(14.097, 2500.0, NoiseEnvironment::Rural, true, Season::Summer, 45.0, atm)
-                .total_fa_db,
+            NoiseFloor::compute(
+                14.097,
+                2500.0,
+                NoiseEnvironment::Rural,
+                true,
+                Season::Summer,
+                45.0,
+                atm,
+            )
+            .total_fa_db,
             2500.0,
         );
         assert!((c.noise_dbm(atm) - direct).abs() < 1e-12);
@@ -1423,7 +1435,11 @@ mod tests {
             }
         }
         let e = StationEffects::solve(&residuals, &spots, 3, 3);
-        assert!((e.global_db - global).abs() < 1e-6, "global {}", e.global_db);
+        assert!(
+            (e.global_db - global).abs() < 1e-6,
+            "global {}",
+            e.global_db
+        );
         for (t, want) in tx_true.iter().enumerate() {
             assert!((e.tx[t] - want).abs() < 1e-6, "tx{t} = {}", e.tx[t]);
         }

@@ -75,7 +75,7 @@ Make sure you have the repo downloaded!
 ```
 cargo build --release
 cargo test
-run -p skipzone-app --bin skipzone-app
+cargo run --release --bin skipzone-app-bin
 ```
 Keep an eye out on the other tools the repo can offer like ``wspr_calibrate``! See Docs
 

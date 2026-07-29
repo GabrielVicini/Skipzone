@@ -642,28 +642,27 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     let hmf2_source = "direct user input".to_string();
     let nm = density_at_critical_frequency(Hertz::new(fof2 * 1e6));
 
-    let (nu0_per_s, nu_ref_alt_km, nu_scale_height_km, collision_source) = if inputs
-        .collision_manual
-    {
-        (
-            inputs.nu0_per_s,
-            inputs.nu_ref_alt_km,
-            inputs.nu_scale_height_km,
-            "manual override".to_string(),
-        )
-    } else {
-        (
-            ion.nu_ref_per_s.value,
-            ion.nu_ref_alt_km.value,
-            ion.nu_scale_height_km.value,
-            format!(
-                "neutral-atmosphere exponential, {:.1e} /s at {:.0} km, \
+    let (nu0_per_s, nu_ref_alt_km, nu_scale_height_km, collision_source) =
+        if inputs.collision_manual {
+            (
+                inputs.nu0_per_s,
+                inputs.nu_ref_alt_km,
+                inputs.nu_scale_height_km,
+                "manual override".to_string(),
+            )
+        } else {
+            (
+                ion.nu_ref_per_s.value,
+                ion.nu_ref_alt_km.value,
+                ion.nu_scale_height_km.value,
+                format!(
+                    "neutral-atmosphere exponential, {:.1e} /s at {:.0} km, \
                  scale {:.1} km (order-of-magnitude anchor). nu follows neutral \
                  density and is NOT a function of solar zenith angle",
-                ion.nu_ref_per_s.value, ion.nu_ref_alt_km.value, ion.nu_scale_height_km.value
-            ),
-        )
-    };
+                    ion.nu_ref_per_s.value, ion.nu_ref_alt_km.value, ion.nu_scale_height_km.value
+                ),
+            )
+        };
 
     let field_desc = if inputs.use_field {
         format!("IGRF-14 @ epoch {:.1}", inputs.igrf_epoch)

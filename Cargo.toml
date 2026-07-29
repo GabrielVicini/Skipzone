@@ -3,6 +3,7 @@
 # no system libraries beyond std (see the portability requirements).
 [workspace]
 members = ["app"]
+default-members = ["app"]
 
 [package]
 name = "skipzone"

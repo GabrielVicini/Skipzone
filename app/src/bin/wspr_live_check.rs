@@ -180,7 +180,9 @@ fn run(args: &Args) -> Result<(), String> {
                         "         reach 6 m at any launch angle, so counting them as misses \
                          would blame the"
                     );
-                    println!("         model for a mechanism it does not carry. --max-mhz 60 includes them.");
+                    println!(
+                        "         model for a mechanism it does not carry. --max-mhz 60 includes them."
+                    );
                 }
                 Ok(_) => {}
                 Err(e) => println!("SCOPE    could not count what the ceiling excluded: {e}"),
@@ -220,7 +222,10 @@ fn run(args: &Args) -> Result<(), String> {
 
     let (spots, problems) = parse_spots(&tsv);
     if !problems.is_empty() {
-        println!("\n{} unreadable row(s), reported not skipped:", problems.len());
+        println!(
+            "\n{} unreadable row(s), reported not skipped:",
+            problems.len()
+        );
         for p in problems.iter().take(5) {
             println!("   {p}");
         }
@@ -232,15 +237,20 @@ fn run(args: &Args) -> Result<(), String> {
     // What actually came back, as opposed to what was asked for.
     let (first, last) = time_span(&spots);
     println!("\nRETURNED {} spot(s), {first} to {last} UTC", spots.len());
-    println!("         {} distinct transmitters, {} distinct receivers",
-        distinct(&spots, |s| &s.tx_call), distinct(&spots, |s| &s.rx_call));
+    println!(
+        "         {} distinct transmitters, {} distinct receivers",
+        distinct(&spots, |s| &s.tx_call),
+        distinct(&spots, |s| &s.rx_call)
+    );
 
     // ---------------------------------------------------------------- SSN
     let ssn = resolve_ssn(args, &spots);
     println!("\nSOLAR    {ssn}");
     if let SsnSource::Operator = ssn.source {
-        println!("         (no observed value was fetched, so the run is scoring this number \
-                  as much as the model)");
+        println!(
+            "         (no observed value was fetched, so the run is scoring this number \
+                  as much as the model)"
+        );
     }
 
     // ---------------------------------------------------------------- solve
@@ -273,17 +283,30 @@ fn run(args: &Args) -> Result<(), String> {
     );
     if summary.closed > 0 {
         println!("\n  modelled minus measured SNR, over the paths that closed:");
-        println!("    median   {:+7.1} dB   <- the model's bias", summary.median_error_db);
+        println!(
+            "    median   {:+7.1} dB   <- the model's bias",
+            summary.median_error_db
+        );
         println!("    mean     {:+7.1} dB", summary.mean_error_db);
-        println!("    IQR       {:6.1} dB   <- the model's spread", summary.iqr_db);
+        println!(
+            "    IQR       {:6.1} dB   <- the model's spread",
+            summary.iqr_db
+        );
         println!("    10th pct {:+7.1} dB", summary.p10_db);
         println!("    90th pct {:+7.1} dB", summary.p90_db);
         println!("    st.dev    {:6.1} dB", summary.stdev_db);
     }
 
     for Breakdown { axis, cuts } in wspr_report::breakdowns(&results) {
-        println!("\n--- BY {} {}", axis.to_uppercase(), "-".repeat(52usize.saturating_sub(axis.len())));
-        println!("  {:<32} {:>5} {:>7} {:>9} {:>7}", " ", "spots", "found", "median dB", "IQR");
+        println!(
+            "\n--- BY {} {}",
+            axis.to_uppercase(),
+            "-".repeat(52usize.saturating_sub(axis.len()))
+        );
+        println!(
+            "  {:<32} {:>5} {:>7} {:>9} {:>7}",
+            " ", "spots", "found", "median dB", "IQR"
+        );
         for c in &cuts {
             let flag = if c.meaningful() { " " } else { "*" };
             println!(
@@ -296,7 +319,10 @@ fn run(args: &Args) -> Result<(), String> {
             );
         }
         if cuts.iter().any(|c| !c.meaningful()) {
-            println!("  * fewer than {} spots: shown for completeness, not a trend", wspr_report::MIN_MEANINGFUL);
+            println!(
+                "  * fewer than {} spots: shown for completeness, not a trend",
+                wspr_report::MIN_MEANINGFUL
+            );
         }
     }
 
@@ -361,9 +387,11 @@ fn run(args: &Args) -> Result<(), String> {
     let misses = wspr_report::worst_misses(&results, args.show);
     println!("\n--- WHERE IT FALLS BEHIND ----------------------------------");
     if misses.is_empty() {
-        println!("  Every scored spot got a path. Note that this cannot be read as the model\n  \
+        println!(
+            "  Every scored spot got a path. Note that this cannot be read as the model\n  \
                   being right: the archive publishes only successful decodes, so nothing here\n  \
-                  tests whether the model also predicts paths that do not exist.");
+                  tests whether the model also predicts paths that do not exist."
+        );
     } else {
         println!(
             "  {} spot(s) the model found NO path for. Each one is a signal that was\n  \
@@ -485,11 +513,7 @@ fn score(spot: &WsprSpot, base: &Inputs) -> SpotResult {
 /// The noise floor each spot WOULD have been scored against under a different
 /// receiver environment. Nothing is re-solved: the environment moves the floor
 /// and nothing else, so the shift can be computed directly.
-fn noise_floors_under(
-    spots: &[WsprSpot],
-    base: &Inputs,
-    env: NoiseEnvironment,
-) -> Vec<f64> {
+fn noise_floors_under(spots: &[WsprSpot], base: &Inputs, env: NoiseEnvironment) -> Vec<f64> {
     spots
         .iter()
         .map(|spot| {

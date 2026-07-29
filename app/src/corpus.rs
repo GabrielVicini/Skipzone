@@ -534,9 +534,7 @@ fn parse_negative(line: &str) -> Result<Negative, String> {
         tx_lon,
         rx_lat,
         rx_lon,
-        rx_heard: f[7]
-            .parse()
-            .map_err(|e| format!("bad rx_heard: {e}"))?,
+        rx_heard: f[7].parse().map_err(|e| format!("bad rx_heard: {e}"))?,
         ssn: num(f[8], "SSN")?,
     })
 }
@@ -618,7 +616,13 @@ mod tests {
         // A busy pair, comfortably over the threshold.
         for i in 0..MIN_SPOTS_PER_STATION {
             #[allow(clippy::cast_possible_truncation)]
-            rows.push(corpus(spot(2 * i as u32, "BUSYTX", "BUSYRX", 14.097, 400.0)));
+            rows.push(corpus(spot(
+                2 * i as u32,
+                "BUSYTX",
+                "BUSYRX",
+                14.097,
+                400.0,
+            )));
         }
         // A rare receiver that heard the busy transmitter a handful of times.
         // Removing those rows must not take BUSYTX below the threshold, because

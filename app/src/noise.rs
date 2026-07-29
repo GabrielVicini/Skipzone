@@ -266,8 +266,7 @@ pub fn atmospheric_noise_figure_db(
         Season::Equinox => 0.0,
     };
     let cos_lat = latitude_deg.to_radians().cos().abs().clamp(0.0, 1.0);
-    let lat_db =
-        anchors.tropical_boost_db.value * cos_lat.powi(3) - anchors.polar_offset_db.value;
+    let lat_db = anchors.tropical_boost_db.value * cos_lat.powi(3) - anchors.polar_offset_db.value;
     let day = anchors.f1_day_db.value - anchors.slope_day_db.value * l + season_db + lat_db;
     if is_day {
         day
@@ -285,7 +284,9 @@ pub fn atmospheric_noise_figure_db(
 #[must_use]
 pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) -> f64 {
     let l = f_mhz.max(1e-6).log10();
-    anchors.step_1mhz_db.value + anchors.step_slope_db.value * l + anchors.step_curve_db.value * l * l
+    anchors.step_1mhz_db.value
+        + anchors.step_slope_db.value * l
+        + anchors.step_curve_db.value * l * l
 }
 
 /// Combine independent noise sources. Noise POWERS add, so the figures are
@@ -670,8 +671,7 @@ mod tests {
                         Season::Equinox => 0.0,
                     };
                     let cos_lat = lat.to_radians().cos().abs();
-                    let lat_db =
-                        ATM_TROPICAL_BOOST_DB * cos_lat.powi(3) - ATM_POLAR_OFFSET_DB;
+                    let lat_db = ATM_TROPICAL_BOOST_DB * cos_lat.powi(3) - ATM_POLAR_OFFSET_DB;
                     // The two independent log-linear curves this replaced.
                     let want_day =
                         ATM_1MHZ_DAY_DB + season_db + lat_db - ATM_SLOPE_DAY_DB * f.log10();
@@ -716,7 +716,10 @@ mod tests {
         a.step_slope_db.value = 8.0;
         let lo = atmospheric_day_night_step_db(1.8, a);
         let hi = atmospheric_day_night_step_db(28.0, a);
-        assert!(hi > lo + 5.0, "inverted step: {lo} at 1.8 MHz, {hi} at 28 MHz");
+        assert!(
+            hi > lo + 5.0,
+            "inverted step: {lo} at 1.8 MHz, {hi} at 28 MHz"
+        );
 
         // And the night floor still exceeds the day floor at both ends, so an
         // inverted SLOPE is not silently an inverted SIGN.
@@ -734,7 +737,10 @@ mod tests {
         a.step_curve_db.value = -20.0;
         let mid = atmospheric_day_night_step_db(5.0, a);
         let top = atmospheric_day_night_step_db(28.0, a);
-        assert!(top < mid, "curvature should turn the step over: {mid} -> {top}");
+        assert!(
+            top < mid,
+            "curvature should turn the step over: {mid} -> {top}"
+        );
     }
 
     /// The atmospheric surrogate has no reference value to check against, so
@@ -748,7 +754,13 @@ mod tests {
         let mut prev = f64::INFINITY;
         let mut f = 2.0;
         while f <= 30.0 {
-            let v = atmospheric_noise_figure_db(f, night, Season::Equinox, mid, AtmosphericAnchors::default());
+            let v = atmospheric_noise_figure_db(
+                f,
+                night,
+                Season::Equinox,
+                mid,
+                AtmosphericAnchors::default(),
+            );
             assert!(v < prev, "not falling at {f} MHz");
             prev = v;
             f += 0.5;
@@ -756,23 +768,69 @@ mod tests {
         // Night is louder than day at the same frequency.
         for f in [3.5, 7.0, 14.0, 28.0] {
             assert!(
-                atmospheric_noise_figure_db(f, night, Season::Equinox, mid, AtmosphericAnchors::default())
-                    > atmospheric_noise_figure_db(f, day, Season::Equinox, mid, AtmosphericAnchors::default()),
+                atmospheric_noise_figure_db(
+                    f,
+                    night,
+                    Season::Equinox,
+                    mid,
+                    AtmosphericAnchors::default()
+                ) > atmospheric_noise_figure_db(
+                    f,
+                    day,
+                    Season::Equinox,
+                    mid,
+                    AtmosphericAnchors::default()
+                ),
                 "night should exceed day at {f} MHz"
             );
         }
         // Summer louder than winter, by the full documented swing.
-        let s = atmospheric_noise_figure_db(7.0, night, Season::Summer, mid, AtmosphericAnchors::default());
-        let w = atmospheric_noise_figure_db(7.0, night, Season::Winter, mid, AtmosphericAnchors::default());
+        let s = atmospheric_noise_figure_db(
+            7.0,
+            night,
+            Season::Summer,
+            mid,
+            AtmosphericAnchors::default(),
+        );
+        let w = atmospheric_noise_figure_db(
+            7.0,
+            night,
+            Season::Winter,
+            mid,
+            AtmosphericAnchors::default(),
+        );
         assert!((s - w - 2.0 * ATM_SEASON_SWING_DB).abs() < 1e-9);
         // Tropics louder than poles.
         assert!(
-            atmospheric_noise_figure_db(7.0, night, Season::Equinox, 0.0, AtmosphericAnchors::default())
-                > atmospheric_noise_figure_db(7.0, night, Season::Equinox, 80.0, AtmosphericAnchors::default())
+            atmospheric_noise_figure_db(
+                7.0,
+                night,
+                Season::Equinox,
+                0.0,
+                AtmosphericAnchors::default()
+            ) > atmospheric_noise_figure_db(
+                7.0,
+                night,
+                Season::Equinox,
+                80.0,
+                AtmosphericAnchors::default()
+            )
         );
         // Sign of latitude must not matter.
-        let n = atmospheric_noise_figure_db(7.0, night, Season::Equinox, 35.0, AtmosphericAnchors::default());
-        let s = atmospheric_noise_figure_db(7.0, night, Season::Equinox, -35.0, AtmosphericAnchors::default());
+        let n = atmospheric_noise_figure_db(
+            7.0,
+            night,
+            Season::Equinox,
+            35.0,
+            AtmosphericAnchors::default(),
+        );
+        let s = atmospheric_noise_figure_db(
+            7.0,
+            night,
+            Season::Equinox,
+            -35.0,
+            AtmosphericAnchors::default(),
+        );
         assert!((n - s).abs() < 1e-12);
     }
 
@@ -783,14 +841,30 @@ mod tests {
     #[test]
     fn atmospheric_dominates_low_hf_galactic_dominates_high_hf() {
         let env = NoiseEnvironment::QuietRural;
-        let low = NoiseFloor::compute(2.0, 2400.0, env, false, Season::Equinox, 50.0, AtmosphericAnchors::default());
+        let low = NoiseFloor::compute(
+            2.0,
+            2400.0,
+            env,
+            false,
+            Season::Equinox,
+            50.0,
+            AtmosphericAnchors::default(),
+        );
         assert!(
             low.atmospheric_db > low.galactic_db + 10.0,
             "at 2 MHz atmospheric {} should dominate galactic {}",
             low.atmospheric_db,
             low.galactic_db
         );
-        let high = NoiseFloor::compute(28.0, 2400.0, env, true, Season::Equinox, 50.0, AtmosphericAnchors::default());
+        let high = NoiseFloor::compute(
+            28.0,
+            2400.0,
+            env,
+            true,
+            Season::Equinox,
+            50.0,
+            AtmosphericAnchors::default(),
+        );
         assert!(
             high.galactic_db > high.atmospheric_db,
             "at 28 MHz daytime galactic {} should dominate atmospheric {}",
