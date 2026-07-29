@@ -227,9 +227,18 @@ fn main() {
     println!("  outcome           {:?}", r.outcome);
     #[allow(clippy::cast_precision_loss)]
     {
-        println!("  density samples   {dd:>10}   ({:.2} / step)", dd as f64 / steps);
-        println!("  field samples     {df:>10}   ({:.2} / step)", df as f64 / steps);
-        println!("  collision samples {dc:>10}   ({:.2} / step)", dc as f64 / steps);
+        println!(
+            "  density samples   {dd:>10}   ({:.2} / step)",
+            dd as f64 / steps
+        );
+        println!(
+            "  field samples     {df:>10}   ({:.2} / step)",
+            df as f64 / steps
+        );
+        println!(
+            "  collision samples {dc:>10}   ({:.2} / step)",
+            dc as f64 / steps
+        );
     }
 
     // ---------------------------------------------------------------- raw model cost
@@ -245,8 +254,11 @@ fn main() {
             let t = Instant::now();
             let mut acc = 0.0f64;
             for i in 0..n {
-                let pp =
-                    SphericalPoint::new(Meters::new(p.r.get() + f64::from(i % 100)), p.colat, p.lon);
+                let pp = SphericalPoint::new(
+                    Meters::new(p.r.get() + f64::from(i % 100)),
+                    p.colat,
+                    p.lon,
+                );
                 acc += $e(&pp);
             }
             let el = t.elapsed();

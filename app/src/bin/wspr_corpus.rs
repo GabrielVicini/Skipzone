@@ -29,13 +29,12 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
-use skipzone_app::corpus::{
-    self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative, Rejections,
-};
+use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative, Rejections};
 use skipzone_app::spaceweather::{self, Ssn, SsnSource};
 use skipzone_app::wspr::{WsprSpot, parse_spots};
 use skipzone_app::wsprlive::{
-    self as wsprlive, BusiestFilter, CorpusQuery, HygieneCensus, StationEnd, Window, cycle_census_tsv,
+    self as wsprlive, BusiestFilter, CorpusQuery, HygieneCensus, StationEnd, Window,
+    cycle_census_tsv,
 };
 use skipzone_app::{grid, scenario};
 
@@ -167,7 +166,8 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn num(s: &str) -> Result<f64, String> {
-    s.parse::<f64>().map_err(|e| format!("bad number {s:?}: {e}"))
+    s.parse::<f64>()
+        .map_err(|e| format!("bad number {s:?}: {e}"))
 }
 
 /// The great-circle range the SOLVER computes for a spot, km.
@@ -278,12 +278,8 @@ fn run(args: &Args) -> Result<(), String> {
             .collect::<Vec<_>>()
             .join(", ")
     );
-    println!(
-        "  SELECTION BIAS, stated: these are the best-sited and best-equipped stations"
-    );
-    println!(
-        "  in the network. Every station effect below therefore describes the ACTIVE"
-    );
+    println!("  SELECTION BIAS, stated: these are the best-sited and best-equipped stations");
+    println!("  in the network. Every station effect below therefore describes the ACTIVE");
     println!("  CORE of WSPR, not its median member.");
 
     // ---------------------------------------------------------------- fetch
@@ -533,7 +529,10 @@ fn build_negatives(
         );
         out.extend(negs);
     }
-    println!("  {fetched} cycle(s) censused, {} negative(s) built", out.len());
+    println!(
+        "  {fetched} cycle(s) censused, {} negative(s) built",
+        out.len()
+    );
     Ok(out)
 }
 
@@ -619,11 +618,7 @@ fn describe_corpus(spots: &[CorpusSpot]) {
     let mut pair_bands: BTreeMap<(&str, &str, String), usize> = BTreeMap::new();
     for s in spots {
         *pair_bands
-            .entry((
-                s.spot.tx_call.as_str(),
-                s.spot.rx_call.as_str(),
-                s.cycle(),
-            ))
+            .entry((s.spot.tx_call.as_str(), s.spot.rx_call.as_str(), s.cycle()))
             .or_default() += 1;
     }
     println!("\n  structure the fixed-effects design relies on:");

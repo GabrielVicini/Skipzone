@@ -98,9 +98,7 @@ pub fn breakdowns(results: &[SpotResult]) -> Vec<Breakdown> {
         },
         Breakdown {
             axis: "layer the model chose",
-            cuts: group(results, |r| {
-                r.layer.unwrap_or("no path found").to_string()
-            }),
+            cuts: group(results, |r| r.layer.unwrap_or("no path found").to_string()),
         },
         Breakdown {
             axis: "measured signal strength",
@@ -261,10 +259,7 @@ pub fn worst_errors(results: &[SpotResult], n: usize) -> Vec<&SpotResult> {
 /// under each alternative environment. The SNR moves by exactly the negative of
 /// the floor's change, because nothing else in the link budget depends on it.
 #[must_use]
-pub fn bias_budget(
-    results: &[SpotResult],
-    noise_shift: &[(&'static str, Vec<f64>)],
-) -> BiasBudget {
+pub fn bias_budget(results: &[SpotResult], noise_shift: &[(&'static str, Vec<f64>)]) -> BiasBudget {
     let med = |mut v: Vec<f64>| -> f64 {
         v.sort_by(f64::total_cmp);
         pct(&v, 0.5)
@@ -361,7 +356,11 @@ mod tests {
         ];
         // Both spots scored against -110 dBm; ask what a 12 dB noisier site does.
         let budget = bias_budget(&results, &[("City", vec![-98.0, -98.0])]);
-        assert!((budget.median_error_db - 22.0).abs() < 1e-9, "{:?}", budget.median_error_db);
+        assert!(
+            (budget.median_error_db - 22.0).abs() < 1e-9,
+            "{:?}",
+            budget.median_error_db
+        );
         assert!(
             (budget.under_noise_env[0].1 - 10.0).abs() < 1e-9,
             "12 dB more noise must remove 12 dB of optimism, got {}",
@@ -377,7 +376,10 @@ mod tests {
         // 4 hops of F2 reach about 16 000 km.
         assert!(needs_more_hops_than(17_185.0, 4));
         assert!(needs_more_hops_than(18_176.0, 4));
-        assert!(!needs_more_hops_than(6_107.0, 4), "6100 km is well within 4 hops");
+        assert!(
+            !needs_more_hops_than(6_107.0, 4),
+            "6100 km is well within 4 hops"
+        );
         assert!(!needs_more_hops_than(730.0, 1));
         // Raising the limit brings the long path back inside reach.
         assert!(!needs_more_hops_than(17_185.0, 5));
@@ -419,7 +421,10 @@ mod tests {
     /// rather than an error of zero. Those mean opposite things.
     #[test]
     fn a_cut_that_found_nothing_reports_no_error_not_a_zero_error() {
-        let results = [result(21.0, -10.0, None, 9000.0), result(21.0, -12.0, None, 9000.0)];
+        let results = [
+            result(21.0, -10.0, None, 9000.0),
+            result(21.0, -12.0, None, 9000.0),
+        ];
         let cut = Cut::of("15 m".into(), &results.iter().collect::<Vec<_>>());
         assert_eq!(cut.closed, 0);
         assert!((cut.hit_rate - 0.0).abs() < 1e-12);
@@ -447,9 +452,9 @@ mod tests {
     #[test]
     fn worst_errors_rank_by_magnitude_in_both_directions() {
         let results = vec![
-            result(14.097, -20.0, Some(-18.0), 3000.0),  // +2
-            result(14.097, -20.0, Some(-45.0), 3000.0),  // -25
-            result(14.097, -20.0, Some(-8.0), 3000.0),   // +12
+            result(14.097, -20.0, Some(-18.0), 3000.0), // +2
+            result(14.097, -20.0, Some(-45.0), 3000.0), // -25
+            result(14.097, -20.0, Some(-8.0), 3000.0),  // +12
         ];
         let worst = worst_errors(&results, 2);
         assert!((worst[0].error_db.unwrap() + 25.0).abs() < 1e-9);

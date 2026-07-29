@@ -330,7 +330,9 @@ mod tests {
     /// equator and the pole.
     #[test]
     fn occurrence_trends_are_as_documented() {
-        let at = |season, lst, lat| SporadicE::derive(season, lst, lat, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability;
+        let at = |season, lst, lat| {
+            SporadicE::derive(season, lst, lat, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability
+        };
 
         // Season, at the summer diurnal peak and latitude.
         let summer = at(Season::Summer, ES_MORNING_PEAK_LST_H, ES_PEAK_LAT_DEG);
@@ -376,16 +378,42 @@ mod tests {
     fn diurnal_cycle_wraps_at_midnight() {
         assert!((lst_separation(23.5, 0.5) - 1.0).abs() < 1e-12);
         assert!((lst_separation(1.0, 23.0) - 2.0).abs() < 1e-12);
-        let before = SporadicE::derive(Season::Summer, 23.9, 40.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability;
-        let after = SporadicE::derive(Season::Summer, 0.1, 40.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY).probability;
+        let before = SporadicE::derive(
+            Season::Summer,
+            23.9,
+            40.0,
+            ES_FOES_MAX_MHZ,
+            ES_PEAK_PROBABILITY,
+        )
+        .probability;
+        let after = SporadicE::derive(
+            Season::Summer,
+            0.1,
+            40.0,
+            ES_FOES_MAX_MHZ,
+            ES_PEAK_PROBABILITY,
+        )
+        .probability;
         assert!((before - after).abs() < 0.02, "{before} vs {after}");
     }
 
     /// foEs tracks occurrence and stays in the anchored band.
     #[test]
     fn foes_tracks_occurrence_within_its_band() {
-        let strong = SporadicE::derive(Season::Summer, ES_MORNING_PEAK_LST_H, ES_PEAK_LAT_DEG, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
-        let weak = SporadicE::derive(Season::Winter, 3.0, 5.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
+        let strong = SporadicE::derive(
+            Season::Summer,
+            ES_MORNING_PEAK_LST_H,
+            ES_PEAK_LAT_DEG,
+            ES_FOES_MAX_MHZ,
+            ES_PEAK_PROBABILITY,
+        );
+        let weak = SporadicE::derive(
+            Season::Winter,
+            3.0,
+            5.0,
+            ES_FOES_MAX_MHZ,
+            ES_PEAK_PROBABILITY,
+        );
         assert!(strong.foes_mhz > weak.foes_mhz);
         for s in [&strong, &weak] {
             assert!(
@@ -407,7 +435,13 @@ mod tests {
     /// and nowhere else.
     #[test]
     fn layer_is_a_thin_sheet_at_the_stated_height() {
-        let es = SporadicE::derive(Season::Summer, 10.0, 45.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
+        let es = SporadicE::derive(
+            Season::Summer,
+            10.0,
+            45.0,
+            ES_FOES_MAX_MHZ,
+            ES_PEAK_PROBABILITY,
+        );
         let layer = es.layer(R0).expect("engine accepts the Es geometry");
         let at = |alt_km: f64| {
             layer
@@ -443,7 +477,13 @@ mod tests {
     /// can never be misfiled as an E-layer reflection.
     #[test]
     fn attribution_band_contains_the_sheet() {
-        let es = SporadicE::derive(Season::Summer, 10.0, 45.0, ES_FOES_MAX_MHZ, ES_PEAK_PROBABILITY);
+        let es = SporadicE::derive(
+            Season::Summer,
+            10.0,
+            45.0,
+            ES_FOES_MAX_MHZ,
+            ES_PEAK_PROBABILITY,
+        );
         let (lo, hi) = es.attribution_band_km();
         assert!(lo < ES_HEIGHT_KM - ES_SEMI_THICKNESS_KM);
         assert!(hi > ES_HEIGHT_KM + ES_SEMI_THICKNESS_KM);

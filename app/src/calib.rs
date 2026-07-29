@@ -294,20 +294,32 @@ impl Anchors {
                 |a| a.d_night_floor_fraction,
                 |a, v| a.d_night_floor_fraction = v,
             ),
-            ("nu at ref alt [1/s]", |a| a.nu_ref_per_s, |a, v| {
-                a.nu_ref_per_s = v;
-            }),
-            ("nu ref altitude [km]", |a| a.nu_ref_alt_km, |a, v| {
-                a.nu_ref_alt_km = v;
-            }),
+            (
+                "nu at ref alt [1/s]",
+                |a| a.nu_ref_per_s,
+                |a, v| {
+                    a.nu_ref_per_s = v;
+                },
+            ),
+            (
+                "nu ref altitude [km]",
+                |a| a.nu_ref_alt_km,
+                |a, v| {
+                    a.nu_ref_alt_km = v;
+                },
+            ),
             (
                 "nu scale height [km]",
                 |a| a.nu_scale_height_km,
                 |a, v| a.nu_scale_height_km = v,
             ),
-            ("E peak altitude [km]", |a| a.e_peak_alt_km, |a, v| {
-                a.e_peak_alt_km = v;
-            }),
+            (
+                "E peak altitude [km]",
+                |a| a.e_peak_alt_km,
+                |a, v| {
+                    a.e_peak_alt_km = v;
+                },
+            ),
             (
                 "E scale height [km]",
                 |a| a.e_scale_height_km,
@@ -318,9 +330,13 @@ impl Anchors {
                 |a| a.foe_overhead_quiet_mhz,
                 |a, v| a.foe_overhead_quiet_mhz = v,
             ),
-            ("foEs at max [MHz]", |a| a.es_foes_max_mhz, |a, v| {
-                a.es_foes_max_mhz = v;
-            }),
+            (
+                "foEs at max [MHz]",
+                |a| a.es_foes_max_mhz,
+                |a, v| {
+                    a.es_foes_max_mhz = v;
+                },
+            ),
             (
                 "Es peak probability",
                 |a| a.es_peak_probability,
@@ -338,32 +354,60 @@ impl Anchors {
         fn(&mut AtmosphericAnchors, Bounded),
     )> {
         vec![
-            ("atm Fa 1 MHz day [dB]", |a| a.f1_day_db, |a, v| {
-                a.f1_day_db = v;
-            }),
-            ("atm slope day [dB/dec]", |a| a.slope_day_db, |a, v| {
-                a.slope_day_db = v;
-            }),
-            ("atm day->night step [dB]", |a| a.step_1mhz_db, |a, v| {
-                a.step_1mhz_db = v;
-            }),
-            ("atm step slope [dB/dec]", |a| a.step_slope_db, |a, v| {
-                a.step_slope_db = v;
-            }),
-            ("atm step curve [dB/dec2]", |a| a.step_curve_db, |a, v| {
-                a.step_curve_db = v;
-            }),
-            ("atm season swing [dB]", |a| a.season_swing_db, |a, v| {
-                a.season_swing_db = v;
-            }),
+            (
+                "atm Fa 1 MHz day [dB]",
+                |a| a.f1_day_db,
+                |a, v| {
+                    a.f1_day_db = v;
+                },
+            ),
+            (
+                "atm slope day [dB/dec]",
+                |a| a.slope_day_db,
+                |a, v| {
+                    a.slope_day_db = v;
+                },
+            ),
+            (
+                "atm day->night step [dB]",
+                |a| a.step_1mhz_db,
+                |a, v| {
+                    a.step_1mhz_db = v;
+                },
+            ),
+            (
+                "atm step slope [dB/dec]",
+                |a| a.step_slope_db,
+                |a, v| {
+                    a.step_slope_db = v;
+                },
+            ),
+            (
+                "atm step curve [dB/dec2]",
+                |a| a.step_curve_db,
+                |a, v| {
+                    a.step_curve_db = v;
+                },
+            ),
+            (
+                "atm season swing [dB]",
+                |a| a.season_swing_db,
+                |a, v| {
+                    a.season_swing_db = v;
+                },
+            ),
             (
                 "atm tropical boost [dB]",
                 |a| a.tropical_boost_db,
                 |a, v| a.tropical_boost_db = v,
             ),
-            ("atm polar offset [dB]", |a| a.polar_offset_db, |a, v| {
-                a.polar_offset_db = v;
-            }),
+            (
+                "atm polar offset [dB]",
+                |a| a.polar_offset_db,
+                |a, v| {
+                    a.polar_offset_db = v;
+                },
+            ),
         ]
     }
 }
@@ -379,9 +423,13 @@ mod tests {
     fn default_anchors_match_the_module_constants() {
         let a = Anchors::default();
         let i = a.ionosphere;
-        assert!((i.d_peak_ne_overhead.value - crate::scenario::D_REGION_PEAK_NE_OVERHEAD).abs() < 1.0);
+        assert!(
+            (i.d_peak_ne_overhead.value - crate::scenario::D_REGION_PEAK_NE_OVERHEAD).abs() < 1.0
+        );
         assert!((i.d_peak_alt_km.value - crate::scenario::D_REGION_PEAK_ALT_KM).abs() < 1e-12);
-        assert!((i.d_scale_height_km.value - crate::scenario::D_REGION_SCALE_HEIGHT_KM).abs() < 1e-12);
+        assert!(
+            (i.d_scale_height_km.value - crate::scenario::D_REGION_SCALE_HEIGHT_KM).abs() < 1e-12
+        );
         assert!(
             (i.d_night_floor_fraction.value - crate::scenario::D_REGION_NIGHT_FLOOR_FRACTION).abs()
                 < 1e-12
@@ -390,8 +438,12 @@ mod tests {
         assert!((i.nu_ref_alt_km.value - crate::scenario::NU_REF_ALT_KM).abs() < 1e-12);
         assert!((i.nu_scale_height_km.value - crate::scenario::NU_SCALE_HEIGHT_KM).abs() < 1e-12);
         assert!((i.e_peak_alt_km.value - crate::scenario::E_REGION_PEAK_ALT_KM).abs() < 1e-12);
-        assert!((i.e_scale_height_km.value - crate::scenario::E_REGION_SCALE_HEIGHT_KM).abs() < 1e-12);
-        assert!((i.foe_overhead_quiet_mhz.value - crate::fof2::FOE_OVERHEAD_QUIET_MHZ).abs() < 1e-12);
+        assert!(
+            (i.e_scale_height_km.value - crate::scenario::E_REGION_SCALE_HEIGHT_KM).abs() < 1e-12
+        );
+        assert!(
+            (i.foe_overhead_quiet_mhz.value - crate::fof2::FOE_OVERHEAD_QUIET_MHZ).abs() < 1e-12
+        );
         assert!((i.es_foes_max_mhz.value - crate::sporadic_e::ES_FOES_MAX_MHZ).abs() < 1e-12);
         assert!(
             (i.es_peak_probability.value - crate::sporadic_e::ES_PEAK_PROBABILITY).abs() < 1e-12

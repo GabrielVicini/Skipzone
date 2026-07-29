@@ -265,10 +265,7 @@ impl Query {
             .trim()
             .split_once('\t')
             .ok_or_else(|| NetError::Data(format!("unexpected count reply: {body:?}")))?;
-        Ok((
-            a.trim().parse().unwrap_or(0),
-            b.trim().parse().unwrap_or(0),
-        ))
+        Ok((a.trim().parse().unwrap_or(0), b.trim().parse().unwrap_or(0)))
     }
 
     /// Fetch the spots as the tab-separated text `parse_spots` reads.
@@ -804,7 +801,9 @@ mod tests {
             "{p}"
         );
         assert!(
-            p.contains(&format!("time < now() - INTERVAL {INGEST_LAG_MINUTES} MINUTE")),
+            p.contains(&format!(
+                "time < now() - INTERVAL {INGEST_LAG_MINUTES} MINUTE"
+            )),
             "the newest {INGEST_LAG_MINUTES} minutes must be excluded: {p}"
         );
         assert!(Window::Recent { minutes: 30 }.describe().contains("upload"));
@@ -820,7 +819,10 @@ mod tests {
         .predicate();
         assert!(p.contains("- INTERVAL 10 MINUTE"), "{p}");
         assert!(p.contains("+ INTERVAL 10 MINUTE"), "{p}");
-        assert!(!p.contains("now()"), "a fixed window must not depend on now: {p}");
+        assert!(
+            !p.contains("now()"),
+            "a fixed window must not depend on now: {p}"
+        );
     }
 
     /// The projection has to match what `parse_spots` reads, in order, or the
@@ -958,8 +960,15 @@ mod tests {
         let sql = q.sql();
         assert!(sql.contains("frequency <= 50394000"), "{sql}");
         // And the band window itself is still applied.
-        assert!(sql.contains("frequency BETWEEN 50194000 AND 50394000"), "{sql}");
-        assert!(q.describe_filter().contains("ceiling is lifted"), "{}", q.describe_filter());
+        assert!(
+            sql.contains("frequency BETWEEN 50194000 AND 50394000"),
+            "{sql}"
+        );
+        assert!(
+            q.describe_filter().contains("ceiling is lifted"),
+            "{}",
+            q.describe_filter()
+        );
     }
 
     /// A band inside HF leaves the ceiling where it is.

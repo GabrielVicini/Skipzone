@@ -12,6 +12,10 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "skipzone-app-bin"
+path = "src/main.rs"
+
 [dependencies]
 skipzone = { path = ".." }
 eframe = "0.35"

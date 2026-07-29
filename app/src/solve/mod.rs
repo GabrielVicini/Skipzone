@@ -135,9 +135,7 @@ fn is_same_ray(a: &Solution, b: &Solution) -> bool {
     a.mode == b.mode
         && a.hops == b.hops
         && match (a.hop_details.first(), b.hop_details.first()) {
-            (Some(x), Some(y)) => {
-                (x.launch_elev_deg - y.launch_elev_deg).abs() < SAME_RAY_ELEV_DEG
-            }
+            (Some(x), Some(y)) => (x.launch_elev_deg - y.launch_elev_deg).abs() < SAME_RAY_ELEV_DEG,
             _ => false,
         }
 }
@@ -230,186 +228,190 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
         let per_mode: Vec<StackOutcome> = modes
             .par_iter()
             .map(|&mode| {
-        let mut solutions = Vec::new();
-        let mut saw_no_bracket = false;
-        let mut saw_trace_failure = false;
-        let mut errors: Vec<String> = Vec::new();
-        {
-            let tracer = make_tracer(
-                density,
-                models.field_dyn(),
-                models.collisions_dyn(),
-                inputs.freq_mhz,
-                mode,
-                a,
-                tuning,
-            );
-            // The search tracer: same tolerances as the reporting one, drift
-            // diagnostic off. Terminal homing runs hundreds of traces through
-            // it and reads only the landing point off each.
-            let search_tracer = make_tracer(
-                density,
-                models.field_dyn(),
-                models.collisions_dyn(),
-                inputs.freq_mhz,
-                mode,
-                a,
-                tuning.for_search(),
-            );
-            let base_config = homing_config(inputs.use_field);
-            // The elevation fan, traced ONCE for this (mode, stack), on its own
-            // tracer at the bracketing tolerance. Every hop count below brackets
-            // against the same rays; see `ElevationScan` and `StepTuning::for_scan`.
-            let scan_tracer = make_tracer(
-                density,
-                models.field_dyn(),
-                models.collisions_dyn(),
-                inputs.freq_mhz,
-                mode,
-                a,
-                tuning.for_scan(),
-            );
-            let scan = scan_elevations(&scan_tracer, &tx, &rx, &base_config);
-
-            // Every (hop count, bracket) pair is one independent candidate
-            // ray: its own terminal homing search and its own propagation, with
-            // nothing shared but the read-only models. They are enumerated
-            // first and then run across the pool, and the results are folded
-            // back IN ORDER, so the solution list and the error list come out
-            // the same whatever order the threads finish in. The parallelism
-            // seam stays outside the ODE loop, as the engine's own `trace_fan`
-            // does.
-            let mut work = Vec::new();
-            for hops in 1..=inputs.max_hops {
-                let target = if hops == 1 {
-                    rx
-                } else {
-                    destination_point(&tx, brng, Radians::new(total_arc.get() / f64::from(hops)))
-                };
-                // The scan brackets against ONE hop of 1/N of the arc: that is
-                // what makes it a cheap way to enumerate the distinct rays
-                // (low ray, high ray, E and F2 branches) that could serve this
-                // hop count. Which of them actually reaches the receiver, and at
-                // what launch angle, is settled by `home_terminal`.
-                let brackets = scan.brackets(central_angle(&tx, &target).get());
-                if brackets.is_empty() {
-                    // Recorded rather than swallowed: "rays reflect but none
-                    // lands here" is a different answer from "nothing reflects",
-                    // and the per-layer report has to be able to say which.
-                    saw_no_bracket = true;
-                    continue;
-                }
-                for bracket in brackets {
-                    work.push((hops, bracket));
-                }
-            }
-
-            let limits = (base_config.elev_min.get(), base_config.elev_max.get());
-            let outcomes: Vec<Candidate> = work
-                .par_iter()
-                .map(|&(hops, bracket)| {
-                    // The search runs on the loose tracer. Nothing it computes
-                    // is reported: it returns a launch elevation, and the path
-                    // that gets measured is the one `propagate` traces at the
-                    // engine's own tolerance below. The acceptance test is
-                    // applied to THAT path's terminal miss rather than to the
-                    // search's estimate of it, so the guarantee - this ray ends
-                    // at the receiver - is made on the trajectory whose numbers
-                    // the operator actually sees.
-                    let Some(homed) = home_terminal(
-                        &search_tracer,
-                        &tx,
-                        &rx,
-                        hops,
-                        0.5 * (bracket.0 + bracket.1),
-                        limits,
-                        terminal_tol,
-                    ) else {
-                        return Candidate::NoBracket;
-                    };
-                    let (details, ends, note) = propagate(
-                        &tracer,
-                        &tx,
-                        homed.elevation,
-                        homed.azimuth,
-                        hops,
-                        f_hz,
-                        ground,
-                    );
-                    // A path that did not complete is not a path. `propagate`
-                    // reports a note exactly when a hop escaped through the top
-                    // or the trace failed, i.e. when the ray never came back
-                    // down to make the next reflection - so the remaining hops
-                    // never happened and the ray never reached the receiver.
-                    // Such a path used to be pushed as a solution anyway, on the
-                    // grounds that it had SOME hop detail to show, and was drawn
-                    // on the map as a line shooting past the receiver and out
-                    // the far side of the world.
-                    if let Some(n) = &note {
-                        return Candidate::Failed(format!(
-                            "{} mode, {hops} hop(s): {n}",
-                            mode_label(mode)
-                        ));
-                    }
-                    // The terminal miss of the REPORTED path, at the engine's
-                    // own tolerance. The search converged on a looser
-                    // integrator, so this re-measures rather than trusts it.
-                    let terminal_miss_m = ends.last().map_or(f64::INFINITY, |e| {
-                        central_angle(e, &rx).get() * EARTH_RADIUS_M
-                    });
-                    if terminal_miss_m.partial_cmp(&terminal_tol) != Some(Ordering::Less) {
-                        return Candidate::NoBracket;
-                    }
-                    let apex_km = details.first().map_or(f64::NAN, |h| h.apex_alt_km);
-                    Candidate::Solved(Box::new(assemble(
-                        mode,
-                        classify_deterministic(apex_km),
-                        1.0,
-                        hops,
-                        details,
-                        &ends,
-                        &rx,
-                        terminal_miss_m,
-                        note,
+                let mut solutions = Vec::new();
+                let mut saw_no_bracket = false;
+                let mut saw_trace_failure = false;
+                let mut errors: Vec<String> = Vec::new();
+                {
+                    let tracer = make_tracer(
+                        density,
+                        models.field_dyn(),
+                        models.collisions_dyn(),
                         inputs.freq_mhz,
-                        link_settings,
-                    )))
-                })
-                .collect();
+                        mode,
+                        a,
+                        tuning,
+                    );
+                    // The search tracer: same tolerances as the reporting one, drift
+                    // diagnostic off. Terminal homing runs hundreds of traces through
+                    // it and reads only the landing point off each.
+                    let search_tracer = make_tracer(
+                        density,
+                        models.field_dyn(),
+                        models.collisions_dyn(),
+                        inputs.freq_mhz,
+                        mode,
+                        a,
+                        tuning.for_search(),
+                    );
+                    let base_config = homing_config(inputs.use_field);
+                    // The elevation fan, traced ONCE for this (mode, stack), on its own
+                    // tracer at the bracketing tolerance. Every hop count below brackets
+                    // against the same rays; see `ElevationScan` and `StepTuning::for_scan`.
+                    let scan_tracer = make_tracer(
+                        density,
+                        models.field_dyn(),
+                        models.collisions_dyn(),
+                        inputs.freq_mhz,
+                        mode,
+                        a,
+                        tuning.for_scan(),
+                    );
+                    let scan = scan_elevations(&scan_tracer, &tx, &rx, &base_config);
 
-            for outcome in outcomes {
-                match outcome {
-                    Candidate::Solved(candidate) => {
-                        // Two brackets of the equal-hop scan can converge onto
-                        // the same ray once the terminal point is what is being
-                        // homed, because the scan brackets a quantity the
-                        // refinement no longer targets. That is one propagation
-                        // mode, so it is listed once - keeping whichever landed
-                        // closer.
-                        match solutions.iter_mut().find(|s| is_same_ray(s, &candidate)) {
-                            Some(existing)
-                                if candidate.homing_miss_m < existing.homing_miss_m =>
-                            {
-                                *existing = *candidate;
-                            }
-                            Some(_) => {}
-                            None => solutions.push(*candidate),
+                    // Every (hop count, bracket) pair is one independent candidate
+                    // ray: its own terminal homing search and its own propagation, with
+                    // nothing shared but the read-only models. They are enumerated
+                    // first and then run across the pool, and the results are folded
+                    // back IN ORDER, so the solution list and the error list come out
+                    // the same whatever order the threads finish in. The parallelism
+                    // seam stays outside the ODE loop, as the engine's own `trace_fan`
+                    // does.
+                    let mut work = Vec::new();
+                    for hops in 1..=inputs.max_hops {
+                        let target = if hops == 1 {
+                            rx
+                        } else {
+                            destination_point(
+                                &tx,
+                                brng,
+                                Radians::new(total_arc.get() / f64::from(hops)),
+                            )
+                        };
+                        // The scan brackets against ONE hop of 1/N of the arc: that is
+                        // what makes it a cheap way to enumerate the distinct rays
+                        // (low ray, high ray, E and F2 branches) that could serve this
+                        // hop count. Which of them actually reaches the receiver, and at
+                        // what launch angle, is settled by `home_terminal`.
+                        let brackets = scan.brackets(central_angle(&tx, &target).get());
+                        if brackets.is_empty() {
+                            // Recorded rather than swallowed: "rays reflect but none
+                            // lands here" is a different answer from "nothing reflects",
+                            // and the per-layer report has to be able to say which.
+                            saw_no_bracket = true;
+                            continue;
+                        }
+                        for bracket in brackets {
+                            work.push((hops, bracket));
                         }
                     }
-                    Candidate::NoBracket => saw_no_bracket = true,
-                    Candidate::Failed(msg) => {
-                        saw_trace_failure = true;
-                        errors.push(msg);
+
+                    let limits = (base_config.elev_min.get(), base_config.elev_max.get());
+                    let outcomes: Vec<Candidate> = work
+                        .par_iter()
+                        .map(|&(hops, bracket)| {
+                            // The search runs on the loose tracer. Nothing it computes
+                            // is reported: it returns a launch elevation, and the path
+                            // that gets measured is the one `propagate` traces at the
+                            // engine's own tolerance below. The acceptance test is
+                            // applied to THAT path's terminal miss rather than to the
+                            // search's estimate of it, so the guarantee - this ray ends
+                            // at the receiver - is made on the trajectory whose numbers
+                            // the operator actually sees.
+                            let Some(homed) = home_terminal(
+                                &search_tracer,
+                                &tx,
+                                &rx,
+                                hops,
+                                0.5 * (bracket.0 + bracket.1),
+                                limits,
+                                terminal_tol,
+                            ) else {
+                                return Candidate::NoBracket;
+                            };
+                            let (details, ends, note) = propagate(
+                                &tracer,
+                                &tx,
+                                homed.elevation,
+                                homed.azimuth,
+                                hops,
+                                f_hz,
+                                ground,
+                            );
+                            // A path that did not complete is not a path. `propagate`
+                            // reports a note exactly when a hop escaped through the top
+                            // or the trace failed, i.e. when the ray never came back
+                            // down to make the next reflection - so the remaining hops
+                            // never happened and the ray never reached the receiver.
+                            // Such a path used to be pushed as a solution anyway, on the
+                            // grounds that it had SOME hop detail to show, and was drawn
+                            // on the map as a line shooting past the receiver and out
+                            // the far side of the world.
+                            if let Some(n) = &note {
+                                return Candidate::Failed(format!(
+                                    "{} mode, {hops} hop(s): {n}",
+                                    mode_label(mode)
+                                ));
+                            }
+                            // The terminal miss of the REPORTED path, at the engine's
+                            // own tolerance. The search converged on a looser
+                            // integrator, so this re-measures rather than trusts it.
+                            let terminal_miss_m = ends.last().map_or(f64::INFINITY, |e| {
+                                central_angle(e, &rx).get() * EARTH_RADIUS_M
+                            });
+                            if terminal_miss_m.partial_cmp(&terminal_tol) != Some(Ordering::Less) {
+                                return Candidate::NoBracket;
+                            }
+                            let apex_km = details.first().map_or(f64::NAN, |h| h.apex_alt_km);
+                            Candidate::Solved(Box::new(assemble(
+                                mode,
+                                classify_deterministic(apex_km),
+                                1.0,
+                                hops,
+                                details,
+                                &ends,
+                                &rx,
+                                terminal_miss_m,
+                                note,
+                                inputs.freq_mhz,
+                                link_settings,
+                            )))
+                        })
+                        .collect();
+
+                    for outcome in outcomes {
+                        match outcome {
+                            Candidate::Solved(candidate) => {
+                                // Two brackets of the equal-hop scan can converge onto
+                                // the same ray once the terminal point is what is being
+                                // homed, because the scan brackets a quantity the
+                                // refinement no longer targets. That is one propagation
+                                // mode, so it is listed once - keeping whichever landed
+                                // closer.
+                                match solutions.iter_mut().find(|s| is_same_ray(s, &candidate)) {
+                                    Some(existing)
+                                        if candidate.homing_miss_m < existing.homing_miss_m =>
+                                    {
+                                        *existing = *candidate;
+                                    }
+                                    Some(_) => {}
+                                    None => solutions.push(*candidate),
+                                }
+                            }
+                            Candidate::NoBracket => saw_no_bracket = true,
+                            Candidate::Failed(msg) => {
+                                saw_trace_failure = true;
+                                errors.push(msg);
+                            }
+                        }
                     }
                 }
-            }
-        }
-        StackOutcome {
-            solutions,
-            saw_no_bracket,
-            saw_trace_failure,
-            errors,
-        }
+                StackOutcome {
+                    solutions,
+                    saw_no_bracket,
+                    saw_trace_failure,
+                    errors,
+                }
             })
             .collect();
 

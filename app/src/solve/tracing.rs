@@ -236,7 +236,10 @@ impl StepTuning {
     /// needs just as much as the refinement does.
     pub fn for_scan(self) -> Self {
         Self {
-            rtol: Some(self.rtol.map_or(Self::SCAN_RTOL, |r| r.max(Self::SCAN_RTOL))),
+            rtol: Some(
+                self.rtol
+                    .map_or(Self::SCAN_RTOL, |r| r.max(Self::SCAN_RTOL)),
+            ),
             max_step_m: self.max_step_m,
             // A scanned ray is thrown away as soon as its landing range has
             // been read off it, so its integrator-quality diagnostic has no
@@ -261,7 +264,10 @@ impl StepTuning {
     /// keeps it, for the reasons in [`Self::for_scan`].
     pub fn for_search(self) -> Self {
         Self {
-            rtol: Some(self.rtol.map_or(Self::SEARCH_RTOL, |r| r.max(Self::SEARCH_RTOL))),
+            rtol: Some(
+                self.rtol
+                    .map_or(Self::SEARCH_RTOL, |r| r.max(Self::SEARCH_RTOL)),
+            ),
             max_step_m: self.max_step_m,
             measure_drift: false,
         }
@@ -548,7 +554,6 @@ impl ElevationScan {
         }
         brackets
     }
-
 }
 
 /// Trace the elevation fan once for one tracer. Reproduces the engine's scan

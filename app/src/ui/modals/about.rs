@@ -1,5 +1,3 @@
-//! Help > About. Placeholder copy, pending real release text.
-
 use egui::{Context, RichText, Ui, vec2};
 
 use crate::state::UiState;
@@ -27,14 +25,14 @@ fn body(ui: &mut Ui) {
     );
     ui.add_space(8.0);
     ui.label(
-        "Example placeholder text. Skipzone is a three-dimensional ionospheric ray tracer \
+        "Skipzone is a three-dimensional ionospheric ray tracer \
          for HF point-to-point prediction: it traces real rays through a magnetised, \
          collisional plasma and reports what arrives at the receiver.",
     );
     ui.add_space(6.0);
     ui.label(
-        "Replace this text with the real about copy - credits, licence, and the data \
-         sources the shipped build uses.",
+        "Copyright \u{00A9} 2026 Gabriel Vicini. Licensed under the GNU General Public \
+         License v3.0 (GPL-3.0). See LICENSE for the full text.",
     );
     ui.add_space(10.0);
     hint(
