@@ -1,3 +1,5 @@
 /target
 /corpus/
 /.idea/
+# Calibration and validation run logs - regenerate, do not commit
+corpus/*.log

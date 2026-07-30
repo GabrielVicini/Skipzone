@@ -289,6 +289,104 @@ pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) ->
         + anchors.step_curve_db.value * l * l
 }
 
+/// Total predictive spread of a modelled SNR, dB, 1 sigma.
+///
+/// MEASURED, not chosen. Two numbers bracket it:
+///
+///  * 3.5 dB is the target's OWN noise - the same transmitter, receiver and band
+///    measured twice inside ten minutes differ by that much (129 pairs from the
+///    WSPR corpus). No model can beat it.
+///  * 7.32 dB is this model's error on 4 909 spots the fit never saw, with the
+///    fit-to-hold-out gap at -0.02 dB, so it is honest out-of-sample performance
+///    and not an in-sample flatter.
+///
+/// `wspr_calibrate` also FITS a spread against decodes and non-decodes and gets
+/// about 15 dB. This value is the 7.32 dB one, and the choice is NOT settled -
+/// the calibrator scores both and neither is calibrated:
+///
+/// | bin | gap at sigma 15 | gap at sigma 7.3 |
+/// |-----|-----------------|------------------|
+/// | 0.3 - 0.5 | +0.25 | -0.31 |
+/// | 0.5 - 0.7 | +0.00 | -0.24 |
+/// | mean NLL | 0.329 | 0.398 |
+///
+/// So 15 dB is over-optimistic below a half and 7.3 dB is under-confident in the
+/// middle, by a LARGER margin, and 15 dB wins on both aggregate scores. The wide
+/// value is not simply contamination either: the constructed negatives include
+/// collisions and off-beam arrivals, and an operator asking "will I be heard" is
+/// genuinely exposed to those, so ~15 dB may be the honest OPERATIONAL spread
+/// against 7.3 dB of physics.
+///
+/// # Why the level cannot be settled from this corpus
+///
+/// The calibrator fits an intercept alongside sigma, and the two trade off
+/// against a base rate that is an artefact: the corpus is decodes plus a thin
+/// constructed negative sample, about 85 % positive, which is nothing like the
+/// prior of an arbitrary path opening. Worse, the app's operating point is not on
+/// either fitted curve - `wspr_calibrate` zeroes `model_bias_db` while the app
+/// applies it, which in the calibrator's frame puts the app at an intercept of
+/// about -5.1 dB against a best fit of -2.0 (sigma 7.3) or +5.29 (sigma 15).
+///
+/// So the ORDERING this produces is validated (AUC about 0.75) and the LEVEL is
+/// not. That is why [`LinkBudget::confidence_label`] exists and why the UI shows
+/// the word rather than a percentage: printing "68 %" would claim a precision
+/// this corpus cannot support. Fixing it needs a corpus whose class balance is
+/// real, not a different constant here.
+pub const PREDICTIVE_SPREAD_DB: f64 = 7.3;
+
+/// Probability that a path with this median margin actually decodes.
+///
+/// # Why a probability at all
+///
+/// The rest of this module produces one SNR, and [`PathState`] turns it into a
+/// yes/no against a threshold. That is the wrong shape of answer, and the WSPR
+/// corpus says so quantitatively: the SAME path, same transmitter, same receiver,
+/// same band, measured twice within ten minutes, differs with a standard
+/// deviation of 3.5 dB, and the model's own out-of-sample error is 7.3 dB. A
+/// hard threshold applied to a quantity with that much spread turns a coin-flip
+/// into a confident verdict.
+///
+/// So: treat the modelled SNR as the MEDIAN of a fading distribution, take it as
+/// log-normal (Gaussian in dB, which is what a Rayleigh-fading envelope looks
+/// like once averaged over a WSPR transmission), and report
+/// `P(instantaneous SNR > threshold) = Phi(margin / sigma)`.
+///
+/// `sigma_db` is the total predictive spread, NOT just the fading: the operator's
+/// uncertainty about being heard includes the model's own error, so the honest
+/// sigma is the one fitted against measured decodes and non-decodes together.
+/// `wspr_calibrate`'s `PREDICTED DECODE PROBABILITY` section fits and reports it.
+///
+/// # What this cannot fix
+///
+/// It is a MONOTONE transform of the margin, so it cannot change the ROC curve
+/// or the AUC by even a rounding error. It buys CALIBRATION - "70 %" meaning
+/// seventy per cent - and nothing else. Anyone expecting better discrimination
+/// from it has misread what it is.
+#[must_use]
+pub fn decode_probability(margin_db: f64, sigma_db: f64) -> f64 {
+    if sigma_db <= 0.0 {
+        return if margin_db >= 0.0 { 1.0 } else { 0.0 };
+    }
+    normal_cdf(margin_db / sigma_db)
+}
+
+/// Standard normal CDF, `Phi(z)`.
+///
+/// Built from [`crate::chapman::erfcx`] rather than from a fresh polynomial
+/// approximation: that function is already in the codebase, already tested, and
+/// already the accuracy this needs. `Phi(z) = erfc(-z / sqrt 2) / 2`, and
+/// `erfc(t) = e^{-t^2} erfcx(t)` for `t >= 0` with `erfc(-t) = 2 - erfc(t)`.
+#[must_use]
+pub fn normal_cdf(z: f64) -> f64 {
+    let t = -z / std::f64::consts::SQRT_2;
+    let half_erfc = if t >= 0.0 {
+        0.5 * (-t * t).exp() * crate::chapman::erfcx(t)
+    } else {
+        1.0 - 0.5 * (-t * t).exp() * crate::chapman::erfcx(-t)
+    };
+    half_erfc.clamp(0.0, 1.0)
+}
+
 /// Combine independent noise sources. Noise POWERS add, so the figures are
 /// converted out of dB, summed, and converted back:
 ///   `Fa_total = 10 log10( sum_i 10^(Fa_i / 10) )`.
@@ -526,6 +624,35 @@ impl LinkBudget {
             PathState::BelowThreshold
         }
     }
+
+    /// Probability that this path actually decodes, at the measured predictive
+    /// spread [`PREDICTIVE_SPREAD_DB`].
+    ///
+    /// [`Self::state`] answers the same question with a hard threshold, and keeps
+    /// doing so - 34 call sites depend on that enum and it is still the right
+    /// summary for a table. But a yes/no on a quantity with 7 dB of spread hides
+    /// how close the call was, so this is the number to show beside it: a path 1 dB
+    /// over threshold is a coin flip, not a verdict.
+    #[must_use]
+    pub fn decode_probability(self) -> f64 {
+        decode_probability(self.margin_db(), PREDICTIVE_SPREAD_DB)
+    }
+
+    /// A word for [`Self::decode_probability`], for a UI that has room for one.
+    ///
+    /// The bands are deliberately coarse. Anything finer would imply the
+    /// probability is calibrated to a few per cent, and the reliability table in
+    /// `wspr_calibrate` says it is trustworthy above a half and optimistic below.
+    #[must_use]
+    pub fn confidence_label(self) -> &'static str {
+        match self.decode_probability() {
+            p if p >= 0.85 => "very likely",
+            p if p >= 0.60 => "likely",
+            p if p >= 0.40 => "marginal",
+            p if p >= 0.15 => "unlikely",
+            _ => "very unlikely",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -741,6 +868,99 @@ mod tests {
             top < mid,
             "curvature should turn the step over: {mid} -> {top}"
         );
+    }
+
+    /// The normal CDF built on `erfcx` must match the textbook values, and the
+    /// decode probability must be the monotone S-curve it claims to be.
+    #[test]
+    fn normal_cdf_and_decode_probability_are_sane() {
+        // Textbook points.
+        assert!((normal_cdf(0.0) - 0.5).abs() < 1e-12);
+        assert!((normal_cdf(1.0) - 0.841_344_746).abs() < 1e-9, "{}", normal_cdf(1.0));
+        assert!((normal_cdf(-1.0) - 0.158_655_254).abs() < 1e-9);
+        assert!((normal_cdf(1.96) - 0.975_002_105).abs() < 1e-9);
+        assert!((normal_cdf(-3.0) - 0.001_349_898).abs() < 1e-9);
+        // Symmetry and the tails.
+        for z in [0.25_f64, 0.9, 2.5, 5.0, 8.0] {
+            assert!((normal_cdf(z) + normal_cdf(-z) - 1.0).abs() < 1e-12, "{z}");
+        }
+        assert!(normal_cdf(40.0) >= 1.0 - 1e-12);
+        assert!(normal_cdf(-40.0) <= 1e-12);
+
+        // At the threshold it is exactly a coin flip whatever the spread is -
+        // which is the whole point of reporting a probability there.
+        for sigma in [1.0_f64, 3.5, 7.3, 20.0] {
+            assert!((decode_probability(0.0, sigma) - 0.5).abs() < 1e-12);
+        }
+        // Monotone in margin, and wider spread pulls both tails toward a half.
+        let tight = decode_probability(6.0, 2.0);
+        let loose = decode_probability(6.0, 12.0);
+        assert!(tight > loose, "{tight} vs {loose}");
+        assert!(decode_probability(-6.0, 2.0) < decode_probability(-6.0, 12.0));
+        let mut prev = 0.0;
+        for m in [-30.0_f64, -10.0, -3.0, 0.0, 3.0, 10.0, 30.0] {
+            let p = decode_probability(m, 7.3);
+            assert!(p >= prev, "not monotone at {m}");
+            prev = p;
+        }
+        // A zero spread degenerates to the old hard threshold, so the two
+        // behaviours are one family rather than two code paths.
+        assert!((decode_probability(0.1, 0.0) - 1.0).abs() < 1e-12);
+        assert!((decode_probability(-0.1, 0.0) - 0.0).abs() < 1e-12);
+    }
+
+    /// The calibrated bias must reach the PROBABILITY, not just the SNR readout.
+    ///
+    /// These two corrections were added together and they compose in a way that is
+    /// easy to get wrong: `model_bias_db` is subtracted from `snr_db`, `margin_db`
+    /// derives from `snr_db`, and `decode_probability` derives from `margin_db`. If
+    /// any link in that chain used the uncorrected power instead, the headline SNR
+    /// would be corrected while the probability quietly was not - and the
+    /// probability is the number a user is being asked to trust.
+    #[test]
+    fn the_calibrated_bias_reaches_the_decode_probability() {
+        let noise = NoiseFloor::compute(
+            14.0,
+            2500.0,
+            NoiseEnvironment::Rural,
+            true,
+            Season::Equinox,
+            50.0,
+            AtmosphericAnchors::default(),
+        );
+        let flat = GainCurve::flat("isotropic", 0.0);
+        let settings = |bias| LinkSettings {
+            tx_power_w: 5.0,
+            noise,
+            threshold_db: crate::wspr::WSPR_DECODE_THRESHOLD_DB,
+            model_bias_db: bias,
+            tx_antenna: &flat,
+            rx_antenna: &flat,
+        };
+        // A loss that lands the UNCORRECTED path a little over threshold.
+        let loss =
+            dbm_from_watts(5.0) - noise.power_dbm - crate::wspr::WSPR_DECODE_THRESHOLD_DB - 2.0;
+        let raw = LinkBudget::from_settings(settings(0.0), loss);
+        let corrected = LinkBudget::from_settings(settings(5.1), loss);
+
+        // The bias moves the SNR, the margin and the probability, by exactly itself.
+        assert!((raw.snr_db - corrected.snr_db - 5.1).abs() < 1e-9);
+        assert!((raw.margin_db() - corrected.margin_db() - 5.1).abs() < 1e-9);
+        assert!(
+            corrected.decode_probability() < raw.decode_probability(),
+            "a pessimistic correction must lower the probability: {} vs {}",
+            corrected.decode_probability(),
+            raw.decode_probability()
+        );
+        // And it must NOT be hidden in the received power, or the budget panel
+        // would stop showing physics.
+        assert!((raw.rx_power_dbm - corrected.rx_power_dbm).abs() < 1e-12);
+
+        // The uncorrected path reads as over threshold; 5.1 dB of measured
+        // pessimism is enough to turn this one into a coin flip or worse.
+        assert!(raw.margin_db() > 0.0);
+        assert!(corrected.margin_db() < 0.0);
+        assert!(corrected.decode_probability() < 0.5);
     }
 
     /// The atmospheric surrogate has no reference value to check against, so

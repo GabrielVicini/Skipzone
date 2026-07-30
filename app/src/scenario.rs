@@ -41,6 +41,13 @@ pub use crate::solar::{Season, season_at};
 /// Spherical Earth radius, matching the engine's validation suites.
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
+/// Calibrated model bias applied to every predicted SNR by default, dB.
+///
+/// This is the ONE number in this module that is measured against data rather
+/// than taken from a textbook. See [`Inputs::model_bias_db`] for the measurement,
+/// the out-of-sample confirmation and the caveat about which stations produced it.
+pub const MEASURED_MODEL_BIAS_DB: f64 = 5.1;
+
 // --- D-region absorbing layer -------------------------------------------
 //
 // Absorption needs electrons where the collision frequency is high, i.e. the
@@ -304,7 +311,26 @@ pub struct Inputs {
     /// zero. Shipping the prediction without it means shipping a bias that has
     /// been measured and declined.
     ///
-    /// 0.0 by default, so nothing changes until a calibrated value is set.
+    /// MEASURED 2026-07-29 and now applied by default.
+    ///
+    /// `wspr_calibrate` over 9 126 spots reports a global offset of +5.12 dB at
+    /// the anchors this app actually ships (the PRIOR anchors - do NOT use the
+    /// much larger offset that belongs to the fitted anchors, which rail and are
+    /// not the default). Confirmed out-of-sample: the fitted parameters transfer
+    /// to 4 909 unseen spots with a -0.02 dB gap in RMS.
+    ///
+    /// It is the model's best estimate of its own bias against an UNKNOWN
+    /// station, which is every station a user asks about, because the per-station
+    /// effects are centred on zero.
+    ///
+    /// CAVEAT worth keeping: the corpus is the 80 busiest transmitters and 30
+    /// busiest receivers, so those stations are better equipped than average and
+    /// this figure is probably an UNDER-estimate for a typical user.
+    ///
+    /// `wspr_calibrate` sets this to 0.0 explicitly, because it measures the
+    /// uncorrected model and would otherwise be fitting an offset on top of an
+    /// offset - and `fit::Cached` reconstructs the SNR without this term, so a
+    /// non-zero value here would break the cache-reproduces-the-solver identity.
     pub model_bias_db: f64,
 
     /// The unverified anchors of the ionosphere and noise models. `Default`
@@ -350,7 +376,7 @@ impl Default for Inputs {
             op_mode: OperatingMode::Ssb,
             bandwidth_hz: OperatingMode::Ssb.defaults().0,
             snr_threshold_db: OperatingMode::Ssb.defaults().1,
-            model_bias_db: 0.0,
+            model_bias_db: MEASURED_MODEL_BIAS_DB,
             anchors: Anchors::default(),
         }
     }

@@ -1176,9 +1176,21 @@ mod tests {
             hit.snr_db.is_finite() && hit.noise_dbm.is_finite(),
             "a found path must carry a real SNR and noise floor"
         );
+        // SNR is `Prx - Pnoise` LESS the calibrated model bias, and the gap must be
+        // exactly that bias and nothing else. This is the invariant that keeps the
+        // correction honest: it is applied to the SNR alone, so `rx_power_dbm` and
+        // every loss term still report what the propagation produced and a measured
+        // fudge cannot hide inside the budget panel. Before the bias was applied by
+        // default this read as a plain equality; the difference between the two is
+        // the whole point, so it is asserted rather than relaxed to a tolerance.
         assert!(
-            (hit.snr_db - (hit.rx_power_dbm - hit.noise_dbm)).abs() < 1e-9,
-            "SNR must be Prx - Pnoise"
+            (hit.snr_db
+                - (hit.rx_power_dbm - hit.noise_dbm - scenario::MEASURED_MODEL_BIAS_DB))
+                .abs()
+                < 1e-9,
+            "SNR must be Prx - Pnoise - model_bias; got {} vs {}",
+            hit.snr_db,
+            hit.rx_power_dbm - hit.noise_dbm - scenario::MEASURED_MODEL_BIAS_DB
         );
 
         let mut hi = inputs;

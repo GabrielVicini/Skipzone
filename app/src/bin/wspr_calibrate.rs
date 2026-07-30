@@ -28,7 +28,7 @@ use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative};
 use skipzone_app::fit::{
     self, Cached, CachedParams, EffectDistribution, Fit, NegativeScore, Spread, StationEffects,
 };
-use skipzone_app::noise::{NoiseEnvironment, NoiseFloor};
+use skipzone_app::noise::{self, NoiseEnvironment, NoiseFloor};
 use skipzone_app::scenario::{self, Inputs};
 use skipzone_app::solve;
 use skipzone_app::wspr::{WSPR_DECODE_THRESHOLD_DB, WsprSpot};
@@ -398,6 +398,13 @@ fn run(args: &Args) -> Result<(), String> {
         noise_env: args.noise_env,
         tx_antenna: antenna,
         rx_antenna: antenna,
+        // Explicitly ZERO, against the shipped default. This binary measures the
+        // UNCORRECTED model: the global offset it reports IS the bias, so leaving
+        // the shipped correction in would fit an offset on top of an offset. It
+        // would also break `fit::Cached`'s exact reconstruction, which rebuilds the
+        // SNR arithmetically and carries no bias term - the CACHE CHECK section
+        // would start reporting a constant disagreement.
+        model_bias_db: 0.0,
         ..Inputs::default()
     };
     println!(
@@ -865,6 +872,12 @@ fn run(args: &Args) -> Result<(), String> {
                     before: baseline.effects.global_db,
                     after: after_fit.effects.global_db,
                 },
+                &fitted,
+            );
+            report_decode_probability(
+                &fit_set,
+                &after_fit,
+                &negative_spots,
                 &fitted,
             );
         }
@@ -1497,8 +1510,8 @@ fn report_terminator_step(
     println!("  that band's 'true' step is measuring the E-layer defect and not the noise");
     println!("  floor. Only rows with a substantial F2 day fraction constrain the surrogate.");
     println!(
-        "\n  {:<8} {:>7} {:>7} {:>7} {:>9} {:>9} {:>9} {:>9} {:>7}",
-        "band", "n day", "n night", "F2 day", "resid day", "resid ngt", "observed", "model", "true"
+        "\n  {:<8} {:>7} {:>7} {:>7} {:>11} {:>10} {:>11} {:>10}",
+        "band", "n day", "n night", "F2 day", "d_measured", "d_absorb", "model step", "observed"
     );
 
     let median = |mut v: Vec<f64>| {
@@ -1580,8 +1593,8 @@ fn report_terminator_step(
         );
     }
     println!("\n  observed = model step - d_absorb - d_measured, so the row can be checked by");
-    println!("  eye. The model has a band's day/night structure right when 'model step' minus");
-    println!("  'd_absorb' equals 'd_measured', which is the only column with no model in it.");
+    println!("  medians: a median does not distribute over a subtraction, and the day and night");
+    println!("  cells hold different stations. Four separate measurements, not an identity.");
     println!("  A surrogate that has the day/night structure right prints observed ~ 0.");
 
     // Same table under the fitted anchors. The point of the day/night step being
@@ -1594,8 +1607,8 @@ fn report_terminator_step(
     println!("\n  The same, under the FITTED anchors. 'observed' is what the fit failed to");
     println!("  remove; if the reparameterised step can carry this at all, it shrinks here.");
     println!(
-        "\n  {:<8} {:>7} {:>7} {:>7} {:>9} {:>9} {:>9} {:>9} {:>7}",
-        "band", "n day", "n night", "F2 day", "resid day", "resid ngt", "observed", "model", "true"
+        "\n  {:<8} {:>7} {:>7} {:>7} {:>11} {:>10} {:>11} {:>10}",
+        "band", "n day", "n night", "F2 day", "d_measured", "d_absorb", "model step", "observed"
     );
     for (band, group) in &by_band {
         let resid = |g: &[&&Cached]| -> Vec<f64> {
@@ -2635,6 +2648,258 @@ struct Levels {
 /// model genuinely more permissive about which paths open, and it is the only one
 /// of the two that is comparable before against after.
 #[allow(clippy::too_many_arguments)]
+/// Fit the predictive spread and report whether the resulting probabilities are
+/// HONEST - whether "70 %" means seventy per cent.
+///
+/// # Why the model should emit a probability
+///
+/// The model produces one SNR and [`skipzone_app::noise::PathState`] compares it
+/// to a threshold. Two measurements say that is the wrong shape of answer:
+///
+///  * the same path measured twice inside ten minutes differs with an SD of
+///    3.5 dB (129 pairs, from the corpus itself);
+///  * the model's own out-of-sample error is 7.3 dB.
+///
+/// A hard threshold on a quantity that noisy reports a coin flip as a verdict.
+/// So the modelled SNR is treated as the MEDIAN of a fading distribution and
+/// turned into `P(decode) = Phi((margin + b) / sigma)`.
+///
+/// # What is and is not identifiable here
+///
+/// `sigma` IS identifiable: it is the slope of the S-curve, fixed by how the
+/// decode rate actually changes with margin, and it is what makes a probability
+/// responsive instead of flat.
+///
+/// The intercept `b` is NOT transferable. This corpus is decodes plus a small
+/// CONSTRUCTED negative set, so its class balance is an artefact of how the
+/// negatives were sampled, not the real prior of an arbitrary path opening. `b`
+/// absorbs that balance and must not be shipped as if it were physics. And the
+/// negatives are documented as an UPPER bound on false positives - a collision or
+/// an off-beam arrival counts as a non-decode here - so the fitted `sigma` is, if
+/// anything, wider than the truth.
+///
+/// Note what this CANNOT do: `Phi` is monotone in the margin, so the AUC is
+/// unchanged to the last bit. This buys calibration, not discrimination.
+fn report_decode_probability(
+    set: &Solved,
+    after: &Scored,
+    negatives: &[Cached],
+    fitted: &CachedParams,
+) {
+    println!("\n--- PREDICTED DECODE PROBABILITY ---------------------------");
+    println!("  The model emits one SNR; reality fades around it. Treating that SNR as the");
+    println!("  MEDIAN of a log-normal and reporting P(decode) = Phi(margin / sigma) turns a");
+    println!("  brittle yes/no into a calibrated probability. Phi is monotone, so this cannot");
+    println!("  change the AUC by a single bit - it buys CALIBRATION, not discrimination.");
+
+    let scale = fitted.absorption_scale.value;
+    let atm = fitted.atm;
+    // margin = modelled - station effects - threshold, for decodes (y = 1) and
+    // for the constructed non-decodes (y = 0).
+    let mut pts: Vec<(f64, bool)> = set
+        .spots
+        .iter()
+        .map(|c| {
+            (
+                c.modelled_db(scale, atm) - after.effects.offset_for(c) - WSPR_DECODE_THRESHOLD_DB,
+                true,
+            )
+        })
+        .collect();
+    for c in negatives {
+        pts.push((
+            c.modelled_db(scale, atm) - after.effects.offset_for(c) - WSPR_DECODE_THRESHOLD_DB,
+            false,
+        ));
+    }
+    let n_pos = pts.iter().filter(|p| p.1).count();
+    let n_neg = pts.len() - n_pos;
+    if n_neg < 30 {
+        println!("\n  only {n_neg} non-decode(s) scored; under the 30 floor, sigma is not fitted.");
+        return;
+    }
+
+    // Mean negative log-likelihood. Clamped away from 0 and 1 so one confident
+    // mistake cannot make the objective infinite.
+    let nll = |sigma: f64, b: f64| -> f64 {
+        let mut acc = 0.0;
+        for (m, y) in &pts {
+            let p = noise::decode_probability(m + b, sigma).clamp(1e-9, 1.0 - 1e-9);
+            acc -= if *y { p.ln() } else { (1.0_f64 - p).ln() };
+        }
+        #[allow(clippy::cast_precision_loss)]
+        {
+            acc / pts.len() as f64
+        }
+    };
+
+    let (mut sigma, mut b) = (8.0, 0.0);
+    let mut best = nll(sigma, b);
+    let (mut ds, mut db) = (4.0, 8.0);
+    for _ in 0..80 {
+        let mut moved = false;
+        for (d, is_sigma) in [(ds, true), (db, false)] {
+            for dir in [1.0, -1.0] {
+                let (s2, b2) = if is_sigma {
+                    ((sigma + dir * d).clamp(0.5, 40.0), b)
+                } else {
+                    (sigma, b + dir * d)
+                };
+                let v = nll(s2, b2);
+                if v < best - 1e-12 {
+                    best = v;
+                    sigma = s2;
+                    b = b2;
+                    moved = true;
+                }
+            }
+        }
+        if !moved {
+            ds *= 0.5;
+            db *= 0.5;
+            if ds < 1e-3 && db < 1e-3 {
+                break;
+            }
+        }
+    }
+
+    println!("\n  fitted predictive spread sigma   {sigma:.2} dB");
+    println!("  fitted intercept b               {b:+.2} dB   (absorbs this corpus's class");
+    println!("                                   balance - NOT shippable, see the doc comment)");
+    println!("  mean negative log-likelihood     {best:.4}   (a coin flip on every spot is 0.6931)");
+    println!("  scored on {n_pos} decode(s) and {n_neg} non-decode(s)");
+    println!(
+        "\n  For reference: repeat measurements of one path give 3.5 dB, and the model's own\n  \
+         out-of-sample error is 7.3 dB. A fitted sigma near the latter says the spread the\n  \
+         operator faces is dominated by MODEL error, not by fading."
+    );
+
+    // Reliability: does a predicted 70 % decode 70 % of the time? This is the
+    // only question a probability has to answer, and it is not the AUC.
+    println!("\n  RELIABILITY - predicted probability against observed decode rate:");
+    println!(
+        "  {:<16} {:>8} {:>12} {:>12} {:>10}",
+        "predicted P", "n", "mean pred", "observed", "gap"
+    );
+    let mut brier = 0.0;
+    for (lo, hi) in [
+        (0.0, 0.1),
+        (0.1, 0.3),
+        (0.3, 0.5),
+        (0.5, 0.7),
+        (0.7, 0.9),
+        (0.9, 1.001),
+    ] {
+        let cell: Vec<(f64, bool)> = pts
+            .iter()
+            .map(|(m, y)| (noise::decode_probability(m + b, sigma), *y))
+            .filter(|(p, _)| *p >= lo && *p < hi)
+            .collect();
+        #[allow(clippy::cast_precision_loss)]
+        let n = cell.len() as f64;
+        if cell.len() < 30 {
+            println!("  {:<16} {:>8} {:>12} {:>12} {:>10}", format!("{lo:.1} - {hi:.1}"), cell.len(), "under 30", "under 30", "-");
+            continue;
+        }
+        let mean_p = cell.iter().map(|(p, _)| p).sum::<f64>() / n;
+        #[allow(clippy::cast_precision_loss)]
+        let obs = cell.iter().filter(|(_, y)| *y).count() as f64 / n;
+        println!(
+            "  {:<16} {:>8} {:>12.3} {:>12.3} {:>+10.3}",
+            format!("{lo:.1} - {hi:.1}"),
+            cell.len(),
+            mean_p,
+            obs,
+            mean_p - obs
+        );
+    }
+    for (m, y) in &pts {
+        let p = noise::decode_probability(m + b, sigma);
+        let t = if *y { 1.0 } else { 0.0 };
+        brier += (p - t) * (p - t);
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let brier = brier / pts.len() as f64;
+    println!("\n  Brier score {brier:.4}   (lower is better; 0.25 is a constant 50 % guess)");
+    println!("  A 'gap' column near zero means the probabilities are honest. Large gaps mean");
+    println!("  the S-curve has the wrong slope, which is a statement about sigma and nothing");
+    println!("  else - the ranking is untouched by any of this.");
+
+    // The SHIPPED sigma, scored the same way. The app does NOT use the fitted
+    // value: `noise::PREDICTIVE_SPREAD_DB` is the measured out-of-sample error,
+    // and the negatives being an upper bound on false positives inflates anything
+    // fitted here. So the number that actually reaches a user gets validated
+    // rather than assumed. Only the intercept is re-optimised, by a plain scan -
+    // it is the one parameter that has to absorb this corpus's class balance.
+    let shipped = noise::PREDICTIVE_SPREAD_DB;
+    let mut b_ship = 0.0;
+    let mut best_ship = f64::INFINITY;
+    for cand in 0..=160 {
+        let trial = -20.0 + f64::from(cand) * 0.25;
+        let v = nll(shipped, trial);
+        if v < best_ship {
+            best_ship = v;
+            b_ship = trial;
+        }
+    }
+    println!("\n  THE SHIPPED SIGMA, scored the same way: {shipped:.1} dB");
+    println!("  (the app uses this, not the fitted value above - see PREDICTIVE_SPREAD_DB)");
+    println!(
+        "  {:<16} {:>8} {:>12} {:>12} {:>10}",
+        "predicted P", "n", "mean pred", "observed", "gap"
+    );
+    let mut brier_ship = 0.0;
+    for (lo, hi) in [
+        (0.0, 0.1),
+        (0.1, 0.3),
+        (0.3, 0.5),
+        (0.5, 0.7),
+        (0.7, 0.9),
+        (0.9, 1.001),
+    ] {
+        let cell: Vec<(f64, bool)> = pts
+            .iter()
+            .map(|(m, y)| (noise::decode_probability(m + b_ship, shipped), *y))
+            .filter(|(p, _)| *p >= lo && *p < hi)
+            .collect();
+        if cell.len() < 30 {
+            println!(
+                "  {:<16} {:>8} {:>12} {:>12} {:>10}",
+                format!("{lo:.1} - {hi:.1}"),
+                cell.len(),
+                "under 30",
+                "under 30",
+                "-"
+            );
+            continue;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let n = cell.len() as f64;
+        let mean_p = cell.iter().map(|(p, _)| p).sum::<f64>() / n;
+        #[allow(clippy::cast_precision_loss)]
+        let obs = cell.iter().filter(|(_, y)| *y).count() as f64 / n;
+        println!(
+            "  {:<16} {:>8} {:>12.3} {:>12.3} {:>+10.3}",
+            format!("{lo:.1} - {hi:.1}"),
+            cell.len(),
+            mean_p,
+            obs,
+            mean_p - obs
+        );
+    }
+    for (m, y) in &pts {
+        let p = noise::decode_probability(m + b_ship, shipped);
+        let t = if *y { 1.0 } else { 0.0 };
+        brier_ship += (p - t) * (p - t);
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let brier_ship = brier_ship / pts.len() as f64;
+    println!("  mean NLL {best_ship:.4}, Brier {brier_ship:.4}, intercept {b_ship:+.2} dB");
+    println!("  If the shipped sigma's gaps below a half are SMALLER than the fitted one's,");
+    println!("  the narrower spread is the better answer and the fit was chasing the");
+    println!("  negatives' contamination rather than the model's real spread.");
+}
+
 fn report_negatives(
     negatives: &[Negative],
     available: usize,

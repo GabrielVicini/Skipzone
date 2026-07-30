@@ -69,14 +69,6 @@ nothing beyond `std`.
 
 Coming soon — a validation report against real-world propagation data will
 be published once the project reaches its first tagged release.
-
-## Building (To run the GUI)
-Make sure you have the repo downloaded!
-```
-cargo build --release
-cargo test
-cargo run --release --bin skipzone-app-bin
-```
 Keep an eye out on the other tools the repo can offer like ``wspr_calibrate``! See Docs
 
 ## Supported Platforms
@@ -84,5 +76,6 @@ Currently, it should support most modern operating systems such as Windows (+ Ar
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).
-For any licensing concerns or questions, feel free to email ``hello@vicini.io``. 
+All files are governed under GPL-3.0 — see [LICENSE](LICENSE), except where noted otherwise (see license for specific file/data exemptions.)
+
+For any licensing concerns or questions, feel free to email `hello@vicini.io`.

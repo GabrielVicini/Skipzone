@@ -32,7 +32,8 @@ pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
         Some(s) if s.link.state() == PathState::Usable => (
             theme::state_color(PathState::Usable),
             format!(
-                "USABLE - path found, SNR {:.1} dB ({:+.1} dB over threshold), {} mode(s)",
+                "USABLE - {} - SNR {:.1} dB ({:+.1} dB over threshold), {} mode(s)",
+                s.link.confidence_label(),
                 s.link.snr_db,
                 s.link.margin_db(),
                 out.solutions.len(),
@@ -41,8 +42,9 @@ pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
         Some(s) => (
             theme::state_color(PathState::BelowThreshold),
             format!(
-                "PATH FOUND, BELOW THRESHOLD - geometry closes, SNR {:.1} dB is {:.1} dB \
+                "PATH FOUND, BELOW THRESHOLD - {} - SNR {:.1} dB is {:.1} dB \
                  short; {} mode(s)",
+                s.link.confidence_label(),
                 s.link.snr_db,
                 -s.link.margin_db(),
                 out.solutions.len(),
@@ -53,11 +55,20 @@ pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
         None => match best_es {
             Some(s) => (
                 WARN,
+                // TWO different probabilities, and they must not be conflated.
+                // `s.probability` is how often the Es sheet EXISTS - a climatological
+                // occurrence rate, and the one number here with a defensible level.
+                // `confidence_label` is whether the signal clears the threshold GIVEN
+                // that it does, and only its ORDERING is validated (see
+                // `noise::PREDICTIVE_SPREAD_DB`), so it is stated as a word.
+                // Multiplying the two would produce a joint percentage that looks
+                // far more precise than either input supports.
                 format!(
-                    "SPORADIC E ONLY - no F2 or E path at this range, but an Es opening gives \
-                     SNR {:.1} dB. That opening is present about {:.0} % of the time; this is \
-                     NOT a dead path",
+                    "SPORADIC E ONLY - no F2 or E path at this range. Es gives SNR {:.1} dB, \
+                     {} if the sheet is there - and the sheet is present about {:.0} % of \
+                     the time. NOT a dead path, but not a reliable one",
                     s.link.snr_db,
+                    s.link.confidence_label(),
                     100.0 * s.probability,
                 ),
             ),
