@@ -103,6 +103,19 @@ pub const DIURNAL_PEAK_LST_H: f64 = 14.0;
 /// Trough-to-peak ratio of the diurnal cycle at midlatitudes: night foF2 is
 /// about half the afternoon value at moderate solar activity.
 pub const DIURNAL_MIN_FRACTION: f64 = 0.50;
+/// Amplitude of the SECOND diurnal harmonic, as a fraction of the peak value.
+///
+/// A single cosine is symmetric, so it forces the diurnal minimum to sit exactly
+/// twelve hours from the maximum. Real foF2 does not do that: it decays slowly
+/// through the night and rises sharply after sunrise, so its minimum lags. This
+/// module used to say a second harmonic "would imply a precision the anchors do
+/// not have" - true when the anchors were guesses, and no longer true now that
+/// `bin/iono_check.rs` measures them against GIRO ionosonde soundings.
+///
+/// Zero reproduces the single-harmonic form exactly.
+pub const DIURNAL_SECOND_AMP: f64 = 0.0;
+/// Phase of the second harmonic, in hours relative to the diurnal peak.
+pub const DIURNAL_SECOND_PHASE_H: f64 = 0.0;
 /// Magnetic-dip latitude of the equatorial-anomaly crests, degrees.
 pub const ANOMALY_CREST_LAT_DEG: f64 = 16.0;
 /// Half-width of a crest, degrees.
@@ -153,14 +166,74 @@ fn day_weight(lst_h: f64) -> f64 {
 /// solar time in hours.
 #[must_use]
 pub fn climatology_fof2(lat_deg: f64, lst_h: f64, season: Season, ssn: f64) -> f64 {
-    let reference = fof2_from_ssn(ssn);
+    climatology_fof2_with(lat_deg, lst_h, season, ssn, DiurnalShape::default())
+}
 
-    // Diurnal: one harmonic peaking at DIURNAL_PEAK_LST_H. A single harmonic
-    // understates the sharpness of the post-sunrise rise; it is kept because a
-    // second harmonic would imply a precision the anchors do not have.
-    let mid = 0.5 * (1.0 + DIURNAL_MIN_FRACTION);
-    let amp = 0.5 * (1.0 - DIURNAL_MIN_FRACTION);
-    let diurnal = mid + amp * (2.0 * PI * (lst_h - DIURNAL_PEAK_LST_H) / 24.0).cos();
+/// The diurnal parameters of [`climatology_fof2`], gathered so a validation run
+/// can vary them without recompiling.
+///
+/// [`Default`] returns the module constants exactly, so
+/// `climatology_fof2_with(.., Default::default())` is bit-identical to
+/// [`climatology_fof2`] - pinned by `tests::default_shape_reproduces_the_constants`.
+/// This exists for `bin/iono_check.rs`, which searches these five numbers against
+/// measured ionosonde soundings and PRINTS the best set. It does not write them
+/// back: moving a constant stays a deliberate edit with a test attached.
+#[derive(Clone, Copy, Debug)]
+pub struct DiurnalShape {
+    pub peak_lst_h: f64,
+    pub min_fraction: f64,
+    pub second_amp: f64,
+    pub second_phase_h: f64,
+    /// Multiplies the whole climatology. Separate from the shape parameters
+    /// because it moves the LEVEL, which is [`fof2_from_ssn`]'s job; a value
+    /// away from 1.0 is a statement about that anchor, not about the diurnal.
+    pub level_scale: f64,
+}
+
+impl Default for DiurnalShape {
+    fn default() -> Self {
+        Self {
+            peak_lst_h: DIURNAL_PEAK_LST_H,
+            min_fraction: DIURNAL_MIN_FRACTION,
+            second_amp: DIURNAL_SECOND_AMP,
+            second_phase_h: DIURNAL_SECOND_PHASE_H,
+            level_scale: 1.0,
+        }
+    }
+}
+
+impl DiurnalShape {
+    /// The diurnal factor at a local solar time, normalised to 1.0 at the peak.
+    ///
+    /// The normalisation is what keeps the two backends sharing one anchor: the
+    /// climatology must reduce to [`fof2_from_ssn`] exactly at the reference
+    /// latitude, equinox, diurnal maximum, and it cannot do that if a second
+    /// harmonic is allowed to move the value at the peak.
+    #[must_use]
+    pub fn factor(self, lst_h: f64) -> f64 {
+        let mid = 0.5 * (1.0 + self.min_fraction);
+        let amp = 0.5 * (1.0 - self.min_fraction);
+        let ph = 2.0 * PI * self.second_phase_h / 24.0;
+        let raw = |th: f64| {
+            mid + amp * th.cos() + self.second_amp * (2.0 * (th + ph)).cos()
+        };
+        raw(2.0 * PI * (lst_h - self.peak_lst_h) / 24.0) / raw(0.0)
+    }
+}
+
+/// [`climatology_fof2`] with the diurnal parameters supplied rather than read
+/// from the module constants.
+#[must_use]
+pub fn climatology_fof2_with(
+    lat_deg: f64,
+    lst_h: f64,
+    season: Season,
+    ssn: f64,
+    shape: DiurnalShape,
+) -> f64 {
+    let reference = fof2_from_ssn(ssn) * shape.level_scale;
+
+    let diurnal = shape.factor(lst_h);
 
     let abs_lat = lat_deg.abs();
     let dayw = day_weight(lst_h);
@@ -189,15 +262,15 @@ pub fn climatology_fof2(lat_deg: f64, lst_h: f64, season: Season, ssn: f64) -> f
 
     // Normalise so that the reference latitude at equinox, at the diurnal peak,
     // returns `fof2_from_ssn(ssn)` exactly: the two backends share one anchor.
-    let norm = latitude_factor_at_reference();
+    let norm = latitude_factor_at_reference(shape.peak_lst_h);
     let f = reference * diurnal * anomaly * trough * seasonal / norm;
     (f * f + FOF2_FLOOR_MHZ * FOF2_FLOOR_MHZ).sqrt()
 }
 
 /// The latitude factor the climatology produces at its own reference point, so
 /// the model can divide it out and land exactly on [`fof2_from_ssn`] there.
-fn latitude_factor_at_reference() -> f64 {
-    let dayw = day_weight(DIURNAL_PEAK_LST_H);
+fn latitude_factor_at_reference(peak_lst_h: f64) -> f64 {
+    let dayw = day_weight(peak_lst_h);
     let u = (REFERENCE_LAT_DEG - ANOMALY_CREST_LAT_DEG) / ANOMALY_CREST_WIDTH_DEG;
     let anomaly = 1.0 + ANOMALY_CREST_GAIN * (-u * u).exp() * dayw;
     let t = (REFERENCE_LAT_DEG - POLAR_TROUGH_LAT_DEG) / POLAR_TROUGH_WIDTH_DEG;
@@ -541,10 +614,27 @@ impl PeakDensitySource for GriddedF2Peak {
 
 // --- E layer ---------------------------------------------------------------
 
-/// Overhead-sun foE at zero sunspot number, MHz. ORDER-OF-MAGNITUDE ANCHOR:
-/// noon midlatitude foE sits in the 3-4 MHz range across the solar cycle, and
-/// 3.30 MHz at SSN 0 puts the model in that range. Not a fitted coefficient.
-pub const FOE_OVERHEAD_QUIET_MHZ: f64 = 3.30;
+/// Overhead-sun foE at zero sunspot number, MHz.
+///
+/// MEASURED, 2026-07-29, and the only anchor in this module that is. It was an
+/// order-of-magnitude guess of 3.30 - "noon midlatitude foE sits in the 3-4 MHz
+/// range, so 3.30 puts the model in that range". `bin/iono_check.rs` compared the
+/// model against 28 952 GIRO ionosonde soundings of foE, across 17 stations, four
+/// one-week windows spanning the seasons, and SSN 36 to 164:
+///
+///   * the model read HIGH by +0.28 MHz on a measured mean of 2.72;
+///   * that bias was FLAT across every local-time bin (+0.17 to +0.29), so the
+///     `Ch(X, chi)^(-1/4)` zenith law is right and only the level was wrong -
+///     scatter about the bias is 0.19 MHz;
+///   * the closed-form level that minimises RMS is 2.994, and a July-only subset
+///     independently gave 2.923, so the number is not an artefact of one season.
+///
+/// This matters beyond foE. The E layer is what screens the low bands off F2 by
+/// day (`solve::tests::daytime_e_layer_screens_the_low_bands`), so a 9 % foE
+/// over-estimate screens paths that reality does not screen, and pushes them onto
+/// E-layer modes. The WSPR calibrator's largest unexplained block is exactly
+/// that: daytime low-band E cells reading +10 to +22 dB optimistic.
+pub const FOE_OVERHEAD_QUIET_MHZ: f64 = 2.99;
 /// Solar-activity scaling of foE. The standard statement is
 /// `foE^4 proportional to (1 + 0.0094 R) cos(chi)`; only the `(1 + 0.0094 R)`
 /// factor is applied here, because the `cos(chi)` half is produced by the
@@ -573,6 +663,47 @@ pub fn e_layer_peak_ne(ssn: f64, quiet_mhz: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    /// The shape struct must be a pure refactor at its defaults: same numbers,
+    /// same anchor, no drift. Referenced from `climatology_fof2_with`'s docs.
+    #[test]
+    fn default_shape_reproduces_the_constants() {
+        use super::*;
+        let d = DiurnalShape::default();
+        assert!((d.peak_lst_h - DIURNAL_PEAK_LST_H).abs() < 1e-12);
+        assert!((d.min_fraction - DIURNAL_MIN_FRACTION).abs() < 1e-12);
+        assert!((d.second_amp - DIURNAL_SECOND_AMP).abs() < 1e-12);
+        assert!((d.level_scale - 1.0).abs() < 1e-12);
+
+        for lat in [-70.0_f64, -15.0, 0.0, 35.0, 62.0] {
+            for lst in [0.0_f64, 3.5, 8.0, 14.0, 19.5, 23.0] {
+                for season in [Season::Summer, Season::Winter, Season::Equinox] {
+                    for ssn in [0.0_f64, 90.0, 180.0] {
+                        let a = climatology_fof2(lat, lst, season, ssn);
+                        let b = climatology_fof2_with(lat, lst, season, ssn, d);
+                        assert!((a - b).abs() < 1e-12, "{lat} {lst} {ssn}: {a} vs {b}");
+                    }
+                }
+            }
+        }
+
+        // With no second harmonic the factor is the plain single cosine, and it
+        // is exactly 1 at the peak - which is what keeps the two backends sharing
+        // the `fof2_from_ssn` anchor.
+        assert!((d.factor(DIURNAL_PEAK_LST_H) - 1.0).abs() < 1e-12);
+        let mid = 0.5 * (1.0 + DIURNAL_MIN_FRACTION);
+        let amp = 0.5 * (1.0 - DIURNAL_MIN_FRACTION);
+        for lst in [1.0_f64, 7.0, 13.0, 21.0] {
+            let want = mid + amp * (2.0 * PI * (lst - DIURNAL_PEAK_LST_H) / 24.0).cos();
+            assert!((d.factor(lst) - want).abs() < 1e-12, "{lst}");
+        }
+
+        // And a second harmonic must not move the peak value, or the anchor slides.
+        let mut h = d;
+        h.second_amp = 0.08;
+        h.second_phase_h = 2.0;
+        assert!((h.factor(DIURNAL_PEAK_LST_H) - 1.0).abs() < 1e-12);
+    }
+
     use super::*;
 
     /// foF2(SSN) hits its calibration anchors, rises monotonically with solar

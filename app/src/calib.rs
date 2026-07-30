@@ -99,7 +99,9 @@ impl Bounded {
 ///   whose neutral-density profile is used; its scale height follows the neutral
 ///   atmosphere, 5-9 km.
 /// * The E peak sits at 100-115 km with a scale height of 5-15 km.
-/// * Overhead quiet-sun foE is 3.0-3.8 MHz.
+/// * Overhead quiet-sun foE was taken as 3.0-3.8 MHz from the textbook range;
+///   the lower end is now 2.6, because the anchor has since been MEASURED at
+///   2.99 against ionosonde soundings and the old floor excluded the answer.
 #[derive(Clone, Copy, Debug)]
 pub struct IonosphereAnchors {
     /// Overhead-sun D-region peak electron density, m^-3.
@@ -145,7 +147,12 @@ impl Default for IonosphereAnchors {
             nu_scale_height_km: Bounded::new(s::NU_SCALE_HEIGHT_KM, 5.0, 9.0),
             e_peak_alt_km: Bounded::new(s::E_REGION_PEAK_ALT_KM, 100.0, 115.0),
             e_scale_height_km: Bounded::new(s::E_REGION_SCALE_HEIGHT_KM, 5.0, 15.0),
-            foe_overhead_quiet_mhz: Bounded::new(crate::fof2::FOE_OVERHEAD_QUIET_MHZ, 3.0, 3.8),
+            // Lower bound was 3.0, which the MEASURED value 2.99 sits just outside.
+            // Widened deliberately and on evidence, not to unstick a fit: see
+            // `fof2::FOE_OVERHEAD_QUIET_MHZ`, measured against 28 952 ionosonde
+            // soundings over four seasons. This is the opposite case to the
+            // atmospheric-noise bounds, which were widened on a theory and put back.
+            foe_overhead_quiet_mhz: Bounded::new(crate::fof2::FOE_OVERHEAD_QUIET_MHZ, 2.6, 3.8),
             es_foes_max_mhz: Bounded::new(crate::sporadic_e::ES_FOES_MAX_MHZ, 5.0, 12.0),
             es_peak_probability: Bounded::new(crate::sporadic_e::ES_PEAK_PROBABILITY, 0.10, 0.70),
         }
