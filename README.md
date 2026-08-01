@@ -68,8 +68,7 @@ nothing beyond `std`.
 ## Accuracy Report
 
 Coming soon — a validation report against real-world propagation data will
-be published once the project reaches its first tagged release.
-Keep an eye out on the other tools the repo can offer like ``wspr_calibrate``! See Docs
+be published once the project reaches its first tagged release. So far though, the only accuracy issues have been with the inputs coming from the app, not the actual physics engine but that may change.
 
 ## Supported Platforms
 Currently, it should support most modern operating systems such as Windows (+ Arm), MacOS, Linux — however, only Windows 11 and Ubuntu 24.04 have been tested. The Linux build requires glibc 2.39 or newer (e.g. Ubuntu 24.04+, Debian 13+, Fedora 40+); older distros such as Ubuntu 22.04 or Debian 12 are not currently supported without rebuilding from an older base. It also has support for WebASM for browser support, although it's not the main focus and is a proof of concept.
