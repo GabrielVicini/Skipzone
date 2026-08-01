@@ -94,8 +94,8 @@ use crate::scenario::{
 };
 
 use tracing::{
-    GroundModel, StepTuning, assemble, home_terminal, homing_config, make_tracer, near_miss_sweep,
-    propagate, scan_elevations, terminal_tolerance_m,
+    GroundModel, StepTuning, assemble, home_terminal, homing_config, hop_elevation_window_deg,
+    make_tracer, near_miss_sweep, propagate, scan_elevations, terminal_tolerance_m,
 };
 
 /// What one pass over the homing produced, per layer.
@@ -267,7 +267,58 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                         a,
                         tuning.for_scan(),
                     );
-                    let scan = scan_elevations(&scan_tracer, &tx, &rx, &base_config);
+                    // Narrow the SCAN to the elevations that could serve any hop
+                    // count here. The fan is 4..=80 deg in 1 deg steps regardless of
+                    // geometry, and most of it is wasted: a 7540 km target cannot be
+                    // reached with a 60 deg launch off any layer the model has, and a
+                    // 300 km one cannot be reached with a 5 deg launch.
+                    //
+                    // Only the scan is narrowed. `base_config` still supplies the
+                    // Newton limits below at their full range, so even a mis-sized
+                    // window cannot clamp a refinement that is converging - the worst
+                    // it could do is fail to offer a bracket, which `solve_digest`
+                    // exists to rule out.
+                    // A fresh config rather than a copy of `base_config`: that one is
+                    // consumed by the Newton limits below and must keep its full range.
+                    let mut scan_config = homing_config(inputs.use_field);
+                    if let Some((lo, hi)) = (1..=inputs.max_hops)
+                        .filter_map(|hops| {
+                            hop_elevation_window_deg(total_arc.get() / f64::from(hops))
+                        })
+                        .fold(None, |acc: Option<(f64, f64)>, (lo, hi)| {
+                            Some(acc.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))))
+                        })
+                    {
+                        // SNAP to the original fan's own grid, outward. The scan finds
+                        // brackets by looking for a sign change between CONSECUTIVE
+                        // sampled elevations, so the set of samples is part of the
+                        // answer, not just their range: starting the fan at 16.0 deg
+                        // instead of 4.0 shifts every sample by a fraction of a degree
+                        // and makes the scan find sign changes the old grid stepped
+                        // over. Measured - `solve_digest` reported brackets appearing
+                        // and launch elevations moving in the 6th decimal.
+                        //
+                        // Snapping outward to a whole number of steps from the original
+                        // `elev_min` makes the scanned elevations a strict SUBSET of the
+                        // ones the full fan would have used. Every bracket inside the
+                        // window is then found identically, and the only ones that can
+                        // be lost lie entirely outside a band already padded well beyond
+                        // what any modelled layer can reach.
+                        let full_lo = base_config.elev_min.get().to_degrees();
+                        let full_hi = base_config.elev_max.get().to_degrees();
+                        let step = base_config.elev_step.get().to_degrees();
+                        let snap = |v: f64, up: bool| {
+                            if step <= 0.0 {
+                                return v;
+                            }
+                            let k = (v - full_lo) / step;
+                            let k = if up { k.ceil() } else { k.floor() };
+                            (full_lo + k * step).clamp(full_lo, full_hi)
+                        };
+                        scan_config.elev_min = Radians::from_degrees(snap(lo.max(full_lo), false));
+                        scan_config.elev_max = Radians::from_degrees(snap(hi.min(full_hi), true));
+                    }
+                    let scan = scan_elevations(&scan_tracer, &tx, &rx, &scan_config);
 
                     // Every (hop count, bracket) pair is one independent candidate
                     // ray: its own terminal homing search and its own propagation, with
@@ -279,6 +330,15 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                     // does.
                     let mut work = Vec::new();
                     for hops in 1..=inputs.max_hops {
+                        // A hop count whose per-hop arc is over the horizon for every
+                        // layer in the model cannot produce a ray, and no amount of
+                        // tracing will change that. Skipping it here is not the same
+                        // as finding no bracket - `saw_no_bracket` means "rays reflect
+                        // but none lands at this range", which the per-layer report
+                        // distinguishes - so this deliberately does NOT set that flag.
+                        if hop_elevation_window_deg(total_arc.get() / f64::from(hops)).is_none() {
+                            continue;
+                        }
                         let target = if hops == 1 {
                             rx
                         } else {
@@ -323,6 +383,9 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                                 &tx,
                                 &rx,
                                 hops,
+                                // The bracket MIDPOINT. See `ElevationScan::brackets`:
+                                // seeding this any closer to the root changes which
+                                // ray Newton converges to.
                                 0.5 * (bracket.0 + bracket.1),
                                 limits,
                                 terminal_tol,

@@ -514,6 +514,83 @@ where
     })
 }
 
+/// Lowest altitude any modelled layer reflects from, km. Below the D-region base:
+/// nothing in the stack turns a ray under this.
+const REFLECT_ALT_MIN_KM: f64 = 60.0;
+
+/// Highest altitude any modelled layer reflects from, km.
+///
+/// Deliberately far above the F2 peak (~300 km). This bound only ever has to be
+/// an OVER-estimate: it decides the shallowest launch that could serve a hop, and
+/// too generous a value costs a few wasted traces while too tight a one silently
+/// deletes a real ray.
+const REFLECT_ALT_MAX_KM: f64 = 800.0;
+
+/// Padding on each end of the computed window, degrees.
+///
+/// The window is derived from a MIRROR at a fixed altitude, and a real refracted
+/// ray is not a mirror: it turns gradually, so it travels further than the mirror
+/// geometry says for the same apex, and its launch angle for a given range sits a
+/// little outside the mirror's answer. This pad plus the deliberately high
+/// [`REFLECT_ALT_MAX_KM`] absorbs that difference. `solve_digest` is the check
+/// that it does.
+const WINDOW_PAD_DEG: f64 = 8.0;
+
+/// The launch-elevation band, in degrees, that could serve one hop spanning
+/// `hop_arc_rad` of ground - or `None` if no modelled layer can reach that far in
+/// a single hop.
+///
+/// # Why this is safe to use as a filter
+///
+/// For a specular reflection at altitude `h` and a half-arc `psi`, the launch
+/// elevation above the local horizontal is exact spherical geometry:
+///
+/// ```text
+/// tan(eps) = ((R + h) cos(psi) - R) / ((R + h) sin(psi))
+/// ```
+///
+/// `eps` rises monotonically with `h` - reaching the same ground range off a
+/// higher layer needs a steeper climb - so the reachable band is bracketed by
+/// evaluating the two altitude extremes. A negative numerator at
+/// [`REFLECT_ALT_MAX_KM`] means the arc is over the horizon for every layer the
+/// model has, which is a statement about geometry alone and cannot be undone by
+/// any ionospheric condition.
+///
+/// This replaces discovering the same fact by tracing: the profiler measured a
+/// 1-hop 7540 km target costing 152 traces to conclude no elevation brackets it.
+pub(super) fn hop_elevation_window_deg(hop_arc_rad: f64) -> Option<(f64, f64)> {
+    if !hop_arc_rad.is_finite() || hop_arc_rad <= 0.0 {
+        return None;
+    }
+    let psi = 0.5 * hop_arc_rad;
+    // Past a quarter turn per hop nothing sensible is left; let the tracer decide
+    // rather than extrapolating this geometry into a regime it does not describe.
+    if psi >= std::f64::consts::FRAC_PI_2 {
+        return Some((-90.0, 90.0));
+    }
+    let (sin_psi, cos_psi) = psi.sin_cos();
+    let r = EARTH_RADIUS_M / 1e3;
+    let elev_at = |h_km: f64| -> Option<f64> {
+        let rh = r + h_km;
+        let num = rh * cos_psi - r;
+        let den = rh * sin_psi;
+        if den <= 0.0 {
+            return None;
+        }
+        // A negative numerator is the reflection point being below the horizon
+        // from the launch site: unreachable at this altitude, not merely steep.
+        (num >= 0.0).then(|| num.atan2(den).to_degrees())
+    };
+
+    // The ceiling comes from the highest layer; if even that cannot see the
+    // target, no launch angle helps.
+    let hi = elev_at(REFLECT_ALT_MAX_KM)?;
+    // The floor comes from the lowest layer, and its absence is not a failure:
+    // it means only high reflections reach, so the band simply opens at zero.
+    let lo = elev_at(REFLECT_ALT_MIN_KM).unwrap_or(0.0);
+    Some((lo - WINDOW_PAD_DEG, hi + WINDOW_PAD_DEG))
+}
+
 /// One elevation scan, traced once and reused for every hop count.
 ///
 /// The engine's `Homing::home_scan` opens with an elevation scan at the
@@ -540,6 +617,22 @@ impl ElevationScan {
     /// Elevation intervals over which the along-track error changes sign for a
     /// target at `target_arc` radians. Mirrors the engine's `scan_brackets`
     /// bracketing rule exactly, on rays that were already traced.
+    ///
+    /// # Do not "improve" the caller's midpoint seed
+    ///
+    /// The obvious optimisation is to hand back a secant estimate of the root -
+    /// the scan already knows the along-track error at both ends, so linear
+    /// interpolation is free and starts Newton much closer. It was tried, and
+    /// `solve_digest` measured the result over 936 scenarios: **22 solutions
+    /// disappeared, 24 new ones appeared, and SNR moved by up to 13.8 dB**, with
+    /// launch elevations moving 8.7 deg and apex altitudes 43 km.
+    ///
+    /// A one-degree bracket is not guaranteed to hold exactly one root, and the
+    /// terminal homing is a Newton iteration with no bracket invariant - from a
+    /// different start inside the same interval it converges to a different ray.
+    /// The midpoint is therefore load-bearing, not arbitrary: it is the seed the
+    /// reported solution set was defined against and the calibration was fitted
+    /// to. Changing it is a physics change wearing a performance costume.
     pub fn brackets(&self, target_arc: f64) -> Vec<(f64, f64)> {
         let mut brackets = Vec::new();
         let mut prev: Option<(f64, f64)> = None;

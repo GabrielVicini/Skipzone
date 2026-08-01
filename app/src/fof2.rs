@@ -214,9 +214,7 @@ impl DiurnalShape {
         let mid = 0.5 * (1.0 + self.min_fraction);
         let amp = 0.5 * (1.0 - self.min_fraction);
         let ph = 2.0 * PI * self.second_phase_h / 24.0;
-        let raw = |th: f64| {
-            mid + amp * th.cos() + self.second_amp * (2.0 * (th + ph)).cos()
-        };
+        let raw = |th: f64| mid + amp * th.cos() + self.second_amp * (2.0 * (th + ph)).cos();
         raw(2.0 * PI * (lst_h - self.peak_lst_h) / 24.0) / raw(0.0)
     }
 }
