@@ -876,7 +876,11 @@ mod tests {
     fn normal_cdf_and_decode_probability_are_sane() {
         // Textbook points.
         assert!((normal_cdf(0.0) - 0.5).abs() < 1e-12);
-        assert!((normal_cdf(1.0) - 0.841_344_746).abs() < 1e-9, "{}", normal_cdf(1.0));
+        assert!(
+            (normal_cdf(1.0) - 0.841_344_746).abs() < 1e-9,
+            "{}",
+            normal_cdf(1.0)
+        );
         assert!((normal_cdf(-1.0) - 0.158_655_254).abs() < 1e-9);
         assert!((normal_cdf(1.96) - 0.975_002_105).abs() < 1e-9);
         assert!((normal_cdf(-3.0) - 0.001_349_898).abs() < 1e-9);

@@ -874,12 +874,7 @@ fn run(args: &Args) -> Result<(), String> {
                 },
                 &fitted,
             );
-            report_decode_probability(
-                &fit_set,
-                &after_fit,
-                &negative_spots,
-                &fitted,
-            );
+            report_decode_probability(&fit_set, &after_fit, &negative_spots, &fitted);
         }
     } else {
         println!("\n=== FALSE POSITIVES ========================================");
@@ -2766,7 +2761,9 @@ fn report_decode_probability(
     println!("\n  fitted predictive spread sigma   {sigma:.2} dB");
     println!("  fitted intercept b               {b:+.2} dB   (absorbs this corpus's class");
     println!("                                   balance - NOT shippable, see the doc comment)");
-    println!("  mean negative log-likelihood     {best:.4}   (a coin flip on every spot is 0.6931)");
+    println!(
+        "  mean negative log-likelihood     {best:.4}   (a coin flip on every spot is 0.6931)"
+    );
     println!("  scored on {n_pos} decode(s) and {n_neg} non-decode(s)");
     println!(
         "\n  For reference: repeat measurements of one path give 3.5 dB, and the model's own\n  \
@@ -2798,7 +2795,14 @@ fn report_decode_probability(
         #[allow(clippy::cast_precision_loss)]
         let n = cell.len() as f64;
         if cell.len() < 30 {
-            println!("  {:<16} {:>8} {:>12} {:>12} {:>10}", format!("{lo:.1} - {hi:.1}"), cell.len(), "under 30", "under 30", "-");
+            println!(
+                "  {:<16} {:>8} {:>12} {:>12} {:>10}",
+                format!("{lo:.1} - {hi:.1}"),
+                cell.len(),
+                "under 30",
+                "under 30",
+                "-"
+            );
             continue;
         }
         let mean_p = cell.iter().map(|(p, _)| p).sum::<f64>() / n;

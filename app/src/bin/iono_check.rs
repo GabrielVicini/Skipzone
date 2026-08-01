@@ -158,7 +158,9 @@ fn main() -> ExitCode {
         let (Ok(hh), Ok(mm)) = (t[11..13].parse::<f64>(), t[14..16].parse::<f64>()) else {
             continue;
         };
-        let Ok(cs) = p[4].parse::<f64>() else { continue };
+        let Ok(cs) = p[4].parse::<f64>() else {
+            continue;
+        };
         let Ok(fof2) = p[5].parse::<f64>() else {
             continue;
         };
@@ -236,18 +238,17 @@ fn main() -> ExitCode {
         let season = o.season();
         let plane = grid.plane(season, o.ssn);
         g_all.push(plane.sample(o.lat, o.lst_h()).0, o.fof2);
-        c_all.push(fof2::climatology_fof2(o.lat, o.lst_h(), season, o.ssn), o.fof2);
+        c_all.push(
+            fof2::climatology_fof2(o.lat, o.lst_h(), season, o.ssn),
+            o.fof2,
+        );
     }
     println!(
         "\n  {:<14} {:>7} {:>10} {:>9} {:>9} {:>12}",
         "backend", "n", "measured", "bias", "RMS", "median |err|"
     );
-    for (name, e) in [
-        ("grid", &mut g_all),
-        ("climatology", &mut c_all),
-    ] {
-        let (n, meas, bias, rms, med) =
-            (e.n, e.mean_measured(), e.bias(), e.rms(), e.median_abs());
+    for (name, e) in [("grid", &mut g_all), ("climatology", &mut c_all)] {
+        let (n, meas, bias, rms, med) = (e.n, e.mean_measured(), e.bias(), e.rms(), e.median_abs());
         println!("  {name:<14} {n:>7} {meas:>10.2} {bias:>+9.2} {rms:>9.2} {med:>12.2}");
     }
 
@@ -336,7 +337,10 @@ fn main() -> ExitCode {
             .push(model, measured);
     }
     if e_all.n < MIN_QUOTABLE {
-        println!("\n  only {} foE observation(s); under the {MIN_QUOTABLE} floor", e_all.n);
+        println!(
+            "\n  only {} foE observation(s); under the {MIN_QUOTABLE} floor",
+            e_all.n
+        );
     } else {
         println!(
             "\n  {:<14} {:>7} {:>10} {:>9} {:>9} {:>12}",
@@ -349,7 +353,10 @@ fn main() -> ExitCode {
             e_all.rms(),
             e_all.median_abs(),
         );
-        println!("  {:<14} {n:>7} {meas:>10.2} {bias:>+9.2} {rms:>9.2} {med:>12.2}", "all");
+        println!(
+            "  {:<14} {n:>7} {meas:>10.2} {bias:>+9.2} {rms:>9.2} {med:>12.2}",
+            "all"
+        );
         for (k, e) in &mut e_by_lst {
             if e.n < MIN_QUOTABLE {
                 continue;
@@ -418,11 +425,46 @@ fn propose(obs: &[Obs], quiet: f64, big_x: f64) {
         f64,
     );
     let fields: [Field; 5] = [
-        ("DIURNAL_PEAK_LST_H", |s| s.peak_lst_h, |s, v| s.peak_lst_h = v, 10.0, 18.0, 1.0),
-        ("DIURNAL_MIN_FRACTION", |s| s.min_fraction, |s, v| s.min_fraction = v, 0.20, 0.95, 0.05),
-        ("DIURNAL_SECOND_AMP", |s| s.second_amp, |s, v| s.second_amp = v, -0.30, 0.30, 0.05),
-        ("DIURNAL_SECOND_PHASE_H", |s| s.second_phase_h, |s, v| s.second_phase_h = v, -6.0, 6.0, 1.0),
-        ("level scale on fof2_from_ssn", |s| s.level_scale, |s, v| s.level_scale = v, 0.70, 1.30, 0.05),
+        (
+            "DIURNAL_PEAK_LST_H",
+            |s| s.peak_lst_h,
+            |s, v| s.peak_lst_h = v,
+            10.0,
+            18.0,
+            1.0,
+        ),
+        (
+            "DIURNAL_MIN_FRACTION",
+            |s| s.min_fraction,
+            |s, v| s.min_fraction = v,
+            0.20,
+            0.95,
+            0.05,
+        ),
+        (
+            "DIURNAL_SECOND_AMP",
+            |s| s.second_amp,
+            |s, v| s.second_amp = v,
+            -0.30,
+            0.30,
+            0.05,
+        ),
+        (
+            "DIURNAL_SECOND_PHASE_H",
+            |s| s.second_phase_h,
+            |s, v| s.second_phase_h = v,
+            -6.0,
+            6.0,
+            1.0,
+        ),
+        (
+            "level scale on fof2_from_ssn",
+            |s| s.level_scale,
+            |s, v| s.level_scale = v,
+            0.70,
+            1.30,
+            0.05,
+        ),
     ];
 
     // Is the model OVER-DISPERSED? This decides whether a level scale below 1 is
@@ -447,7 +489,10 @@ fn propose(obs: &[Obs], quiet: f64, big_x: f64) {
     let sd_y = (syy / n - ybar * ybar).sqrt();
     let cov = smy / n - mbar * ybar;
     println!("\n  DISPERSION at the current constants:");
-    println!("    SD of model {sd_m:.2} MHz vs SD of measured {sd_y:.2} MHz   (ratio {:.2})", sd_m / sd_y);
+    println!(
+        "    SD of model {sd_m:.2} MHz vs SD of measured {sd_y:.2} MHz   (ratio {:.2})",
+        sd_m / sd_y
+    );
     println!("    correlation {:.3}", cov / (sd_m * sd_y));
     println!("    A ratio above 1 means the model swings harder than the ionosphere does, and");
     println!("    a level scale below 1 will then cut RMS whether or not the level is wrong.");
@@ -574,7 +619,11 @@ fn corpus_ssn() -> f64 {
     let mut v: Vec<f64> = text
         .lines()
         .filter(|l| !l.starts_with('#'))
-        .filter_map(|l| l.split('\t').nth(9).and_then(|s| s.trim().parse::<f64>().ok()))
+        .filter_map(|l| {
+            l.split('\t')
+                .nth(9)
+                .and_then(|s| s.trim().parse::<f64>().ok())
+        })
         .collect();
     if v.is_empty() {
         return 90.0;
@@ -583,13 +632,7 @@ fn corpus_ssn() -> f64 {
     v[v.len() / 2]
 }
 
-fn cut(
-    title: &str,
-    note: &str,
-    obs: &[Obs],
-    grid: &Fof2Grid,
-    key: impl Fn(&Obs) -> String,
-) {
+fn cut(title: &str, note: &str, obs: &[Obs], grid: &Fof2Grid, key: impl Fn(&Obs) -> String) {
     println!("\n--- {title} ---");
     println!("{note}");
     let mut cells: BTreeMap<String, (Err2, Err2)> = BTreeMap::new();
@@ -598,7 +641,10 @@ fn cut(
         let plane = grid.plane(season, o.ssn);
         let e = cells.entry(key(o)).or_default();
         e.0.push(plane.sample(o.lat, o.lst_h()).0, o.fof2);
-        e.1.push(fof2::climatology_fof2(o.lat, o.lst_h(), season, o.ssn), o.fof2);
+        e.1.push(
+            fof2::climatology_fof2(o.lat, o.lst_h(), season, o.ssn),
+            o.fof2,
+        );
     }
     println!(
         "\n  {:<16} {:>7} {:>10} {:>11} {:>10} {:>12} {:>11}",

@@ -251,8 +251,7 @@ fn night_floor_leverage(base: &Inputs) {
             };
             let res = solve::solve(&inputs, &a, &models);
             cells.push(
-                solve::best_with_es_fallback(&res)
-                    .map_or(f64::NAN, |s| s.total_absorption_db),
+                solve::best_with_es_fallback(&res).map_or(f64::NAN, |s| s.total_absorption_db),
             );
         }
         let show = |v: f64| {
@@ -325,7 +324,12 @@ fn main() -> ExitCode {
     // grazing function realises a peak of Nm/sqrt(Ch), so the density falls only
     // as sqrt(cos chi) while the ray's traverse is unchanged at fixed range. Going
     // from 61 to 82 deg should cost roughly a factor 0.55, not a factor 3.6.
-    sweep(&base, "E) THE CELL: same path, sun near the terminator", 547.0, 18.8);
+    sweep(
+        &base,
+        "E) THE CELL: same path, sun near the terminator",
+        547.0,
+        18.8,
+    );
     sweep(&base, "F) same path, deeper twilight", 547.0, 19.6);
 
     night_floor_leverage(&base);

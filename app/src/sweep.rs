@@ -1184,8 +1184,7 @@ mod tests {
         // default this read as a plain equality; the difference between the two is
         // the whole point, so it is asserted rather than relaxed to a tolerance.
         assert!(
-            (hit.snr_db
-                - (hit.rx_power_dbm - hit.noise_dbm - scenario::MEASURED_MODEL_BIAS_DB))
+            (hit.snr_db - (hit.rx_power_dbm - hit.noise_dbm - scenario::MEASURED_MODEL_BIAS_DB))
                 .abs()
                 < 1e-9,
             "SNR must be Prx - Pnoise - model_bias; got {} vs {}",
