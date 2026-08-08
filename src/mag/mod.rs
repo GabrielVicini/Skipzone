@@ -18,7 +18,7 @@ pub struct FieldSample {
     /// (B_r, B_theta, B_phi), tesla.
     pub b: [f64; 3],
     /// `db[i][j]` = partial of `b[i]` with respect to coordinate `j`,
-    /// coordinates ordered (r [m], theta [rad], phi [rad]).
+    /// coordinates ordered `(r [m], theta [rad], phi [rad])`.
     pub db: [[f64; 3]; 3],
 }
 

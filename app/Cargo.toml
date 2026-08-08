@@ -5,13 +5,6 @@ edition = "2024"
 description = "Interactive point-to-point HF ray tracing application for the Skipzone engine"
 publish = false
 
-# Windows is the primary target and the native binary in `main.rs` is the
-# default build; `cdylib` exists only so `wasm-bindgen` has something to link
-# against for the proof-of-concept web build (see `src/web.rs`). Native builds
-# are unaffected beyond emitting an extra, unused shared library.
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [[bin]]
 name = "skipzone-app-bin"
 path = "src/main.rs"
@@ -24,28 +17,16 @@ walkers = "0.56"
 # Complex Fresnel reflection coefficients for the ground-reflection loss term.
 num-complex = "0.4"
 # Data-parallel execution for the compute layer (frequency sweep and any other
-# embarrassingly-parallel batch of independent engine solves). The engine crate
-# stays single-threaded; parallelism lives entirely in this app layer.
+# embarrassingly-parallel batch of independent engine solves). All parallelism
+# in the project lives in this layer; see `compute.rs`.
 rayon = "1"
 shapefile = { version = "0.9.0", default-features = false }
-# `std::time::Instant` panics on wasm32-unknown-unknown. This is a drop-in that
-# forwards straight to std everywhere else, so the native timings are unchanged.
-web-time = "1"
-
 # HTTPS for the validation harness only: it fetches live WSPR spots and the
 # current solar indices. Nothing in the GUI or the solver touches the network,
 # and the engine crate never sees this - the workspace split exists so that an
 # HTTP dependency here cannot reach it. Pure-Rust TLS so there is no system
 # library to install, matching the crate's portability requirement.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls"] }
-
-# The web proof of concept. None of this is pulled into a native build.
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
-console_error_panic_hook = "0.1"
 
 # Deliberately NOT clippy-pedantic, unlike the engine crate: this is an
 # egui application crate, and pedantic lint churn on UI layout code buys

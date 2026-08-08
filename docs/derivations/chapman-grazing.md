@@ -1,6 +1,6 @@
 # Chapman grazing-incidence function and the twilight D region
 
-Derived here for `app/src/dregion.rs`. Unlike everything else in
+Derived here for `app/src/chapman.rs`. Unlike everything else in
 docs/derivations/, this supports the *scenario-level* app, not the engine
 crate: it is the day/night-aware D-region absorbing layer the app feeds to the
 (unchanged) engine tracer. Notation and sign conventions follow conventions.md
@@ -82,7 +82,7 @@ without any external crate:
         sqrt(pi) erfcx(t) = 1 / ( t + (1/2)/( t + (2/2)/( t + (3/2)/( t + ... ))))
     evaluated backward; converges to double precision in ~40 terms for t >= 2.
 
-Both are exercised in `dregion.rs` tests against reference values
+Both are exercised in `chapman.rs` tests against reference values
 erfcx(0)=1, erfcx(1)=0.427583..., erfcx(2)=0.255396..., erfcx(5)=0.110704....
 
 Derivative (needed for the horizontal density gradient, section 4):

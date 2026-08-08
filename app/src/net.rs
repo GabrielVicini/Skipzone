@@ -4,9 +4,6 @@
 //! has a single answer. The GUI and the solver never call it; the headless
 //! harnesses in `src/bin` do, and only to fetch public measurement data
 //! (WSPR spots, solar indices) that the run is scored against.
-//!
-//! Not compiled for wasm32 at all: the web build has no business making these
-//! requests, and the dependency is gated out of it in `Cargo.toml`.
 
 use std::fmt;
 use std::time::Duration;
@@ -20,7 +17,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 const USER_AGENT: &str = concat!(
     "skipzone-validate/",
     env!("CARGO_PKG_VERSION"),
-    " (HF propagation model validation; https://github.com/)"
+    " (HF propagation model validation; hello@vicini.io)"
 );
 
 #[derive(Debug)]

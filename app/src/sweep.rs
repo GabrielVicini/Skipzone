@@ -10,6 +10,11 @@
 //!
 //! Nothing here implements physics: it clones the `Inputs`, rebuilds the engine
 //! models once per job, and calls the existing `scenario`/`solve` API.
+//!
+//! Nothing here mentions egui either. This is the computation layer, and the
+//! one thing it needs from the view is "there is something new to draw" - which
+//! it takes as a [`Wake`] callback rather than an `egui::Context`, so the whole
+//! module can be driven headlessly by the harnesses in `src/bin`.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -17,7 +22,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
-use egui::Context;
 use skipzone::magnetoionic::Mode;
 
 use crate::compute::{ComputePool, Execution, PoolConfig, Timing, available_cores};
@@ -271,62 +275,44 @@ pub fn better(a: SweepPoint, b: SweepPoint) -> SweepPoint {
     }
 }
 
+/// "New results have landed, redraw." Called from the solver worker thread, so
+/// it must be `Send + Sync`; the view layer supplies one that requests a repaint
+/// and a headless caller supplies one that does nothing.
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+
+/// A [`Wake`] that does nothing, for headless callers with no window to redraw.
+#[must_use]
+pub fn no_wake() -> Wake {
+    Arc::new(|| {})
+}
+
 /// Handle to the worker thread. Dispatch jobs, drain results each frame.
 ///
 /// Each dispatch bumps an epoch and cancels the previous job; results carry
 /// their job's epoch and `drain` returns only current-epoch messages, so
 /// straggler progress from a superseded job can never flip the UI state.
 pub struct SolverService {
-    /// Web build: nothing reads this, because `dispatch` runs the job inline
-    /// rather than queuing it. Kept so the two builds share one struct shape.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     job_tx: Sender<(u64, Job, Arc<AtomicBool>)>,
     msg_rx: Receiver<(u64, Msg)>,
-    /// Web build only: the job runs on the caller's stack, so the service holds
-    /// the sending half and the pool the worker thread would otherwise own.
-    #[cfg(target_arch = "wasm32")]
-    msg_tx: Sender<(u64, Msg)>,
-    #[cfg(target_arch = "wasm32")]
-    ctx: Context,
-    #[cfg(target_arch = "wasm32")]
-    pool: ComputePool,
     current_cancel: Option<Arc<AtomicBool>>,
     epoch: u64,
 }
 
 impl SolverService {
+    /// Start the worker thread. `wake` is called from the worker whenever new
+    /// results are available; the view layer passes something that asks its
+    /// window to redraw.
     #[must_use]
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(ctx: Context) -> Self {
+    pub fn new(wake: Wake) -> Self {
         let (job_tx, job_rx) = mpsc::channel::<(u64, Job, Arc<AtomicBool>)>();
         let (msg_tx, msg_rx) = mpsc::channel::<(u64, Msg)>();
         std::thread::Builder::new()
             .name("skipzone-solver".to_string())
-            .spawn(move || worker(&job_rx, &msg_tx, &ctx))
+            .spawn(move || worker(&job_rx, &msg_tx, &wake))
             .expect("spawn solver thread");
         Self {
             job_tx,
             msg_rx,
-            current_cancel: None,
-            epoch: 0,
-        }
-    }
-
-    /// Web build: no worker thread, because wasm32-unknown-unknown has none to
-    /// spawn. The channels and the epoch protocol are kept exactly as they are
-    /// natively - only *when* the job runs changes, and [`Self::dispatch`] runs
-    /// it inline. Everything downstream, including `drain`, is unaware.
-    #[must_use]
-    #[cfg(target_arch = "wasm32")]
-    pub fn new(ctx: Context) -> Self {
-        let (job_tx, _job_rx) = mpsc::channel::<(u64, Job, Arc<AtomicBool>)>();
-        let (msg_tx, msg_rx) = mpsc::channel::<(u64, Msg)>();
-        Self {
-            job_tx,
-            msg_rx,
-            msg_tx,
-            ctx,
-            pool: build_pool("coverage", coverage_pool_config()),
             current_cancel: None,
             epoch: 0,
         }
@@ -341,22 +327,7 @@ impl SolverService {
         }
         self.epoch += 1;
         let cancel = Arc::new(AtomicBool::new(false));
-        #[cfg(not(target_arch = "wasm32"))]
         let _ = self.job_tx.send((self.epoch, job, Arc::clone(&cancel)));
-        // Web build: run it here and now. This blocks the browser's main thread
-        // for the length of the job, so a long sweep or a coverage grid freezes
-        // the tab until it finishes and its progress lands in one go instead of
-        // streaming - the honest consequence of having no worker thread. CANCEL
-        // cannot interrupt a job that is already running for the same reason.
-        #[cfg(target_arch = "wasm32")]
-        run_job(
-            self.epoch,
-            job,
-            &self.pool,
-            &cancel,
-            &self.msg_tx,
-            &self.ctx,
-        );
         self.current_cancel = Some(cancel);
     }
 
@@ -383,34 +354,28 @@ impl SolverService {
     }
 }
 
-/// Run one job to completion, whatever thread we happen to be on.
-///
-/// Split out of [`worker`] so the web build, which has no worker thread, can
-/// call exactly the same code path from `dispatch`. On wasm both job kinds share
-/// one sequential pool, since the sweep/coverage thread-budget split that
-/// `sweep_pool_config` and `coverage_pool_config` express has nothing to divide.
+/// Run one job to completion on the worker thread.
 fn run_job(
     epoch: u64,
     job: Job,
     pool: &ComputePool,
     cancel: &AtomicBool,
     msg_tx: &Sender<(u64, Msg)>,
-    ctx: &Context,
+    wake: &Wake,
 ) {
     match job {
-        Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, ctx),
-        Job::Sweep(inputs) => run_sweep(epoch, &inputs, pool, cancel, msg_tx, ctx),
+        Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, wake),
+        Job::Sweep(inputs) => run_sweep(epoch, &inputs, pool, cancel, msg_tx, wake),
         Job::Coverage(inputs, config) => {
-            run_coverage(epoch, &inputs, config, pool, cancel, msg_tx, ctx);
+            run_coverage(epoch, &inputs, config, pool, cancel, msg_tx, wake);
         }
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn worker(
     job_rx: &Receiver<(u64, Job, Arc<AtomicBool>)>,
     msg_tx: &Sender<(u64, Msg)>,
-    ctx: &Context,
+    wake: &Wake,
 ) {
     // One pool per job kind for the worker's whole lifetime: sizing a rayon pool
     // costs a thread spawn per worker, so we pay it once and reuse it. The two
@@ -419,13 +384,12 @@ fn worker(
     let pool = build_pool("sweep", sweep_pool_config());
     let coverage_pool = build_pool("coverage", coverage_pool_config());
     while let Ok((epoch, job, cancel)) = job_rx.recv() {
-        // The pool a job gets is the only thing the worker decides; the job
-        // itself runs identically here and in the web build's inline path.
+        // The pool a job gets is the only thing the worker decides.
         let pool = match job {
             Job::Coverage(..) => &coverage_pool,
             Job::Main(_) | Job::Sweep(_) => &pool,
         };
-        run_job(epoch, job, pool, &cancel, msg_tx, ctx);
+        run_job(epoch, job, pool, &cancel, msg_tx, wake);
     }
 }
 
@@ -442,9 +406,6 @@ fn worker(
 /// tile fetcher and the UI thread both want CPU while it does. Reserving two
 /// cores keeps the interface responsive for the whole minute-plus it takes. The
 /// coverage grid is the opposite case and is sized accordingly.
-// Only the worker thread splits the thread budget between the two job kinds,
-// and the web build has no worker thread and no budget to split.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn sweep_pool_config() -> PoolConfig {
     let cores = available_cores();
     PoolConfig {
@@ -495,7 +456,7 @@ fn build_pool(label: &str, config: PoolConfig) -> ComputePool {
     })
 }
 
-fn run_main(epoch: u64, inputs: &Inputs, msg_tx: &Sender<(u64, Msg)>, ctx: &Context) {
+fn run_main(epoch: u64, inputs: &Inputs, msg_tx: &Sender<(u64, Msg)>, wake: &Wake) {
     let a = scenario::resolve(inputs);
     match scenario::build_models(inputs, &a) {
         Ok(models) => {
@@ -514,7 +475,7 @@ fn run_main(epoch: u64, inputs: &Inputs, msg_tx: &Sender<(u64, Msg)>, ctx: &Cont
             let _ = msg_tx.send((epoch, Msg::MainFailed(e)));
         }
     }
-    ctx.request_repaint();
+    wake();
 }
 
 /// Build the scenario models once, then run the sweep on the chosen execution
@@ -526,23 +487,23 @@ fn run_sweep(
     pool: &ComputePool,
     cancel: &AtomicBool,
     msg_tx: &Sender<(u64, Msg)>,
-    ctx: &Context,
+    wake: &Wake,
 ) {
     let a = scenario::resolve(inputs);
     let models = match scenario::build_models(inputs, &a) {
         Ok(m) => m,
         Err(e) => {
             let _ = msg_tx.send((epoch, Msg::SweepFailed(e)));
-            ctx.request_repaint();
+            wake();
             return;
         }
     };
     match pool.execution() {
         Execution::Parallel => {
-            run_sweep_parallel(epoch, inputs, &a, &models, pool, cancel, msg_tx, ctx);
+            run_sweep_parallel(epoch, inputs, &a, &models, pool, cancel, msg_tx, wake);
         }
         Execution::Sequential => {
-            run_sweep_sequential(epoch, inputs, &a, &models, cancel, msg_tx, ctx);
+            run_sweep_sequential(epoch, inputs, &a, &models, cancel, msg_tx, wake);
         }
     }
 }
@@ -594,7 +555,7 @@ fn run_sweep_parallel(
     pool: &ComputePool,
     cancel: &AtomicBool,
     msg_tx: &Sender<(u64, Msg)>,
-    ctx: &Context,
+    wake: &Wake,
 ) {
     let coarse = coarse_freqs();
     // Optimistic total for the bar: whole coarse grid plus one fine window.
@@ -605,7 +566,7 @@ fn run_sweep_parallel(
             total: total_estimate,
         },
     ));
-    ctx.request_repaint();
+    wake();
 
     // Shared, lock-free progress counter; the mpsc Sender is !Sync so a clone is
     // wrapped in a Mutex (progress is one message per solve, so contention is
@@ -631,7 +592,7 @@ fn run_sweep_parallel(
                             },
                         ));
                     }
-                    ctx.request_repaint();
+                    wake();
                 }
             });
         (opt_points.into_iter().flatten().collect(), timing)
@@ -664,7 +625,7 @@ fn run_sweep_parallel(
             best: best.map(|point| SweepBest { point }),
         },
     ));
-    ctx.request_repaint();
+    wake();
 }
 
 /// Single-threaded path: the original coarse-with-uphill-early-stop then fine
@@ -678,9 +639,9 @@ fn run_sweep_sequential(
     models: &Models,
     cancel: &AtomicBool,
     msg_tx: &Sender<(u64, Msg)>,
-    ctx: &Context,
+    wake: &Wake,
 ) {
-    let sweep_started = web_time::Instant::now();
+    let sweep_started = std::time::Instant::now();
     let mut per_item: Vec<Duration> = Vec::new();
 
     let coarse = coarse_freqs();
@@ -688,10 +649,10 @@ fn run_sweep_sequential(
     // progress message carries its own (possibly revised) total.
     let mut total = coarse.len() + fine_freqs(0.5 * (SWEEP_MIN_MHZ + SWEEP_MAX_MHZ)).len();
     let _ = msg_tx.send((epoch, Msg::SweepStart { total }));
-    ctx.request_repaint();
+    wake();
 
     let mut timed_solve = |f: f64| -> Option<SweepPoint> {
-        let started = web_time::Instant::now();
+        let started = std::time::Instant::now();
         let point = solve_point(f, inputs, a, models, cancel);
         if point.is_some() {
             per_item.push(started.elapsed());
@@ -719,7 +680,7 @@ fn run_sweep_sequential(
             worse_streak += 1;
         }
         let _ = msg_tx.send((epoch, Msg::SweepProgress { done, total, point }));
-        ctx.request_repaint();
+        wake();
         if worse_streak >= UPHILL_PATIENCE {
             break; // going uphill: no need to fill out the rest of the band
         }
@@ -734,7 +695,7 @@ fn run_sweep_sequential(
             done += 1;
             best = Some(best.map_or(point, |b| better(b, point)));
             let _ = msg_tx.send((epoch, Msg::SweepProgress { done, total, point }));
-            ctx.request_repaint();
+            wake();
         }
     }
 
@@ -751,7 +712,7 @@ fn run_sweep_sequential(
             best: best.map(|point| SweepBest { point }),
         },
     ));
-    ctx.request_repaint();
+    wake();
 }
 
 /// Area coverage: build the models once, then run the existing point-to-point
@@ -769,14 +730,14 @@ fn run_coverage(
     pool: &ComputePool,
     cancel: &AtomicBool,
     msg_tx: &Sender<(u64, Msg)>,
-    ctx: &Context,
+    wake: &Wake,
 ) {
     let a = scenario::resolve(inputs);
     let models = match scenario::build_models(inputs, &a) {
         Ok(m) => m,
         Err(e) => {
             let _ = msg_tx.send((epoch, Msg::CoverageFailed(e)));
-            ctx.request_repaint();
+            wake();
             return;
         }
     };
@@ -786,7 +747,7 @@ fn run_coverage(
     let total = points.len();
     let threads = pool.threads();
     let _ = msg_tx.send((epoch, Msg::CoverageStart { total, threads }));
-    ctx.request_repaint();
+    wake();
 
     let done = AtomicUsize::new(0);
     let prog = Mutex::new(msg_tx.clone());
@@ -817,7 +778,7 @@ fn run_coverage(
                         cell: Box::new(*cell),
                     },
                 ));
-                ctx.request_repaint();
+                wake();
             }
         },
     );
@@ -835,7 +796,7 @@ fn run_coverage(
     );
 
     let _ = msg_tx.send((epoch, Msg::CoverageDone { cancelled }));
-    ctx.request_repaint();
+    wake();
 }
 
 /// One-line timing summary combining the coarse and fine phases. This is the
@@ -991,13 +952,13 @@ mod tests {
         assert!(expected > 8, "need a grid worth cancelling, got {expected}");
 
         let pool = build_pool("coverage-test", coverage_pool_config());
-        let ctx = Context::default();
+        let wake = no_wake();
 
         // Run 1: to completion. One message per grid point, in the order they
         // finished, each carrying the pool's thread count.
         let (tx, rx) = mpsc::channel();
         let never = AtomicBool::new(false);
-        run_coverage(1, &inputs, config, &pool, &never, &tx, &ctx);
+        run_coverage(1, &inputs, config, &pool, &never, &tx, &wake);
         drop(tx);
         let msgs: Vec<Msg> = rx.into_iter().map(|(_, m)| m).collect();
 
@@ -1034,7 +995,7 @@ mod tests {
         // run still closes itself out, and it says it was cancelled.
         let (tx, rx) = mpsc::channel();
         let cancelled_flag = AtomicBool::new(true);
-        run_coverage(2, &inputs, config, &pool, &cancelled_flag, &tx, &ctx);
+        run_coverage(2, &inputs, config, &pool, &cancelled_flag, &tx, &wake);
         drop(tx);
         let msgs: Vec<Msg> = rx.into_iter().map(|(_, m)| m).collect();
         assert!(

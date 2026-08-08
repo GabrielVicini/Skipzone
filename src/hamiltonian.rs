@@ -3,10 +3,14 @@
 //! section numbers in comments refer to that file.
 //!
 //! State vector layout (SI, f64, fixed size - no allocation in the loop):
-//!   y[0] r [m]   y[1] theta [rad]   y[2] phi [rad]
-//!   y[3..6] m = (c/omega) k, physical components (r, theta, phi)
-//!   y[6] group path P' [m]   y[7] phase path P [m]
-//!   y[8] absorption A [Np]   y[9] arc length s [m]
+//!
+//! ```text
+//! y[0] r [m]              y[1] theta [rad]      y[2] phi [rad]
+//! y[3..6] m = (c/omega) k, physical components (r, theta, phi)
+//! y[6] group path P' [m]  y[7] phase path P [m]
+//! y[8] absorption A [Np]  y[9] arc length s [m]
+//! ```
+//!
 //! The independent variable sigma has units of metres (section 2).
 
 use crate::collision::CollisionFrequency;

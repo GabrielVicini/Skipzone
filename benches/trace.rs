@@ -8,7 +8,7 @@ use skipzone::density::{ChapmanLayer, density_at_critical_frequency};
 use skipzone::geo::SphericalPoint;
 use skipzone::mag::Igrf;
 use skipzone::magnetoionic::Mode;
-use skipzone::trace::{TraceConfig, Tracer, trace_fan};
+use skipzone::trace::{TraceConfig, Tracer};
 use skipzone::units::{Hertz, Meters, PerSecond, Radians};
 use std::hint::black_box;
 
@@ -55,6 +55,10 @@ fn bench_trace(c: &mut Criterion) {
         });
     });
 
+    // A fan of launches, traced one after another. The engine is deliberately
+    // single-threaded: parallelism is the app's `compute` layer, which fans
+    // whole solves out rather than individual rays. This measures the serial
+    // cost that layer is dividing up.
     let fan: Vec<_> = (0..64)
         .map(|i| {
             (
@@ -64,9 +68,12 @@ fn bench_trace(c: &mut Criterion) {
             )
         })
         .collect();
-    c.bench_function("fan_64_rays_rayon", |b| {
+    c.bench_function("fan_64_rays_serial", |b| {
         b.iter(|| {
-            let out = trace_fan(&tracer, black_box(&fan));
+            let out: Vec<_> = black_box(&fan)
+                .iter()
+                .map(|(p, elev, az)| tracer.trace(p, *elev, *az))
+                .collect();
             black_box(out.len())
         });
     });

@@ -445,26 +445,6 @@ where
     }
 }
 
-/// Trace a fan of launches in parallel, one rayon task per ray (the spec's
-/// parallelism seam: never inside the ODE loop). Models must be `Sync`;
-/// results keep launch order.
-#[must_use]
-pub fn trace_fan<D, B, C>(
-    tracer: &Tracer<'_, D, B, C>,
-    launches: &[(SphericalPoint, Radians, Radians)],
-) -> Vec<Result<TraceResult, TraceError>>
-where
-    D: ElectronDensity + Sync + ?Sized,
-    B: MagneticField + Sync + ?Sized,
-    C: CollisionFrequency + Sync + ?Sized,
-{
-    use rayon::prelude::*;
-    launches
-        .par_iter()
-        .map(|(p, elev, az)| tracer.trace(p, *elev, *az))
-        .collect()
-}
-
 #[derive(Clone, Copy)]
 enum RefineTarget {
     /// Root of r(sigma) - target.

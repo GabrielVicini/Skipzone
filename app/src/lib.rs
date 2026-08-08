@@ -37,36 +37,25 @@ pub mod clock;
 pub mod coastline;
 pub mod compute;
 /// A saved, reproducible WSPR corpus for calibration. Harness-only.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod corpus;
 pub mod coverage;
 /// Two-way fixed-effects calibration against measured WSPR spots. Harness-only.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod fit;
 pub mod fof2;
 pub mod grid;
-/// Outbound HTTP, used only by the validation harnesses. Not built for the web
-/// target, which has no business making these requests.
-#[cfg(not(target_arch = "wasm32"))]
+/// Outbound HTTP, used only by the validation harnesses.
 pub mod net;
 pub mod noise;
 pub mod scenario;
 pub mod solar;
 pub mod solve;
 /// Observed solar indices, fetched rather than assumed.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod spaceweather;
 pub mod sporadic_e;
 pub mod state;
 pub mod sweep;
 pub mod ui;
-/// Browser entry point. A proof of concept: Windows is the primary target and
-/// `main.rs` remains the default build. See the module docs for the two things
-/// the browser does differently, both forced by wasm32 having no threads.
-#[cfg(target_arch = "wasm32")]
-pub mod web;
 pub mod wspr;
 pub mod wspr_report;
 /// Live WSPR spot retrieval.
-#[cfg(not(target_arch = "wasm32"))]
 pub mod wsprlive;

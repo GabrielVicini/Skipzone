@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt, clippy, test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # eframe/winit need X11 and Wayland headers to build on Linux. The engine
+      # crate does not; this is the app's dependency tree, which is exactly why
+      # the two are separate workspace members.
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libxcb1-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libx11-dev libgl1-mesa-dev
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace --all-targets
+
+      # The engine must stay buildable with nothing but std and its two
+      # crates.io dependencies. Building it alone, out of the workspace's
+      # default members, is the only thing that actually proves that: a
+      # workspace build would pull the app's tree in and hide a leak.
+      - name: Engine builds standalone
+        run: cargo build --package skipzone --lib
+
+  msrv:
+    name: engine builds on the declared minimum (1.85)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # `rust-version = "1.85"` in the root Cargo.toml is a promise about the
+      # ENGINE crate, which is the portable, embeddable one. The app is not held
+      # to it: eframe, walkers and their trees move their own minimums, and
+      # chasing those would mean either pinning the GUI or weakening the claim
+      # that matters.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --package skipzone --lib --all-features
+
+  docs:
+    name: rustdoc
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Broken intra-doc links are how the derivation cross-references rot.
+      - name: Build engine docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --package skipzone --no-deps

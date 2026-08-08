@@ -1,3 +1,32 @@
+//! Near-vertical-incidence skywave (NVIS) probe: where does the high-angle
+//! part of the elevation fan actually land?
+//!
+//! # What it shows
+//!
+//! A field-free, collisionless Chapman layer (foF2 5 MHz, peak 280 km,
+//! scale 50 km) probed at 4 MHz, which is comfortably below the layer's
+//! critical frequency, so every launch angle here should reflect rather than
+//! penetrate. It prints range and apex height for launch elevations from 50 to
+//! 88 degrees.
+//!
+//! # What a good result looks like
+//!
+//! Every row reports `Landed`. Range falls monotonically as elevation rises,
+//! down to a few tens of kilometres at 88 degrees, and apex height climbs
+//! towards but never reaches the 280 km peak. A `Penetrated` row, a range that
+//! turns back upward, or an error near the vertical means the high-angle
+//! branch has broken - most likely the Spitze region, where the ray turns
+//! almost exactly at the vertical and the apex refinement has the least to
+//! bracket.
+//!
+//! This is a diagnostic, not a test: it has no assertions and nothing runs it
+//! automatically. The equivalent invariants that ARE enforced live in
+//! `tests/analytic_field_free.rs`.
+//!
+//! ```text
+//! cargo run --release --example nvis_probe
+//! ```
+
 use skipzone::collision::ZeroCollisions;
 use skipzone::density::{ChapmanLayer, density_at_critical_frequency};
 use skipzone::geo::{SphericalPoint, central_angle};
