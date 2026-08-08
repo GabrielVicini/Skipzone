@@ -17,10 +17,7 @@
 //! accuracy of the ionospheric climatology it drives. The year exists so the
 //! operator sees a real date.
 
-// `std::time::SystemTime::now` panics on wasm32-unknown-unknown ("time not
-// implemented on this platform"); `web_time` reads the browser clock there and
-// re-exports std everywhere else, so the native behaviour is unchanged.
-use web_time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Days in each month of a non-leap year, indexed by `month - 1`.
 const MONTH_LENGTHS: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];

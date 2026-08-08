@@ -153,7 +153,7 @@ fn classify_deterministic(apex_alt_km: f64) -> LayerMode {
 }
 
 pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome {
-    let started = web_time::Instant::now();
+    let started = std::time::Instant::now();
     let tx = ground_point(inputs.tx_lat, inputs.tx_lon);
     let rx = ground_point(inputs.rx_lat, inputs.rx_lon);
     let total_arc = central_angle(&tx, &rx);
@@ -326,8 +326,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                     // first and then run across the pool, and the results are folded
                     // back IN ORDER, so the solution list and the error list come out
                     // the same whatever order the threads finish in. The parallelism
-                    // seam stays outside the ODE loop, as the engine's own `trace_fan`
-                    // does.
+                    // seam stays outside the ODE loop, and outside the engine
+                    // entirely: the engine traces one ray at a time.
                     let mut work = Vec::new();
                     for hops in 1..=inputs.max_hops {
                         // A hop count whose per-hop arc is over the horizon for every

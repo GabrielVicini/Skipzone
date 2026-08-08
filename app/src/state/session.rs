@@ -190,7 +190,9 @@ impl Session {
             coverage: CoverageResults::default(),
             busy: Busy::Idle,
             error: None,
-            solver: SolverService::new(ctx),
+            // The computation layer knows nothing about egui; all it needs from
+            // the view is a way to say "redraw, there is something new".
+            solver: SolverService::new(std::sync::Arc::new(move || ctx.request_repaint())),
         }
     }
 

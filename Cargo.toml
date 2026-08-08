@@ -12,9 +12,11 @@ edition = "2024"
 rust-version = "1.85"
 description = "3D ionospheric HF ray tracing: Haselgrove equations with full Appleton-Hartree magnetoionic theory"
 
+# The engine is single-threaded by design. It has no parallelism seam and no
+# thread-pool dependency; batching independent solves across cores is the app's
+# job, in `app/src/compute.rs`.
 [dependencies]
 num-complex = "0.4"
-rayon = "1"
 thiserror = "2"
 
 [dev-dependencies]

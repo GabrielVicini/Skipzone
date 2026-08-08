@@ -120,11 +120,25 @@ impl Err2 {
 /// calibrator: a median from a handful of points is that handful's own noise.
 const MIN_QUOTABLE: usize = 30;
 
+/// Default locations of the three inputs, all overridable so the tool does not
+/// silently depend on being run from the repository root.
+const DEFAULT_OBS: &str = "corpus/ionosonde.tsv";
+const DEFAULT_SSN: &str = "corpus/ssn_daily.tsv";
+const DEFAULT_FIT: &str = "corpus/fit.tsv";
+
+/// Value of `--name=VALUE`, if given.
+fn flag(name: &str) -> Option<String> {
+    let prefix = format!("--{name}=");
+    std::env::args().find_map(|a| a.strip_prefix(&prefix).map(str::to_string))
+}
+
 fn main() -> ExitCode {
     let path = std::env::args()
         .skip(1)
         .find(|a| !a.starts_with("--"))
-        .unwrap_or_else(|| "corpus/ionosonde.tsv".to_string());
+        .unwrap_or_else(|| DEFAULT_OBS.to_string());
+    let ssn_path = flag("ssn").unwrap_or_else(|| DEFAULT_SSN.to_string());
+    let fit_path = flag("fit").unwrap_or_else(|| DEFAULT_FIT.to_string());
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) => {
@@ -204,8 +218,8 @@ fn main() -> ExitCode {
 
     // The corpus's own SSN, so the comparison uses the number the model would
     // have been driven with on those days rather than a guess.
-    let ssn_table = ssn_daily();
-    let fallback = corpus_ssn();
+    let ssn_table = ssn_daily(&ssn_path);
+    let fallback = corpus_ssn(&fit_path);
     for o in &mut obs {
         o.ssn = ssn_table.get(&o.date).copied().unwrap_or(fallback);
     }
@@ -580,15 +594,26 @@ fn propose(obs: &[Obs], quiet: f64, big_x: f64) {
     }
 }
 
-/// Daily sunspot number by date, from `corpus/ssn_daily.tsv` (SILSO).
+/// Daily sunspot number by date, from the SILSO daily series (`--ssn=PATH`).
 ///
 /// The seasonal windows sit months apart on the solar cycle. Driving them all at
 /// one SSN would charge the model for that cycle and call the difference model
 /// error, which is the same confound as fitting a diurnal shape in one season.
-fn ssn_daily() -> BTreeMap<(i32, u32, u32), f64> {
+///
+/// A missing file is survivable - every observation falls back to the corpus
+/// median - but it changes what the run measures, so it is reported rather than
+/// swallowed.
+fn ssn_daily(path: &str) -> BTreeMap<(i32, u32, u32), f64> {
     let mut out = BTreeMap::new();
-    let Ok(text) = std::fs::read_to_string("corpus/ssn_daily.tsv") else {
-        return out;
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!(
+                "warning: cannot read daily SSN from {path}: {e}
+                 every observation will use the corpus median instead;                  pass --ssn=PATH to point at the SILSO series."
+            );
+            return out;
+        }
     };
     for line in text.lines() {
         if line.starts_with('#') {
@@ -612,9 +637,21 @@ fn ssn_daily() -> BTreeMap<(i32, u32, u32), f64> {
 
 /// Median SSN over the WSPR corpus, used only for dates SILSO has not published
 /// a daily value for yet - its series lags real time by about a month.
-fn corpus_ssn() -> f64 {
-    let Ok(text) = std::fs::read_to_string("corpus/fit.tsv") else {
-        return 90.0;
+///
+/// The 90.0 fallback is a mid-cycle guess and nothing more. If it is being used
+/// the run says so, because an SSN nobody chose is not a detail.
+const SSN_FALLBACK: f64 = 90.0;
+
+fn corpus_ssn(path: &str) -> f64 {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!(
+                "warning: cannot read the WSPR corpus from {path}: {e}
+                 falling back to SSN {SSN_FALLBACK} for undated observations;                  pass --fit=PATH to point at the corpus."
+            );
+            return SSN_FALLBACK;
+        }
     };
     let mut v: Vec<f64> = text
         .lines()
@@ -626,7 +663,8 @@ fn corpus_ssn() -> f64 {
         })
         .collect();
     if v.is_empty() {
-        return 90.0;
+        eprintln!("warning: {path} carries no SSN column; falling back to {SSN_FALLBACK}.");
+        return SSN_FALLBACK;
     }
     v.sort_by(f64::total_cmp);
     v[v.len() / 2]
