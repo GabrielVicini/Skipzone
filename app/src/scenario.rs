@@ -88,6 +88,33 @@ pub const D_REGION_SCALE_HEIGHT_KM: f64 = 6.0;
 /// 14 MHz over a midnight path.
 pub const D_REGION_NIGHT_FLOOR_FRACTION: f64 = 0.10;
 
+/// How much of the photochemical peak RISE the D-region profile takes, 0..1.
+/// ANCHOR - and the one that sets the model's solar-zenith absorption law.
+///
+/// A textbook alpha-Chapman layer thins to `Nm Ch^{-1/2}` AND translates its
+/// whole profile upward by `H ln Ch` as the sun sets. Because the collision
+/// frequency falls on its own scale height, that translation costs absorption a
+/// second factor, and the two together give
+///
+/// ```text
+/// A(chi) ~ cos^n chi,   n = 1/2 + f H_D / H_nu
+/// ```
+///
+/// At `f = 1` and the anchors above that is `n = 1.39`. Riometer and A1
+/// absorption measurements report `n ~ 0.75`, and no setting of the two scale
+/// heights inside their calibration bounds reaches it - the box floors at 0.944,
+/// and the functional form itself floors at 0.5. So the exponent is a SHAPE
+/// error, not a level error, and `f` is the only anchor that can address it.
+/// `bin/zenith_probe` measures every line of that.
+///
+/// Kept at 1.0, which is the textbook layer and reproduces every earlier run
+/// bit-for-bit. It is deliberately NOT set to the value that matches the
+/// measured exponent: that value has not yet been fitted against the corpus,
+/// and moving a shape anchor on the strength of one literature number would be
+/// exactly the kind of quiet recalibration this project refuses elsewhere.
+/// See `wiki/Ionosphere-Model.md`.
+pub const D_REGION_RISE_FRACTION: f64 = 1.0;
+
 // --- Electron-neutral collision frequency --------------------------------
 //
 // nu_e tracks NEUTRAL density, so it is essentially a property of the neutral
@@ -590,7 +617,8 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
         solar.declination_deg,
         inputs.utc_hours,
         ion.d_night_floor_fraction.value,
-    );
+    )
+    .with_rise_fraction(ion.d_rise_fraction.value);
     let d_region_peak_ne = d_disp.realised_peak_ne(mid_colat, mid_lon_rad);
     // "Active" now means "producing at the midpoint", tied to the SAME
     // sun-above-horizon test as is_day(), so the panel can no longer disagree
@@ -852,7 +880,8 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
         a.solar.declination_deg,
         inputs.utc_hours,
         ion.d_night_floor_fraction.value,
-    );
+    )
+    .with_rise_fraction(ion.d_rise_fraction.value);
 
     // E region: same treatment as D, one region up. This is what gives short
     // paths somewhere to reflect from in daylight when F2 has no solution at
@@ -906,14 +935,17 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
                 EARTH_RADIUS_M + ion.e_peak_alt_km.value * 1e3,
                 ion.e_scale_height_km.value * 1e3,
             )),
-            Box::new(SolarChapmanLayer::d_region(
-                ion.d_peak_ne_overhead.value,
-                EARTH_RADIUS_M + ion.d_peak_alt_km.value * 1e3,
-                ion.d_scale_height_km.value * 1e3,
-                a.solar.declination_deg,
-                inputs.utc_hours,
-                ion.d_night_floor_fraction.value,
-            )),
+            Box::new(
+                SolarChapmanLayer::d_region(
+                    ion.d_peak_ne_overhead.value,
+                    EARTH_RADIUS_M + ion.d_peak_alt_km.value * 1e3,
+                    ion.d_scale_height_km.value * 1e3,
+                    a.solar.declination_deg,
+                    inputs.utc_hours,
+                    ion.d_night_floor_fraction.value,
+                )
+                .with_rise_fraction(ion.d_rise_fraction.value),
+            ),
             Box::new(es),
         ];
         Some(MultiLayer::new(layers))

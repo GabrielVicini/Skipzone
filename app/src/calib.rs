@@ -114,6 +114,22 @@ pub struct IonosphereAnchors {
     /// peak. See [`crate::chapman::SolarChapmanLayer::with_night_floor`] for why
     /// an alpha-Chapman layer cannot derive this and must be given it.
     pub d_night_floor_fraction: Bounded,
+    /// How much of the photochemical peak RISE the D-region profile takes,
+    /// 0..1. See [`crate::chapman::SolarChapmanLayer::with_rise_fraction`].
+    ///
+    /// This is the only anchor here that changes the model's SHAPE rather than
+    /// one of its levels, and it exists because the shape was measured wrong.
+    /// The layer imposes `A ~ cos^n chi` with `n = 1/2 + f H_D/H_nu`; at the
+    /// shipping `f = 1` that is 1.39 against a measured `n ~ 0.75`, and no
+    /// setting of the two scale heights inside their own bounds reaches 0.75.
+    /// `bin/zenith_probe` measures the whole table.
+    ///
+    /// The full range 0..1 is allowed because BOTH endpoints are derived rather
+    /// than arbitrary - 1 is the textbook photochemical layer, 0 is the
+    /// fixed-height limit the lower D region actually sits closer to - so
+    /// neither end is a bound whose being reached would be a finding. What IS a
+    /// finding is the fitted value itself.
+    pub d_rise_fraction: Bounded,
     /// Electron-neutral collision frequency at `nu_ref_alt_km`, s^-1.
     pub nu_ref_per_s: Bounded,
     /// Reference altitude for `nu_ref_per_s`, km.
@@ -142,6 +158,7 @@ impl Default for IonosphereAnchors {
             d_peak_alt_km: Bounded::new(s::D_REGION_PEAK_ALT_KM, 80.0, 90.0),
             d_scale_height_km: Bounded::new(s::D_REGION_SCALE_HEIGHT_KM, 4.0, 10.0),
             d_night_floor_fraction: Bounded::new(s::D_REGION_NIGHT_FLOOR_FRACTION, 0.0, 0.25),
+            d_rise_fraction: Bounded::new(s::D_REGION_RISE_FRACTION, 0.0, 1.0),
             nu_ref_per_s: Bounded::new(s::NU_REF_PER_S, 1.0e6, 2.0e7),
             nu_ref_alt_km: Bounded::new(s::NU_REF_ALT_KM, 65.0, 80.0),
             nu_scale_height_km: Bounded::new(s::NU_SCALE_HEIGHT_KM, 5.0, 9.0),
@@ -300,6 +317,11 @@ impl Anchors {
                 "D night floor [fraction]",
                 |a| a.d_night_floor_fraction,
                 |a, v| a.d_night_floor_fraction = v,
+            ),
+            (
+                "D rise fraction [0..1]",
+                |a| a.d_rise_fraction,
+                |a, v| a.d_rise_fraction = v,
             ),
             (
                 "nu at ref alt [1/s]",
@@ -480,11 +502,42 @@ mod tests {
 
     /// Every default value must sit INSIDE its own stated range. A prior that
     /// starts on a bound cannot be reported as "hit the bound" meaningfully.
+    ///
+    /// # The one exemption, and why it is not a loophole
+    ///
+    /// `d_rise_fraction` starts ON its upper bound, because for that anchor the
+    /// bound and the prior are the same object: 1.0 is both the physical maximum
+    /// (a profile cannot take more than all of its own photochemical rise) and
+    /// the incumbent model (the textbook alpha-Chapman layer every earlier run
+    /// used). They coincide by construction, not by an oversight in choosing the
+    /// range.
+    ///
+    /// The rationale above still holds for it in the direction that matters.
+    /// "Hit the upper bound" is not a finding here - it is the null result, and
+    /// means the corpus found no reason to leave the textbook layer. The
+    /// informative outcome is a fitted value strictly inside, and that direction
+    /// is fully open. The exemption is by NAME so that any other anchor drifting
+    /// onto a bound still fails this test.
     #[test]
     fn every_prior_sits_inside_its_range() {
+        /// The prior legitimately equals a bound here; see the doc comment.
+        const AT_BOUND_BY_CONSTRUCTION: [&str; 1] = ["D rise fraction [0..1]"];
+
         let a = Anchors::default();
         for (name, get, _) in Anchors::ionosphere_fields() {
             let b = get(&a.ionosphere);
+            if AT_BOUND_BY_CONSTRUCTION.contains(&name) {
+                // Still has to be within the range, and still has to have a
+                // real interval to move in - only the strictness is relaxed.
+                assert!(
+                    b.value >= b.min && b.value <= b.max && b.min < b.max,
+                    "{name}: exempt prior {} is still outside [{}, {}]",
+                    b.value,
+                    b.min,
+                    b.max
+                );
+                continue;
+            }
             assert!(
                 b.value > b.min && b.value < b.max,
                 "{name}: prior {} is not strictly inside [{}, {}]",

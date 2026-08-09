@@ -277,6 +277,13 @@ pub struct SolarChapmanLayer {
     big_x: f64,
     /// Residual peak density that survives the night, m^-3. See [`Self::floor_at`].
     night_floor_nm: f64,
+    /// How much of the photochemical peak RISE the profile actually takes.
+    /// See [`Self::with_rise_fraction`]. 1.0 is the textbook layer.
+    rise_fraction: f64,
+    /// `rise_fraction == 1.0`, hoisted out of [`ElectronDensity::sample`]. The
+    /// full-rise arithmetic is kept as its own branch so it stays BIT-identical,
+    /// and this is a whole-solve constant, so the branch predicts perfectly.
+    full_rise: bool,
 }
 
 impl SolarChapmanLayer {
@@ -296,7 +303,78 @@ impl SolarChapmanLayer {
             scale_height,
             big_x: r_peak / scale_height,
             night_floor_nm: 0.0,
+            rise_fraction: 1.0,
+            full_rise: true,
         }
+    }
+
+    /// This layer with only `f` of the photochemical peak rise.
+    ///
+    /// # The defect this exists to address
+    ///
+    /// A textbook alpha-Chapman layer does two things as the sun sets. It thins,
+    /// to `Nm Ch^{-1/2}`, and the ENTIRE profile - wings included - translates
+    /// upward by `H ln Ch`. Both are consequences of photochemical equilibrium,
+    /// and for the ionisation peak both are right.
+    ///
+    /// For ABSORPTION the translation is the dominant term and it is wrong. The
+    /// collision frequency falls on its own scale height `H_nu`, so a profile
+    /// that rises by `H ln Ch` loses a further `Ch^{-H/H_nu}` of the `Ne nu`
+    /// product on top of the `Ch^{-1/2}` thinning. That makes the absorption
+    /// zenith law
+    ///
+    /// ```text
+    /// A(chi) ~ cos^n chi,   n = 1/2 + f H / H_nu
+    /// ```
+    ///
+    /// which at `f = 1` and the shipping anchors is `n = 1.39`, against the
+    /// `n ~ 0.75` that riometer and A1 absorption measurements report. No
+    /// setting of the two scale heights inside their calibration bounds reaches
+    /// 0.75, and with `H_nu -> infinity` the law still floors at `n = 1/2`, so
+    /// the exponent is not something the existing anchors can chase. See
+    /// `bin/zenith_probe`, which measures every step of that.
+    ///
+    /// # Why a fraction is the honest knob
+    ///
+    /// The translation assumes the whole layer is in photochemical equilibrium
+    /// with a recombination time short against the sun's motion. Near the peak
+    /// that holds. In the LOWER D region - 60 to 75 km, which is where `nu` is
+    /// largest and where the absorption kernel actually lives - it does not:
+    /// recombination there is fast enough that `Ne` tracks production at roughly
+    /// FIXED height, which is the `n = 1/2` law with no rise at all.
+    ///
+    /// So the real layer sits between the two limits, and `f` says where. It is
+    /// a shape parameter with two derived endpoints rather than a fudge factor:
+    ///
+    /// * `f = 1` - the textbook layer, bit-identical to this type before the
+    ///   parameter existed, and the default from [`Self::new`];
+    /// * `f = 0` - amplitude law only, `Nm Ch^{-1/2}` at fixed height, `n = 1/2`.
+    ///
+    /// # The algebra
+    ///
+    /// Writing `u = z - f ln Ch`, the layer is
+    ///
+    /// ```text
+    /// Ne = Nm Ch^{-1/2} exp( 1/2 (1 - u - e^{-u}) )
+    /// ```
+    ///
+    /// At `f = 1` the `Ch^{-1/2}` prefactor and the `+ln Ch` inside `u` cancel
+    /// exactly and this is the textbook form back again, which is why the
+    /// endpoint is not merely close but identical.
+    ///
+    /// # Panics
+    /// If `f` is not finite and in `0..=1`. A rise fraction outside that has no
+    /// derived meaning, and silently clamping one would hide a caller's error in
+    /// the one parameter this model is most sensitive to.
+    #[must_use]
+    pub fn with_rise_fraction(mut self, f: f64) -> Self {
+        assert!(
+            f.is_finite() && (0.0..=1.0).contains(&f),
+            "rise fraction must be in 0..=1, got {f}"
+        );
+        self.rise_fraction = f;
+        self.full_rise = f == 1.0;
+        self
     }
 
     /// This layer with a residual peak density [m^-3] that survives the night.
@@ -411,14 +489,89 @@ impl SolarChapmanLayer {
         }
     }
 
-    /// Realised peak altitude above `r_peak`, `H ln Ch` (m). Display only.
+    /// Realised peak altitude above `r_peak`, `f H ln Ch` (m). Display only.
+    ///
+    /// Carries the rise fraction, so a layer built with `f < 1` reports the
+    /// height it actually peaks at rather than the textbook one.
     #[must_use]
     pub fn realised_peak_rise(&self, colat: f64, lon: f64) -> f64 {
         let (ch, _) = self.slant_at(self.zenith_angle(colat, lon));
         if ch.is_finite() {
-            self.scale_height * ch.ln()
+            self.rise_fraction * self.scale_height * ch.ln()
         } else {
             f64::INFINITY
+        }
+    }
+}
+
+impl SolarChapmanLayer {
+    /// The `rise_fraction < 1` branch of [`ElectronDensity::sample`], split out
+    /// so the default full-rise path keeps its original arithmetic untouched.
+    ///
+    /// With `L = ln Ch` and `u = z - f L`:
+    ///
+    /// ```text
+    /// Ne        = Nm Ch^{-1/2} exp(F),      F = 1/2 (1 - u - e^{-u})
+    /// dNe/dr    = Ne (1/2)(e^{-u} - 1) / H
+    /// dNe/dchi  = Ne (Ch'/Ch) (-1/2) [ 1 + f (e^{-u} - 1) ]
+    /// ```
+    ///
+    /// The `dNe/dchi` form is the product rule over both places `Ch` appears -
+    /// the `Ch^{-1/2}` prefactor and the shift inside `u` - and at `f = 1` it
+    /// collapses to the full-rise expression `Ne (-1/2 e^{-z}) Ch'`, which
+    /// `partial_rise_reduces_to_the_textbook_layer_at_f_one` checks.
+    fn sample_partial_rise(
+        &self,
+        p: &SphericalPoint,
+        peak: &PeakSample,
+        z: f64,
+        ch: f64,
+        dch: f64,
+        chi_partials: Option<(f64, f64)>,
+    ) -> DensitySample {
+        let ln_ch = ch.ln();
+        let u = z - self.rise_fraction * ln_ch;
+        let emu = (-u).exp();
+        let big_f = 0.5 * (1.0 - u - emu);
+        // Ch^{-1/2}: a sqrt rather than exp(-L/2), which is one instruction.
+        let thinning = 1.0 / ch.sqrt();
+        if big_f < -700.0 || !thinning.is_finite() {
+            let (ne, dne_dr) = self.floor_at(p.r.get());
+            return DensitySample {
+                ne,
+                d_ne: [dne_dr, 0.0, 0.0],
+            };
+        }
+        // Ne = Nm * shape, so the peak's own gradient enters as d_nm * shape,
+        // exactly as `ef` does on the full-rise path.
+        let shape = thinning * big_f.exp();
+        let ne = peak.nm * shape;
+
+        let (floor_ne, floor_dr) = self.floor_at(p.r.get());
+        if floor_ne > ne {
+            return DensitySample {
+                ne: floor_ne,
+                d_ne: [floor_dr, 0.0, 0.0],
+            };
+        }
+
+        let dne_dr = ne * 0.5 * (emu - 1.0) / self.scale_height;
+
+        let (mut dne_dtheta, mut dne_dphi) = match chi_partials {
+            None => (0.0, 0.0),
+            Some((dchi_dtheta, dchi_dphi)) => {
+                let dne_dchi = ne * (dch / ch) * (-0.5) * (1.0 + self.rise_fraction * (emu - 1.0));
+                (dne_dchi * dchi_dtheta, dne_dchi * dchi_dphi)
+            }
+        };
+        if peak.d_nm[0] != 0.0 || peak.d_nm[1] != 0.0 {
+            dne_dtheta += peak.d_nm[0] * shape;
+            dne_dphi += peak.d_nm[1] * shape;
+        }
+
+        DensitySample {
+            ne,
+            d_ne: [dne_dr, dne_dtheta, dne_dphi],
         }
     }
 }
@@ -467,6 +620,15 @@ impl ElectronDensity for SolarChapmanLayer {
 
         let peak = self.source.peak(theta, phi);
         let z = (p.r.get() - self.r_peak) / self.scale_height;
+        // `emz` and `f` below are the FULL-RISE quantities; the partial-rise
+        // branch substitutes u = z - rise_fraction ln Ch for z and carries a
+        // Ch^{-1/2} prefactor. At f = 1 the two are algebraically the same
+        // expression, so the full-rise arithmetic is kept verbatim rather than
+        // specialised out of the general one - that is what keeps the default
+        // layer bit-identical.
+        if !self.full_rise {
+            return self.sample_partial_rise(p, &peak, z, ch, dch, chi_partials);
+        }
         let emz = (-z).exp();
         let f = 0.5 * (1.0 - z - ch * emz);
         if f < -700.0 {
@@ -587,6 +749,263 @@ mod tests {
 
     fn point(r: f64, colat: f64, lon: f64) -> SphericalPoint {
         SphericalPoint::new(Meters::new(r), Radians::new(colat), Radians::new(lon))
+    }
+
+    /// The partial-rise branch must reduce to the textbook one at `f = 1`, and
+    /// not merely to within a tolerance - the two are the same expression.
+    ///
+    /// `with_rise_fraction(1.0)` sets `full_rise`, so it would take the fast
+    /// branch and test nothing. The flag is therefore forced off here to run the
+    /// GENERAL arithmetic at `f = 1` against the branch it has to agree with.
+    /// Bit-identity is not expected (the operation order differs); agreement to
+    /// a few ulps is.
+    #[test]
+    fn partial_rise_reduces_to_the_textbook_layer_at_f_one() {
+        const R0: f64 = 6_371_000.0;
+        let textbook = SolarChapmanLayer::d_region(1.0e9, R0 + 85e3, 6e3, 15.0, 12.0, 0.10);
+        let mut general = SolarChapmanLayer::d_region(1.0e9, R0 + 85e3, 6e3, 15.0, 12.0, 0.10)
+            .with_rise_fraction(1.0);
+        general.full_rise = false; // force the general path at f = 1
+
+        let mut worst = 0.0_f64;
+        for ti in 0..=16 {
+            let theta = PI * f64::from(ti) / 16.0;
+            for pi_ in 0..=16 {
+                let phi = -PI + 2.0 * PI * f64::from(pi_) / 16.0;
+                for ri in 0..=16 {
+                    let r = R0 + 55e3 + (140e3 - 55e3) * f64::from(ri) / 16.0;
+                    let want = textbook.sample(&point(r, theta, phi));
+                    let got = general.sample(&point(r, theta, phi));
+                    let rel = |a: f64, b: f64, scale: f64| {
+                        if a == b {
+                            0.0
+                        } else {
+                            (a - b).abs() / scale.abs().max(1e-300)
+                        }
+                    };
+                    worst = worst.max(rel(got.ne, want.ne, want.ne));
+                    for k in 0..3 {
+                        worst = worst.max(rel(
+                            got.d_ne[k],
+                            want.d_ne[k],
+                            want.d_ne[k].abs().max(1e-6 * want.ne),
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            worst < 1e-12,
+            "partial-rise at f=1 disagrees with the textbook layer by {worst:e}"
+        );
+    }
+
+    /// The partial-rise branch's ANALYTIC gradients must match central
+    /// differences on both slant branches and with a varying peak source.
+    ///
+    /// This is the test that matters most for the new branch: a density that
+    /// varies without a matching gradient does not produce a wrong number, it
+    /// drives Hamiltonian drift along the ray, which shows up far away from
+    /// here as a solver that quietly stops conserving `H = 0`.
+    #[test]
+    fn partial_rise_partials_match_fd() {
+        const R0: f64 = 6_371_000.0;
+        for f in [0.0_f64, 0.15, 0.28, 0.5, 0.9] {
+            for source_varies in [false, true] {
+                let layer = if source_varies {
+                    SolarChapmanLayer::new(
+                        Box::new(WavySource { n0: 1.0e9, a: 0.45 }),
+                        SlantFactor::solar(15.0, 12.0),
+                        R0 + 85e3,
+                        6e3,
+                    )
+                    .with_rise_fraction(f)
+                } else {
+                    SolarChapmanLayer::d_region(1.0e9, R0 + 85e3, 6e3, 15.0, 12.0, 0.0)
+                        .with_rise_fraction(f)
+                };
+                for (r_off, colat, lon) in [
+                    (70e3, 0.9, 0.3),
+                    (85e3, 1.2, 0.0),
+                    (95e3, 1.9, -1.1),
+                    (110e3, 0.6, -2.8),
+                ] {
+                    let r = R0 + r_off;
+                    let s = layer.sample(&point(r, colat, lon));
+                    if s.ne <= 0.0 {
+                        continue;
+                    }
+                    let h = 1e-6;
+                    let fd_theta = (layer.sample(&point(r, colat + h, lon)).ne
+                        - layer.sample(&point(r, colat - h, lon)).ne)
+                        / (2.0 * h);
+                    let fd_phi = (layer.sample(&point(r, colat, lon + h)).ne
+                        - layer.sample(&point(r, colat, lon - h)).ne)
+                        / (2.0 * h);
+                    let fd_r = (layer.sample(&point(r + 0.5, colat, lon)).ne
+                        - layer.sample(&point(r - 0.5, colat, lon)).ne)
+                        / 1.0;
+                    let ok = |an: f64, fd: f64| (an - fd).abs() < 1e-5 * fd.abs().max(1e-3 * s.ne);
+                    assert!(ok(s.d_ne[0], fd_r), "f={f}: dr {} vs {fd_r}", s.d_ne[0]);
+                    assert!(
+                        ok(s.d_ne[1], fd_theta),
+                        "f={f}: dtheta {} vs {fd_theta}",
+                        s.d_ne[1]
+                    );
+                    assert!(
+                        ok(s.d_ne[2], fd_phi),
+                        "f={f}: dphi {} vs {fd_phi}",
+                        s.d_ne[2]
+                    );
+                }
+            }
+        }
+    }
+
+    /// The solar-zenith law this layer imposes on absorption is DERIVED, not
+    /// free: `A ~ cos^n chi` with `n = 1/2 + H_layer/H_nu`.
+    ///
+    /// Two independent contributions, and neither is a choice:
+    ///
+    ///   * the realised peak is `Nm Ch^{-1/2}`, worth exactly 1/2;
+    ///   * the whole profile TRANSLATES upward by `H ln Ch`, and the collision
+    ///     frequency falls on `H_nu`, so the layer loses a further
+    ///     `Ch^{-H/H_nu}` of the `Ne nu` product.
+    ///
+    /// This is pinned because it is the single most load-bearing fact about
+    /// what a calibration of the D region can and cannot reach. `bin/mode_audit`
+    /// measures the same exponent end-to-end through a traced ray and gets
+    /// 1.3-1.5 against the shipping anchors; `bin/zenith_probe` measures it on a
+    /// bare vertical column and gets 1.386 where this formula predicts 1.396. If
+    /// this test ever fails, the relationship between the two scale heights and
+    /// the zenith law has changed, and every conclusion drawn from either tool
+    /// has to be re-derived.
+    #[test]
+    fn the_zenith_exponent_is_one_half_plus_the_scale_height_ratio() {
+        use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
+        use skipzone::units::PerSecond;
+
+        const R0: f64 = 6_371_000.0;
+        let omega = 2.0 * PI * 7.04e6;
+
+        // Vertical integral of the non-deviative absorption kernel, Ne nu/omega^2,
+        // in arbitrary units - constants independent of chi cancel in the ratio.
+        let column = |h_layer_km: f64, h_nu_km: f64, rise: f64, chi_deg: f64| -> f64 {
+            let layer = SolarChapmanLayer::d_region(
+                1.0e9,
+                R0 + 85e3,
+                h_layer_km * 1e3,
+                0.0,  // declination
+                12.0, // UTC: subsolar at colat 90 deg, lon 0
+                0.0,  // no night floor - it is a chi-INDEPENDENT additive term
+                      // and would flatten the very law being measured
+            )
+            .with_rise_fraction(rise);
+            let coll = ExponentialCollisions::new(
+                PerSecond::new(5.0e6),
+                Meters::new(R0 + 70e3),
+                Meters::new(h_nu_km * 1e3),
+            )
+            .expect("valid collision profile");
+            // Along lon = 0 with decl = 0, cos chi = sin(colat), so colat = 90 - chi.
+            let colat = (90.0 - chi_deg).to_radians();
+            let (lo, hi, step) = (40e3, 140e3, 25.0);
+            let n = ((hi - lo) / step) as usize;
+            (0..=n)
+                .map(|i| {
+                    let p = point(R0 + lo + step * i as f64, colat, 0.0);
+                    let nu = coll.sample(&p).nu;
+                    let w = if i == 0 || i == n { 0.5 } else { 1.0 };
+                    w * layer.sample(&p).ne * nu / (omega * omega + nu * nu) * step
+                })
+                .sum()
+        };
+
+        // Least-squares slope of log A on log cos chi, fitted below 70 deg where
+        // Ch still tracks sec chi (past that it is the grazing correction being
+        // measured, not the law).
+        let exponent = |h_layer_km: f64, h_nu_km: f64, rise: f64| -> f64 {
+            let pts: Vec<(f64, f64)> = [0.0_f64, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0]
+                .iter()
+                .map(|&c| {
+                    (
+                        c.to_radians().cos().ln(),
+                        column(h_layer_km, h_nu_km, rise, c).ln(),
+                    )
+                })
+                .collect();
+            let n = pts.len() as f64;
+            let mx = pts.iter().map(|p| p.0).sum::<f64>() / n;
+            let my = pts.iter().map(|p| p.1).sum::<f64>() / n;
+            let num: f64 = pts.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
+            let den: f64 = pts.iter().map(|p| (p.0 - mx).powi(2)).sum();
+            num / den
+        };
+
+        // Across the whole box `calib.rs` allows both scale heights to move in.
+        for h_layer in [4.0_f64, 6.0, 8.0] {
+            for h_nu in [5.0_f64, 6.7, 9.0] {
+                let got = exponent(h_layer, h_nu, 1.0);
+                let want = 0.5 + h_layer / h_nu;
+                assert!(
+                    (got - want).abs() < 0.03,
+                    "H={h_layer} H_nu={h_nu}: measured n={got:.4}, derived {want:.4}"
+                );
+            }
+        }
+
+        // And across the rise fraction, which is the general law the above is
+        // the f = 1 slice of. This is the one anchor that reaches the exponent,
+        // so the relationship between it and `n` has to stay exactly this.
+        for h_layer in [4.0_f64, 6.0] {
+            for h_nu in [5.0_f64, 6.7] {
+                for rise in [0.0_f64, 0.25, 0.5, 0.75, 1.0] {
+                    let got = exponent(h_layer, h_nu, rise);
+                    let want = 0.5 + rise * h_layer / h_nu;
+                    assert!(
+                        (got - want).abs() < 0.03,
+                        "H={h_layer} H_nu={h_nu} f={rise}: measured n={got:.4}, \
+                         derived {want:.4}"
+                    );
+                }
+            }
+        }
+
+        // The f = 0 endpoint is the hard floor of the whole functional form:
+        // the Ch^{-1/2} thinning alone, with no rise term left to add to it.
+        // Nothing this layer can be configured as goes below it.
+        let floor = exponent(6.0, 6.7, 0.0);
+        assert!(
+            (floor - 0.5).abs() < 0.02,
+            "the f = 0 limit must be exactly the Ch^-1/2 law, n = 1/2, got {floor:.4}"
+        );
+
+        // And the consequence that matters: with the SHIPPING anchors the layer
+        // is far steeper than the ~0.75 that riometer and A1 absorption
+        // measurements report, and no legal setting of the two scale heights
+        // reaches it - the floor of the box is 1/2 + 4/9.
+        let shipping = exponent(
+            crate::scenario::D_REGION_SCALE_HEIGHT_KM,
+            crate::scenario::NU_SCALE_HEIGHT_KM,
+            crate::scenario::D_REGION_RISE_FRACTION,
+        );
+        assert!(
+            shipping > 1.3 && shipping < 1.45,
+            "shipping anchors should give n ~ 1.39, got {shipping:.4}"
+        );
+        // The tripwire, read from `calib.rs` rather than from literals so that
+        // widening a bound trips it. The smallest exponent the two scale
+        // heights can reach together is 1/2 + H_D(min)/H_nu(max); if that ever
+        // drops to the measured ~0.75, the "no calibration can reach it"
+        // conclusion in the wiki and in `bin/zenith_probe` stops being true.
+        let ion = crate::calib::Anchors::default().ionosphere;
+        let n_min = 0.5 + ion.d_scale_height_km.min / ion.nu_scale_height_km.max;
+        assert!(
+            n_min > 0.75,
+            "the scale-height bounds now admit n = {n_min:.3} <= 0.75, so the \
+             calibration CAN reach the measured zenith law by scale heights \
+             alone - Ionosphere-Model.md and Calibration.md need rewriting"
+        );
     }
 
     /// The forward (continuant) recurrence evaluates the SAME continued

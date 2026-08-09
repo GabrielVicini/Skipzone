@@ -150,6 +150,25 @@ the D-region decomposition and the night-floor leverage for a chosen scenario.
 cargo run --release -p skipzone-app --bin mode_audit
 ```
 
+### `zenith_probe`
+
+Answers "where does the D region's solar-zenith law come from, and can the
+calibration reach the right one". `mode_audit` measures the effective exponent
+end-to-end through a traced ray; this strips the ray away and integrates the
+absorption kernel `Ne nu / (omega^2 + nu^2)` up a bare vertical column, so the
+exponent that comes out is the layer's own.
+
+```bash
+cargo run --release -p skipzone-app --bin zenith_probe
+```
+
+It prints the measured exponent against the derived `1/2 + H_D/H_nu`, checks
+that the exponent is frequency-independent (it must be, since `nu << omega`
+through the D region), sweeps both scale heights, and reports the smallest
+exponent anywhere inside the calibration's own bounds. Runs in about 1.4 s -
+there is no ray tracing in it, only vertical quadratures. See
+[Ionosphere Model](Ionosphere-Model) for what it found.
+
 ### `solve_digest`
 
 A stable fingerprint of everything `solve()` produces, over a scenario grid.

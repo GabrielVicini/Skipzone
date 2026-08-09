@@ -223,3 +223,28 @@ cost:
 - **The Es sheet is a near-perfect mirror.** The derived tunnelling loss is about
   zero. The apparent Es bias was a selection bug plus the foEs value, never a
   missing loss term.
+- **The D-region zenith exponent is outside this calibration's reach, and that
+  is a property of the model rather than of the fit.** The layer imposes
+  `A ~ cos^n chi` with `n = 1/2 + H_D/H_nu`, which the shipping anchors make
+  1.39 against a measured ~0.75. Sweeping both scale heights over their full
+  bounds spans 0.944 to 2.500; adding the chi-independent night-floor component
+  needs four times the literature night/day density ratio; and the extreme
+  corner of all three anchors together still only reaches 0.787. So when a run
+  pins those anchors to their bounds, **do not widen the bounds** - the residual
+  is not produced by any of them. `bin/zenith_probe` measures the whole table
+  in about 1.4 s.
+
+  The anchor that *does* reach it is `d_rise_fraction`, added for this and
+  described in [Ionosphere Model](Ionosphere-Model): it is the only one that
+  changes the layer's shape rather than a level, and `n = 1/2 + f H_D/H_nu`. It
+  ships at `f = 1` - the textbook layer, byte-identical to every earlier run -
+  and **has not been fitted yet**. The literature exponent implies `f ~ 0.285`;
+  whether the corpus agrees is an open question, and one worth being careful
+  about, since a single northern-summer Europe/North-America corpus is a weak
+  judge of a solar-zenith law.
+
+  `d_rise_fraction` is also the one anchor whose prior sits ON a bound, because
+  1.0 is simultaneously the physical maximum and the incumbent model. That is
+  exempted by name in `every_prior_sits_inside_its_range`, with the reason;
+  "hit the upper bound" is the null result for it rather than a finding, and
+  the informative direction is fully open.

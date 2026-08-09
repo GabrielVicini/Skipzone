@@ -55,6 +55,106 @@ Implementation notes, all derived in `docs/derivations/chapman-grazing.md`:
 - References: Smith and Smith 1972 for the function, A&S 7.1.14 for the
   continued fraction.
 
+### The absorption zenith law is DERIVED, and it is the model's largest known error
+
+The layer imposes a solar-zenith law on absorption that nothing chooses:
+
+```text
+A(chi) ~ cos^n chi,    n = 1/2 + H_D / H_nu
+```
+
+Two contributions, neither of them a free parameter:
+
+- the realised peak is `Nm Ch^{-1/2}`, worth exactly **1/2**;
+- the **whole profile translates upward** by `H_D ln Ch` - wings included - and
+  the collision frequency falls on `H_nu`, so the `Ne nu` product loses a
+  further `Ch^{-H_D/H_nu}`.
+
+Away from the terminator `Ch -> sec chi`, and the two combine into the formula
+above. `chapman.rs`'s
+`the_zenith_exponent_is_one_half_plus_the_scale_height_ratio` pins it against
+the real layer and the real collision model, across the whole box the
+calibration is allowed to move both scale heights in.
+
+With the shipping anchors (`H_D = 6.0 km`, `H_nu = 6.7 km`) that is
+**n = 1.39**. Riometer and A1 absorption measurements report **n ~ 0.75**, and
+the band-fixed WSPR cells want 0.2-0.6. The model is roughly **twice as steep in
+the exponent as reality**, and that single defect orders the whole unexplained
+residual block by sun angle rather than by frequency.
+
+#### Why no calibration can fix it
+
+This is the important part, and `bin/zenith_probe` measures every line of it:
+
+| what was tried | reachable `n` |
+|---|---|
+| both scale heights across their full bounds | 0.944 to 2.500 |
+| adding a chi-independent component (the night floor) | needs 0.42, vs a literature night/day ratio of ~0.10 |
+| all three anchors at their extreme corner at once | 0.787 |
+
+The target 0.75 sits **outside** the calibration's own three-parameter box. So
+a run that drives `d_scale_height_km`, `nu_scale_height_km` and
+`d_night_floor_fraction` to their bounds is not a stuck optimiser - it is the
+bound-reached finding described in [Calibration](Calibration), reporting
+correctly that the residual is not produced by any of them.
+
+There is also a hard floor. With `H_nu -> infinity` the rise term vanishes and
+`n -> 1/2`. **An alpha-Chapman D region cannot produce `n < 1/2` under any
+anchors at all**, because `Nm Ch^{-1/2}` alone is worth exactly one half. Part
+of what the WSPR cells ask for is below what the functional form admits.
+
+#### The knob that does reach it: `d_rise_fraction`
+
+The shape had to change, not a constant. The rise term assumes the entire
+profile is in photochemical equilibrium and translates with the ionisation peak.
+The real lower D region - 60 to 75 km, where `nu` is largest and where the
+absorption kernel actually lives - recombines fast enough that `Ne` tracks
+production at roughly **fixed height**, which is the `n = 1/2` law with no rise
+term at all.
+
+So the layer now takes a **rise fraction** `f`, and the law generalises to
+
+```text
+A(chi) ~ cos^n chi,    n = 1/2 + f H_D / H_nu
+```
+
+Writing `u = z - f ln Ch`, the layer is `Ne = Nm Ch^{-1/2} exp(1/2 (1 - u -
+e^{-u}))`. Both endpoints are derived rather than chosen:
+
+| `f` | what it is |
+|---|---|
+| 1 | the textbook alpha-Chapman layer - the `Ch^{-1/2}` prefactor and the `+ln Ch` inside `u` cancel exactly, so this is the old form back again |
+| 0 | amplitude law only, `Nm Ch^{-1/2}` at fixed height, `n = 1/2` |
+
+Measured against the derived line across `f`, both scale heights and 0-70
+degrees, the worst disagreement is **0.0094**. The literature `n = 0.75` lands
+at `f = 0.285`, against the closed form `(0.75 - 1/2) H_nu/H_D = 0.279`.
+
+**The shipping default is still `f = 1`.** `solve_digest` is byte-identical to
+its pre-change baseline, so every earlier run reproduces exactly. The value that
+matches the literature exponent has *not* been adopted, because it has not been
+fitted against the corpus - and the corpus that would judge it is one northern
+summer of Europe/North America paths (see [Calibration](Calibration)). Moving a
+shape anchor on the strength of a single literature number is precisely the
+quiet recalibration this project refuses elsewhere.
+
+Implementation notes:
+
+- `f = 1` keeps its **own branch** with the original arithmetic, so the default
+  layer stays bit-identical rather than merely close.
+  `partial_rise_reduces_to_the_textbook_layer_at_f_one` forces the general path
+  at `f = 1` and checks the two agree to better than 1e-12.
+- The analytic `chi` gradient is the product rule over both places `Ch` appears
+  - the prefactor and the shift inside `u` - giving
+  `dNe/dchi = Ne (Ch'/Ch) (-1/2) [1 + f(e^{-u} - 1)]`. It is checked against
+  central differences across `f` and on both slant branches, because a gradient
+  that disagrees with its density does not produce a wrong number here, it
+  drives Hamiltonian drift far away in the solver.
+- Enabling `f < 1` costs about **+14 % on the D layer's own density sample**
+  (one `ln`, one `sqrt`). That is one layer of four, and IGRF is ~72 % of a
+  solve, so scale before quoting. The default path pays nothing: `full_rise` is
+  a whole-solve constant and the branch predicts perfectly.
+
 ### The overhead-sun peak density
 
 Queried at each sampled point's horizontal position. This is what lets F2 follow

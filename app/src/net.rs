@@ -17,7 +17,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 const USER_AGENT: &str = concat!(
     "skipzone-validate/",
     env!("CARGO_PKG_VERSION"),
-    " (HF propagation model validation; hello@vicini.io)"
+    " (HF propagation model validation;)"
 );
 
 #[derive(Debug)]
