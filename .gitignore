@@ -8,5 +8,9 @@
 # Knowledge-graph output.
 /graphify-out/
 
+# Staged release artefacts: built binaries, archives and checksums, assembled
+# for upload to a GitHub release. Reproduce them from a tag, do not commit them.
+/release/
+
 # Git notes
 upload.txt

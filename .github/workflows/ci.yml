@@ -63,9 +63,8 @@ jobs:
       - uses: actions/checkout@v4
       # `rust-version = "1.85"` in the root Cargo.toml is a promise about the
       # ENGINE crate, which is the portable, embeddable one. The app is not held
-      # to it: eframe, walkers and their trees move their own minimums, and
-      # chasing those would mean either pinning the GUI or weakening the claim
-      # that matters.
+      # to it: eframe and its tree move their own minimums, and chasing those
+      # would mean either pinning the GUI or weakening the claim that matters.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.85"

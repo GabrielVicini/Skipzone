@@ -12,17 +12,39 @@ published wiki and not in this directory.
 ## Publishing it
 
 GitHub wikis are a separate git repository at
-`https://github.com/<owner>/<repo>.wiki.git`. To publish, clone it and copy
-these files across:
+`https://github.com/<owner>/<repo>.wiki.git`. To publish, clone it beside this
+repository and copy the pages across. From the repository root:
 
 ```bash
-git clone https://github.com/GabrielVicini/Skipzone.wiki.git /tmp/skipzone-wiki
-cp wiki/*.md /tmp/skipzone-wiki/
-cd /tmp/skipzone-wiki && git add -A && git commit -m "Sync wiki from main repo" && git push
+git clone https://github.com/GabrielVicini/Skipzone.wiki.git ../Skipzone.wiki
 ```
 
+```bash
+find wiki -maxdepth 1 -name '*.md' ! -name 'README.md' -exec cp {} ../Skipzone.wiki/ \; && git -C ../Skipzone.wiki add -A && git -C ../Skipzone.wiki commit -m "Sync wiki from main repo" && git -C ../Skipzone.wiki push
+```
+
+The same thing in PowerShell, which is what Windows gets and which has no
+`find`:
+
+```powershell
+Get-ChildItem wiki\*.md -Exclude README.md | Copy-Item -Destination ..\Skipzone.wiki
+git -C ..\Skipzone.wiki add -A
+git -C ..\Skipzone.wiki commit -m "Sync wiki from main repo"
+git -C ..\Skipzone.wiki push
+```
+
+`README.md` is excluded deliberately - see the conventions below. The copy step
+used to be a plain `cp wiki/*.md`, which contradicted that rule and published a
+stray page called "README" describing how to publish the wiki. If that page is
+still live, `git rm README.md` in the wiki clone once.
+
+Copying only adds and overwrites. A page **deleted** here stays on the wiki until
+it is deleted there too, so removing a page means `git rm` in the wiki clone as
+well.
+
 The wiki must be enabled and initialised once through the repository settings
-before that clone URL exists.
+(Settings > Features > Wikis, then create the first page) before that clone URL
+exists at all; cloning it before then fails with a repository-not-found error.
 
 ## Conventions for these pages
 
@@ -45,4 +67,3 @@ before that clone URL exists.
   navigation does not work.
 - **This `README.md` is not part of the wiki.** Do not copy it across; GitHub
   would render it as a page called "README".
-- **No em dashes.**

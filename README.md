@@ -30,7 +30,7 @@ Star us on GitHub if this is useful to you.
 
 The engine is in a non-production state while I fine-tune it, verify its
 accuracy and work out minor input bugs. A full wiki of app functions, releases
-and so on is planned. Right now, everything is pre-alpha.
+and so on is planned. Right now, everything is pre-alpha. Currently, we have a public build people can test with, check out the [Accuracy Report](#accuracy-report)!
 
 ## About
 
@@ -133,10 +133,10 @@ cargo run --release -p skipzone-app --bin wspr_validate -- --help
 
 ## Accuracy Report
 
-Coming soon. A validation report against real-world propagation data will be
-published once the project reaches its first tagged release. So far the only
-accuracy issues have been with the inputs coming from the app rather than the
-physics engine, though that may change.
+[docs/verification-report.md](docs/verification-report.md) is the current one.
+It separates three tiers of evidence that are usually conflated: whether the
+engine solves the equations correctly, whether the modelled ionosphere matches
+measurement, and whether an end-to-end prediction matches observed propagation.
 
 ## Supported Platforms
 
