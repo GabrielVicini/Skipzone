@@ -17,8 +17,8 @@ the end-to-end link against reality, but only in the dimensions it can identify.
 ## 1. The test suite
 
 Runs on every `cargo test` and in CI. 241 tests, no network, no fetched data.
-See [Engine Crate](Engine-Crate.md#testing) and
-[Building and CI](Building-and-CI.md).
+See [Engine Crate](Engine-Crate#testing) and
+[Building and CI](Building-and-CI).
 
 The engine's suite works by having analytic answers to compare against:
 quasi-parabolic closed forms, the Bouguer invariant along a ray, apex
@@ -88,7 +88,7 @@ Score against a saved spot file. Reproducible, no network.
 
 ### `wspr_calibrate`
 
-The full fixed-effects calibration. See [Calibration](Calibration.md).
+The full fixed-effects calibration. See [Calibration](Calibration).
 
 ### Why WSPR is a good datum, and where it stops
 
@@ -128,7 +128,7 @@ cargo run --release -p skipzone-app --bin wspr_corpus -- \
 ```
 
 Then a hold-out over a different, non-adjacent span, and the calibration itself.
-See [Command Line Tools](Command-Line-Tools.md).
+See [Command Line Tools](Command-Line-Tools).
 
 ## Network access
 

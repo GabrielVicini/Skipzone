@@ -35,6 +35,10 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
     let solve = &mut session.solve;
     let mut close = false;
 
+    // The window's right edge, read before the panel takes its bite out of the
+    // layout, so the width the panel really occupies can be measured against it.
+    let right_edge = ui.max_rect().right();
+
     let panel = Panel::right("trace_panel")
         .resizable(true)
         .default_size(DEFAULT_WIDTH)
@@ -54,7 +58,13 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
                 .inner
         });
 
-    ui_state.right_inset = panel.response.rect.width();
+    // Measured from the panel's left edge to the window's right edge, not from
+    // the panel's own reported width. egui grows a panel's reported rect to
+    // cover content that overflowed it, and that rect can run off the side of
+    // the window - which used to push the floating overlays inwards by however
+    // much the widest readout overhung. What the overlays need is the strip the
+    // panel actually covers.
+    ui_state.right_inset = (right_edge - panel.response.rect.left()).clamp(0.0, right_edge);
     if close {
         ui_state.trace_open = false;
         ui_state.right_inset = 0.0;

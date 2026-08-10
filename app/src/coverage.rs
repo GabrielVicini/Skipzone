@@ -37,14 +37,21 @@ pub const MAX_POINTS: usize = 19_881; // 141 x 141
 /// is a domain limit of the point-to-point solver, not a coverage heuristic.
 pub const MIN_RANGE_KM: f64 = 25.0;
 
-/// Highest latitude a grid row may sit at. Web Mercator diverges at the poles
-/// and the tile would be unrenderable, so the row is simply not computed.
+/// Highest latitude a grid row may sit at.
 ///
-/// Public because the map plugin clamps a *tile's* drawn edges to the same
-/// limit: a row centred just inside it still extends half a step past it, and
-/// Web Mercator's `tan(lat).asinh()` changes sign beyond the pole, which throws
-/// the rectangle to the far side of the world.
-pub const LAT_LIMIT_DEG: f64 = 85.0;
+/// This used to be 85 degrees, and it was a *projection* limit, not a physical
+/// one: Web Mercator diverges at the poles, so the tile would have been
+/// unrenderable and the row was simply not computed. Rows between 85 and 90
+/// were thrown away with no propagation reason whatsoever, which is one of the
+/// ways a full-extent run came back with holes in it. The map is now
+/// equirectangular and has real poles, so the limit is back to being about the
+/// solver: at exactly +/-90 the great-circle bearing from the transmitter is
+/// undefined, and one degree short of the pole is enough to keep it defined.
+///
+/// Public because the map clamps a *tile's* drawn edges to the same limit: a row
+/// centred just inside it still extends half a step past it, and nothing may be
+/// painted past the pole.
+pub const LAT_LIMIT_DEG: f64 = 89.0;
 
 /// The user-controlled grid: how far out from the transmitter to go, and how
 /// finely to sample.
@@ -452,10 +459,10 @@ mod tests {
     }
 
     /// Every computed row is drawn as a band half a step tall either side of its
-    /// centre. Clamped to the Mercator limit that band must stay a real,
-    /// non-empty piece of the map - the plugin relies on it.
+    /// centre. Clamped to the latitude limit that band must stay a real,
+    /// non-empty piece of the map - the drawing layer relies on it.
     #[test]
-    fn tile_bands_stay_inside_the_mercator_limit() {
+    fn tile_bands_stay_inside_the_latitude_limit() {
         let cfg = CoverageConfig {
             half_span_deg: 180.0,
             points_per_deg: 0.05,

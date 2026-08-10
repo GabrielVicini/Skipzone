@@ -44,10 +44,21 @@ const LAKES_FILE: &str = "ne_50m_lakes.shp";
 const LAND_BYTES: &[u8] = include_bytes!("assets/ne_50m_land.shp");
 const LAKES_BYTES: &[u8] = include_bytes!("assets/ne_50m_lakes.shp");
 
-/// Target point count per ring for the map overlay. The classification always
-/// uses the full-detail rings; only the drawing is thinned, since the overlay
-/// exists to be eyeballed, not measured.
-const OUTLINE_MAX_POINTS: usize = 120;
+/// How far a ring is allowed to move when it is thinned for drawing, degrees.
+///
+/// The classification always uses the full-detail rings; only the drawing is
+/// thinned. This used to be a target *point count* reached by keeping every
+/// n-th vertex, which is the wrong rule: dropping vertices by index takes no
+/// account of where they are, so a fjord coast with its points bunched together
+/// survived and a long smooth coast with them spread out got cut across. The
+/// rule is now a distance: keep a vertex if it is at least this far from the
+/// last one kept, so the thinned ring is everywhere within about this much of
+/// the real one.
+///
+/// 0.12 degrees is roughly 13 km - below one texel of the basemap raster, which
+/// is filled from these same rings. Under that the picture cannot tell the
+/// difference, and above it the shoreline would start visibly cutting corners.
+const OUTLINE_TOLERANCE_DEG: f64 = 0.12;
 
 /// Rings of one polygon shape, with its bounding box for a cheap reject.
 struct Poly {
@@ -105,9 +116,9 @@ pub struct GroundPick {
     pub reason: String,
 }
 
-/// One thinned ring for the debug overlay, carrying its own geographic bounds
-/// so the map plugin can drop everything off screen without projecting a single
-/// point of it. At any useful zoom that is nearly all of them.
+/// One thinned ring for drawing, carrying its own geographic bounds so the map
+/// can drop everything off screen without projecting a single point of it. At
+/// any useful zoom that is nearly all of them.
 pub struct Outline {
     /// (min_lon, min_lat, max_lon, max_lat).
     pub bounds: (f64, f64, f64, f64),
@@ -115,12 +126,17 @@ pub struct Outline {
     pub points: Vec<(f64, f64)>,
 }
 
+/// One shape's rings, thinned. Grouped rather than flattened because the
+/// even-odd rule that carves lakes out of continents only works over a shape's
+/// rings *together*.
+pub type OutlineShape = Vec<Outline>;
+
 pub struct Coastline {
     land: Vec<Poly>,
     lakes: Vec<Poly>,
-    /// Thinned rings for the debug overlay.
-    land_outlines: Vec<Outline>,
-    lake_outlines: Vec<Outline>,
+    /// Thinned rings for drawing, grouped by shape.
+    land_outlines: Vec<OutlineShape>,
+    lake_outlines: Vec<OutlineShape>,
 }
 
 impl Coastline {
@@ -152,15 +168,22 @@ impl Coastline {
         }
     }
 
-    /// Thinned land rings for the debug overlay.
+    /// Land shapes for drawing: thinned rings, grouped by shape.
+    ///
+    /// The basemap raster is filled from exactly these, and the shoreline is
+    /// stroked from exactly these. That is deliberate and load-bearing. When the
+    /// fill came from the full-detail rings and the stroke from the thinned
+    /// ones, the two were different polygons and the coastline visibly did not
+    /// follow the land underneath it. One geometry, drawn twice, cannot
+    /// disagree with itself.
     #[must_use]
-    pub fn land_outlines(&self) -> &[Outline] {
+    pub fn land_outlines(&self) -> &[OutlineShape] {
         &self.land_outlines
     }
 
-    /// Thinned lake rings for the debug overlay.
+    /// Lake shapes for drawing, as [`Self::land_outlines`].
     #[must_use]
-    pub fn lake_outlines(&self) -> &[Outline] {
+    pub fn lake_outlines(&self) -> &[OutlineShape] {
         &self.lake_outlines
     }
 
@@ -191,20 +214,33 @@ pub fn format_lat_lon(lat: f64, lon: f64) -> String {
     )
 }
 
+/// Thin one ring by radial distance: keep the first vertex, then every vertex
+/// at least [`OUTLINE_TOLERANCE_DEG`] from the last one kept, then close it.
 fn thin(ring: &[(f64, f64)]) -> Outline {
-    let points = if ring.len() <= OUTLINE_MAX_POINTS {
-        ring.to_vec()
-    } else {
-        let stride = ring.len().div_ceil(OUTLINE_MAX_POINTS);
-        let mut out: Vec<(f64, f64)> = ring.iter().step_by(stride).copied().collect();
-        // Close the ring back up, since the last point is usually dropped.
-        if let Some(&first) = out.first()
-            && out.last() != Some(&first)
-        {
-            out.push(first);
+    let tol2 = OUTLINE_TOLERANCE_DEG * OUTLINE_TOLERANCE_DEG;
+    let mut points: Vec<(f64, f64)> = Vec::new();
+    for &(lon, lat) in ring {
+        let keep = points.last().is_none_or(|&(plon, plat)| {
+            let (dx, dy) = (lon - plon, lat - plat);
+            dx * dx + dy * dy >= tol2
+        });
+        if keep {
+            points.push((lon, lat));
         }
-        out
-    };
+    }
+    // A shape smaller than the tolerance still has to exist: collapsing an
+    // island to a single point would delete it from the map, and the classifier
+    // would still call it land. Fall back to the ring as it came.
+    if points.len() < 3 {
+        points = ring.to_vec();
+    }
+    // Close the ring back up, since the last vertex is usually dropped.
+    if let Some(&first) = points.first()
+        && points.last() != Some(&first)
+    {
+        points.push(first);
+    }
+
     let mut bounds = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
     for &(lon, lat) in &points {
         bounds.0 = bounds.0.min(lon);
@@ -254,11 +290,11 @@ fn load() -> Result<Coastline, String> {
     let lakes = read_polygons(LAKES_FILE, LAKES_BYTES)?;
     let land_outlines = land
         .iter()
-        .flat_map(|p| p.rings.iter().map(|r| thin(r)))
+        .map(|p| p.rings.iter().map(|r| thin(r)).collect())
         .collect();
     let lake_outlines = lakes
         .iter()
-        .flat_map(|p| p.rings.iter().map(|r| thin(r)))
+        .map(|p| p.rings.iter().map(|r| thin(r)).collect())
         .collect();
 
     Ok(Coastline {
@@ -350,24 +386,56 @@ mod tests {
         assert_eq!(pick.ground.label(), "sea water");
     }
 
-    /// The overlay geometry must exist and be thinned, or the debug view has
-    /// nothing to draw.
+    /// The drawing geometry must exist, be thinned, and still bound itself.
+    ///
+    /// One thinned ring per full-detail ring, one group per shape: the basemap
+    /// raster relies on the grouping to apply the even-odd rule over a shape,
+    /// and on the bounds to cull without projecting.
     #[test]
     fn outlines_are_present_and_thinned() {
         let c = get().expect("coastline data");
         assert!(!c.land_outlines().is_empty());
         assert!(!c.lake_outlines().is_empty());
-        assert!(
-            c.land_outlines()
-                .iter()
-                .all(|r| r.points.len() <= OUTLINE_MAX_POINTS + 1)
-        );
-        // The cached bounds must actually bound the ring, or culling would
-        // silently drop rings that are on screen.
-        for r in c.land_outlines() {
-            for &(lon, lat) in &r.points {
-                assert!(lon >= r.bounds.0 && lon <= r.bounds.2);
-                assert!(lat >= r.bounds.1 && lat <= r.bounds.3);
+        assert_eq!(c.land_outlines().len(), c.land.len());
+        assert_eq!(c.lake_outlines().len(), c.lakes.len());
+
+        let (mut full, mut thinned) = (0usize, 0usize);
+        for (poly, shape) in c.land.iter().zip(c.land_outlines()) {
+            assert_eq!(poly.rings.len(), shape.len(), "one outline per ring");
+            for (ring, outline) in poly.rings.iter().zip(shape) {
+                full += ring.len();
+                thinned += outline.points.len();
+                // The cached bounds must actually bound the ring, or culling
+                // would silently drop rings that are on screen.
+                for &(lon, lat) in &outline.points {
+                    assert!(lon >= outline.bounds.0 && lon <= outline.bounds.2);
+                    assert!(lat >= outline.bounds.1 && lat <= outline.bounds.3);
+                }
+            }
+        }
+        assert!(thinned < full, "thinning removed nothing: {thinned}/{full}");
+    }
+
+    /// Thinning may move the shoreline, but only by about the tolerance it
+    /// promises. This is what lets the same rings be used for the raster fill
+    /// and the stroke over it: at that tolerance the two agree to within a
+    /// texel, so the coastline follows the land it is drawn on.
+    #[test]
+    fn thinning_stays_within_its_tolerance() {
+        let c = get().expect("coastline data");
+        for (poly, shape) in c.land.iter().zip(c.land_outlines()).take(200) {
+            for (ring, outline) in poly.rings.iter().zip(shape) {
+                if outline.points.len() == ring.len() {
+                    continue; // untouched
+                }
+                // Every dropped vertex must be within tolerance of a kept one.
+                for &(lon, lat) in ring {
+                    let near = outline.points.iter().any(|&(olon, olat)| {
+                        let (dx, dy) = (lon - olon, lat - olat);
+                        dx * dx + dy * dy <= 4.0 * OUTLINE_TOLERANCE_DEG * OUTLINE_TOLERANCE_DEG
+                    });
+                    assert!(near, "vertex ({lon}, {lat}) has no kept neighbour");
+                }
             }
         }
     }

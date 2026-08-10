@@ -57,7 +57,7 @@ equations, so a field model must not pre-apply them.
 - `igrf` implements IGRF-14 from its defining Schmidt semi-normalised
   spherical-harmonic expansion to degree 13, valid 1900.0 to 2030.0, with a
   secular-variation column for 2025 to 2030. The coefficient table is compiled
-  in with `include_str!`; see [Data and Assets](Data-and-Assets.md).
+  in with `include_str!`; see [Data and Assets](Data-and-Assets).
 - `legendre` computes the Schmidt semi-normalised associated Legendre functions
   and their first and second theta-derivatives by recurrence.
 - `dipole` is the `n = 1` term in closed form. It exists as a test oracle: the
@@ -74,7 +74,7 @@ convention so the ray equations assemble gradients uniformly.
 The engine ships `ChapmanLayer`, `QuasiParabolicLayer` and a linear layer,
 mainly because they have closed-form analytic solutions the test suite can check
 the tracer against. The ionosphere the application actually uses is built in
-`app/`; see [Ionosphere Model](Ionosphere-Model.md).
+`app/`; see [Ionosphere Model](Ionosphere-Model).
 
 `density_at_critical_frequency` and `critical_frequency` convert between peak
 density and plasma frequency, and round-trip exactly.

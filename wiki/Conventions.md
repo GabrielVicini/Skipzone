@@ -91,7 +91,7 @@ property is tested, not assumed.
 ### Layers depend downward only
 
 The app's five-layer stack is in
-[Architecture](Architecture.md#the-apps-internal-layers). Two invariants:
+[Architecture](Architecture#the-apps-internal-layers). Two invariants:
 nothing in `ui` computes a physical quantity, and nothing below `state` mentions
 egui. Both are greppable, so check them after touching that boundary.
 
@@ -126,4 +126,4 @@ action is applied once, centrally, after the frame is drawn.
 - Not build output. Not `corpus/`. Not editor configuration.
 - Generated data only when a test proves it still matches its generator. There
   is exactly one such case, `fof2_grid.tsv`.
-- See [Data and Assets](Data-and-Assets.md#what-is-deliberately-not-committed).
+- See [Data and Assets](Data-and-Assets#what-is-deliberately-not-committed).

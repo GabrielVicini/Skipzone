@@ -326,7 +326,7 @@ the same file layout is a file replacement, not a code change.
 
 Do not confuse this grid with `data/nequick/`, which is real CCIR data, vendored
 and licensed but **not read by any code**. See
-[Data and Assets](Data-and-Assets.md).
+[Data and Assets](Data-and-Assets).
 
 ### What the ionosonde comparison measured
 
@@ -360,7 +360,7 @@ would be a false equivalence. So the module produces an **occurrence
 probability** alongside foEs, and the solver keeps Es-supported paths in a
 separate verdict carrying that probability. They are never folded into the
 deterministic yes/no. See
-[Solver and Link Budget](Solver-and-Link-Budget.md#two-stacks-three-verdicts).
+[Solver and Link Budget](Solver-and-Link-Budget#two-stacks-three-verdicts).
 
 Provenance: order-of-magnitude anchors, not a fitted model and not traceable to
 a citable table. The shape follows midlatitude Es climatology (strong summer
@@ -417,4 +417,4 @@ Every unverified value above is gathered in `app/src/calib.rs` with the range it
 is physically defensible over, so a calibration run can vary it and an ordinary
 run can ignore it. Nothing new is introduced there; each value already existed
 as a named module constant with a unit and a docstring. See
-[Calibration](Calibration.md).
+[Calibration](Calibration).

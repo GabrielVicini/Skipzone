@@ -5,7 +5,7 @@ that will survive review rather than about process ceremony.
 
 ## Before you start
 
-Read [Conventions](Conventions.md). Most of the rules there exist because
+Read [Conventions](Conventions). Most of the rules there exist because
 breaking one produced a wrong answer that looked right, and a change that
 violates one will be asked to change.
 
@@ -19,7 +19,7 @@ cargo build --package skipzone --lib
 cargo doc --package skipzone --no-deps       # with RUSTDOCFLAGS=-D warnings
 ```
 
-That is exactly what CI runs. See [Building and CI](Building-and-CI.md).
+That is exactly what CI runs. See [Building and CI](Building-and-CI).
 
 ## Changing the physics
 
@@ -51,7 +51,7 @@ identify it.
 Before moving an anchor:
 
 1. Check the identification table in
-   [Calibration](Calibration.md#what-that-makes-unidentifiable-on-purpose). If
+   [Calibration](Calibration#what-that-makes-unidentifiable-on-purpose). If
    the quantity is in the "no, absorbed" column, WSPR cannot see it and a fit
    that moved it fitted something else.
 2. Check whether the fit hit the bound. A bound being reached is a finding: the

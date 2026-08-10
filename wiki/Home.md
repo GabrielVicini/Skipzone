@@ -16,19 +16,19 @@ are still being calibrated. Nothing here is a production propagation forecast.
 
 | If you want to | Read |
 |---|---|
-| Understand the shape of the project | [Architecture](Architecture.md) |
-| Embed or extend the ray tracer | [Engine Crate](Engine-Crate.md) |
-| Work on the application | [App Crate](App-Crate.md) |
-| Know where the ionosphere comes from | [Ionosphere Model](Ionosphere-Model.md) |
-| Know how a path is decided | [Solver and Link Budget](Solver-and-Link-Budget.md) |
-| Work on the interface | [User Interface](User-Interface.md) |
-| Run something from a terminal | [Command Line Tools](Command-Line-Tools.md) |
-| Check the model against reality | [Validation Harnesses](Validation-Harnesses.md) |
-| Understand the fitted numbers | [Calibration](Calibration.md) |
-| Know what data ships and under what licence | [Data and Assets](Data-and-Assets.md) |
-| Read the physics | [Physics Derivations](Physics-Derivations.md) |
-| Build, test or change CI | [Building and CI](Building-and-CI.md) |
-| Contribute | [Conventions](Conventions.md) and [Contributing](Contributing.md) |
+| Understand the shape of the project | [Architecture](Architecture) |
+| Embed or extend the ray tracer | [Engine Crate](Engine-Crate) |
+| Work on the application | [App Crate](App-Crate) |
+| Know where the ionosphere comes from | [Ionosphere Model](Ionosphere-Model) |
+| Know how a path is decided | [Solver and Link Budget](Solver-and-Link-Budget) |
+| Work on the interface | [User Interface](User-Interface) |
+| Run something from a terminal | [Command Line Tools](Command-Line-Tools) |
+| Check the model against reality | [Validation Harnesses](Validation-Harnesses) |
+| Understand the fitted numbers | [Calibration](Calibration) |
+| Know what data ships and under what licence | [Data and Assets](Data-and-Assets) |
+| Read the physics | [Physics Derivations](Physics-Derivations) |
+| Build, test or change CI | [Building and CI](Building-and-CI) |
+| Contribute | [Conventions](Conventions) and [Contributing](Contributing) |
 
 ## The one-paragraph version
 
@@ -47,13 +47,13 @@ page that owns it.
 
 - **No approximations in the dispersion relation.** No quasi-longitudinal, no
   quasi-transverse. The full complex Appleton-Hartree, with analytic
-  derivatives. See [Physics Derivations](Physics-Derivations.md).
+  derivatives. See [Physics Derivations](Physics-Derivations).
 - **No physics without a derivation first.** Every equation in the engine is
   derived from scratch in `docs/derivations/` and the code cites the section.
 - **No `unsafe`.** Forbidden at the crate level in the engine.
 - **No fitting to a number the data cannot identify.** The calibration explicitly
   enumerates what WSPR can and cannot see, and refuses to move the rest. See
-  [Calibration](Calibration.md).
+  [Calibration](Calibration).
 - **No silent fallbacks.** A guessed value that gets used says so on stderr.
 - **No browser build.** A WebAssembly proof of concept existed and was removed.
-  See [Architecture](Architecture.md#the-removed-web-target).
+  See [Architecture](Architecture#the-removed-web-target).

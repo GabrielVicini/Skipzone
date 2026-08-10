@@ -43,7 +43,7 @@ Haselgrove ray equations in Hamiltonian form.
   system libraries; single-threaded; `unsafe` forbidden. Built to stay portable
   and embeddable. CI builds it on its own, outside the workspace default
   members, so a dependency leak from the app cannot hide.
-- **App (`app/`):** an `egui` + `Walkers` desktop map application for
+- **App (`app/`):** an `egui` desktop map application for
   point-to-point HF path prediction. Useful for amateur radio propagation
   planning, but general enough for any HF ray-tracing use case. It also holds
   the ionosphere model layer, the solver, the link budget and every validation
@@ -51,7 +51,9 @@ Haselgrove ray equations in Hamiltonian form.
 - **Docs (`docs/derivations/`):** every piece of physics derived from first
   principles and cross-checked against known analytic limits, before it was
   implemented.
-- **Wiki (`wiki/`):** how the whole thing fits together, module by module.
+- **Wiki ([github.com/GabrielVicini/Skipzone/wiki](https://github.com/GabrielVicini/Skipzone/wiki)):** how the whole thing fits
+  together, module by module. The pages are versioned in `wiki/` in this
+  repository and published to the GitHub wiki from there.
 
 ### Where the code actually is
 
@@ -69,7 +71,7 @@ skipzone/
 ├── Cargo.toml          # engine crate (workspace root)
 ├── src/                # the engine: field model, magnetoionic theory, ray tracer
 │   └── bin/            # hfpredict, the headless engine CLI
-├── app/                # skipzone-app: egui + Walkers desktop application
+├── app/                # skipzone-app: egui desktop application
 │   ├── Cargo.toml
 │   └── src/
 │       ├── assets/     # bundled foF2 grid and coastline shapefiles
@@ -88,7 +90,7 @@ tree never enters the engine crate, which stays buildable with nothing beyond
 
 `corpus/` is not in the repository. It is gitignored working data that the WSPR
 and ionosonde harnesses read and write. See
-[wiki/Validation-Harnesses.md](wiki/Validation-Harnesses.md) for how to build it.
+[Validation Harnesses](https://github.com/GabrielVicini/Skipzone/wiki/Validation-Harnesses) for how to build it.
 
 ## Building
 
@@ -108,7 +110,7 @@ cargo build --release --package skipzone --lib
 
 Ten binaries besides the GUI. None of them is required to use the app; they
 exist so that every claim the model makes can be checked. Full descriptions are
-in [wiki/Command-Line-Tools.md](wiki/Command-Line-Tools.md).
+in [Command Line Tools](https://github.com/GabrielVicini/Skipzone/wiki/Command-Line-Tools).
 
 | Tool | Crate | What it does |
 |---|---|---|
@@ -150,11 +152,12 @@ removed: it carried its own code paths for having no threads, and keeping them
 correct cost more than the target was worth. (Last commit to have WebASM was b07cb7a)
 
 `rust-version = "1.85"` is a promise about the engine crate, and CI enforces it
-there. The app tracks whatever `eframe` and `walkers` require, which moves.
+there. The app tracks whatever `eframe` requires, which moves.
 
 ## Documentation
 
-- [wiki/](wiki/) - how the project is put together, module by module.
+- [Wiki](https://github.com/GabrielVicini/Skipzone/wiki) - how the project is put together, module by module.
+  (Sources in [wiki/](wiki/).)
 - [docs/derivations/](docs/derivations/) - the physics, derived from first principles.
 - `cargo doc --package skipzone --open` - engine API documentation.
 

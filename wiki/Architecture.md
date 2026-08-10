@@ -87,7 +87,7 @@ out of that and both are load bearing:
 
 The two job kinds are sized differently on purpose. The frequency sweep holds
 two cores back, because it runs while the operator is still panning the map and
-the tile fetcher wants CPU. The coverage grid takes every core, because it is a
+the interface has to stay responsive. The coverage grid takes every core, because it is a
 deliberate one-off run and the operator is doing nothing but waiting for it.
 Both are overridable without a rebuild:
 

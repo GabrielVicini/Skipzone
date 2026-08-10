@@ -80,7 +80,7 @@ It is the largest tool in the project and is split into modules under
 | `negatives.rs` | Negatives, decode probability, false-positive rate |
 | `jackknife.rs` | Day-level refits |
 
-Read [Calibration](Calibration.md) before believing any number it prints.
+Read [Calibration](Calibration) before believing any number it prints.
 
 Run `--help` for the full flag list. The defaults point at `corpus/`, and a
 missing file is a hard error, not a silent fallback.
@@ -138,7 +138,7 @@ sunspot number or R12, on the modern SILSO scale or converted back to the
 pre-2015 one the maps were fitted in). The last two axes are not free choices;
 which one is right is a fact about units and about what R12 means, and the table
 is how it was established. See
-[Ionosphere Model](Ionosphere-Model.md#the-ccir-maps-what-replaced-the-guess-and-by-how-much).
+[Ionosphere Model](Ionosphere-Model#the-ccir-maps-what-replaced-the-guess-and-by-how-much).
 
 It also prints the windows it found in the data rather than a hard-coded claim
 about them, and the model's own standard deviation next to the measurement's, so

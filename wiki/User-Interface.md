@@ -50,9 +50,15 @@ and RX entry rows beneath.
 
 ### `map/`
 
-- `view.rs` - `MapView`, the walkers map widget, zoom and framing.
-- `plugins.rs` - the drawing overlays that sit on the tiles: the great-circle
-  path, the traced ray, hop markers, the coverage raster.
+- `projection.rs` - the equirectangular projection and the camera that frames
+  it, with the clamping that keeps the view inside one whole world.
+- `basemap.rs` - the world rasterised once from the bundled Natural Earth
+  polygons. No tiles are fetched and nothing is drawn from the network.
+- `layers.rs` - the drawing overlays that sit on the basemap: the graticule, the
+  day/night shading, the coverage tiles, the coastline stroke, the great-circle
+  path, the traced ray and the hop markers.
+- `view.rs` - `MapView`, which owns the camera and the raster, handles pan and
+  zoom, and assembles a frame out of the layers.
 
 ### `overlays/`
 
@@ -107,7 +113,7 @@ shell each frame:
 - `Session` - the scenario, everything computed from it, and the handle to the
   background solver.
 - `UiState` - view state that is not part of the scenario or its results.
-- `MapView` - map tile and camera resources.
+- `MapView` - the map camera and the basemap raster.
 
 The UI never talks to `SolverService` directly. It calls `Session::calculate`,
 which dispatches the job, and `Session` drains results each frame.

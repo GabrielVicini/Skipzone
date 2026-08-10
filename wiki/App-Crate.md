@@ -6,7 +6,7 @@ a library with a thin `main.rs` on top, so the headless harnesses in
 than a parallel copy.
 
 The layer stack and its two invariants are in
-[Architecture](Architecture.md#the-apps-internal-layers). This page walks the
+[Architecture](Architecture#the-apps-internal-layers). This page walks the
 modules.
 
 ## Conversion layer
@@ -53,7 +53,7 @@ position rather than one ground type for the whole path.
 ## Model layer
 
 May know about the engine. This is the one place the application carries physics
-of its own, and [Ionosphere Model](Ionosphere-Model.md) covers it in full.
+of its own, and [Ionosphere Model](Ionosphere-Model) covers it in full.
 
 - `chapman` - horizontally varying Chapman layers, including the grazing-
   incidence D region.
@@ -115,7 +115,7 @@ Calls the engine's public API only. Split by concern:
 - `solve/tracing.rs` - per-hop tracing and homing helpers.
 - `solve/mod.rs` - the top-level driver that stitches them together.
 
-See [Solver and Link Budget](Solver-and-Link-Budget.md).
+See [Solver and Link Budget](Solver-and-Link-Budget).
 
 ### `sweep`
 
@@ -156,7 +156,7 @@ and no separate area model. A cell is a real trace, and the test
 
 ## View layer
 
-See [User Interface](User-Interface.md).
+See [User Interface](User-Interface).
 
 ## Harness-only modules
 
@@ -173,8 +173,8 @@ These exist for validation and calibration and are not reachable from the GUI.
 | `calib` | The unverified anchors, each with the range it is defensible over. |
 | `fit` | Two-way fixed-effects calibration against measured WSPR SNRs. |
 
-See [Validation Harnesses](Validation-Harnesses.md) and
-[Calibration](Calibration.md).
+See [Validation Harnesses](Validation-Harnesses) and
+[Calibration](Calibration).
 
 ## Lint policy
 

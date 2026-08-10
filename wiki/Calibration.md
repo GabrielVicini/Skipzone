@@ -216,7 +216,7 @@ The report includes, beyond the fit itself:
 
 **2026-08-09.** The default foF2 backend moved from the bundled synthetic
 climatology to the CCIR numerical maps (`app/src/ccir.rs`, see
-[Ionosphere Model](Ionosphere-Model.md#the-ccir-maps-what-replaced-the-guess-and-by-how-much)).
+[Ionosphere Model](Ionosphere-Model#the-ccir-maps-what-replaced-the-guess-and-by-how-much)).
 That is a physics change under everything below: it moves foF2 by of order a
 megahertz, so it moves which paths exist, which layer answers, and therefore
 every fitted number on this page.

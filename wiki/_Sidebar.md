@@ -1,27 +1,27 @@
-**[Home](Home.md)**
+**[Home](Home)**
 
 **Overview**
-- [Architecture](Architecture.md)
-- [Conventions](Conventions.md)
+- [Architecture](Architecture)
+- [Conventions](Conventions)
 
 **Code**
-- [Engine Crate](Engine-Crate.md)
-- [App Crate](App-Crate.md)
-- [Ionosphere Model](Ionosphere-Model.md)
-- [Solver and Link Budget](Solver-and-Link-Budget.md)
-- [User Interface](User-Interface.md)
+- [Engine Crate](Engine-Crate)
+- [App Crate](App-Crate)
+- [Ionosphere Model](Ionosphere-Model)
+- [Solver and Link Budget](Solver-and-Link-Budget)
+- [User Interface](User-Interface)
 
 **Physics**
-- [Physics Derivations](Physics-Derivations.md)
+- [Physics Derivations](Physics-Derivations)
 
 **Running it**
-- [Building and CI](Building-and-CI.md)
-- [Command Line Tools](Command-Line-Tools.md)
+- [Building and CI](Building-and-CI)
+- [Command Line Tools](Command-Line-Tools)
 
 **Checking it**
-- [Validation Harnesses](Validation-Harnesses.md)
-- [Calibration](Calibration.md)
-- [Data and Assets](Data-and-Assets.md)
+- [Validation Harnesses](Validation-Harnesses)
+- [Calibration](Calibration)
+- [Data and Assets](Data-and-Assets)
 
 **Working on it**
-- [Contributing](Contributing.md)
+- [Contributing](Contributing)

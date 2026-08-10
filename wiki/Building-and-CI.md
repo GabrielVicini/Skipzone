@@ -32,7 +32,7 @@ That builds the engine alone, with none of the app's dependency tree.
 cargo run --release -p skipzone-app --bin wspr_validate -- --help
 ```
 
-That runs one of the harnesses. See [Command Line Tools](Command-Line-Tools.md).
+That runs one of the harnesses. See [Command Line Tools](Command-Line-Tools).
 
 ## Testing
 
@@ -130,8 +130,8 @@ build would pull the app's tree in and hide a leak.
 `cargo check --package skipzone --lib` on Rust 1.85.
 
 `rust-version = "1.85"` in the root `Cargo.toml` is a promise about the **engine**
-crate, which is the portable, embeddable one. The app is not held to it: eframe,
-walkers and their trees move their own minimums, and chasing those would mean
+crate, which is the portable, embeddable one. The app is not held to it: eframe
+and its tree move their own minimums, and chasing those would mean
 either pinning the GUI or weakening the claim that actually matters.
 
 ### `docs`
@@ -163,4 +163,4 @@ Fedora 40+). Older distributions such as Ubuntu 22.04 or Debian 12 need a
 rebuild from an older base.
 
 There is no browser build. See
-[Architecture](Architecture.md#the-removed-web-target).
+[Architecture](Architecture#the-removed-web-target).

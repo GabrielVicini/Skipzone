@@ -13,7 +13,6 @@ path = "src/main.rs"
 skipzone = { path = ".." }
 eframe = "0.35"
 egui = "0.35"
-walkers = "0.56"
 # Complex Fresnel reflection coefficients for the ground-reflection loss term.
 num-complex = "0.4"
 # Data-parallel execution for the compute layer (frequency sweep and any other
