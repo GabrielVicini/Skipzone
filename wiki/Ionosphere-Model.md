@@ -16,7 +16,7 @@ documentation, in the UI, and here.
 | D | ~70 km | Chapman | `Ch(X, chi)` at the local zenith angle | constant overhead anchor |
 | E | ~110 km | Chapman | `Ch(X, chi)` at the local zenith angle | constant overhead anchor (foE) |
 | Es | ~100 km | Quasi-parabolic, thin | none | probabilistic foEs |
-| F2 | ~300 km | Chapman | overhead (none) | gridded foF2 climatology |
+| F2 | ~300 km | Chapman | overhead (none) | **CCIR numerical maps** |
 
 `app/src/chapman.rs` provides one reusable layer type, `SolarChapmanLayer`, that
 D, E and F2 are all built from, plus the grazing-incidence function itself.
@@ -172,10 +172,12 @@ zenith-angle law. Feeding F2 both a map and a zenith law would double-count the
 diurnal variation. So F2 uses the overhead slant factor and gets all of its
 horizontal structure from the map.
 
-## foF2: two backends, both surfaced
+## foF2: three backends, all surfaced
 
-`app/src/fof2.rs`.
+`app/src/fof2.rs` and `app/src/ccir.rs`.
 
+- `Fof2Backend::Ccir` — **the default.** The CCIR numerical maps, real measured
+  coefficients. See the next section.
 - `Fof2Backend::ConstantSsn` uses `fof2_from_ssn` everywhere. NmF2 is taken
   linear in sunspot number, calibrated to representative midlatitude anchors of
   about 4.5 MHz at SSN 0 and about 10 MHz at SSN 150. There is deliberately no
@@ -185,9 +187,124 @@ horizontal structure from the map.
   point's own latitude and local solar time, interpolated with Catmull-Rom.
 
 Whichever ran is written into `Assumptions::fof2_source` verbatim, **including**
-when the grid failed to load and the constant took over.
+when the bundled data failed to load and the constant took over.
+
+## The CCIR maps: what replaced the guess, and by how much
+
+`app/src/ccir.rs`, reading `data/nequick/ccir11.txt` .. `ccir22.txt` and
+`data/nequick/modipNeQG_wrapped.txt`.
+
+This wiki used to say that the bundled grid's layout followed the operational
+maps and that "dropping a real IRI or CCIR table into the same file layout is a
+file replacement, not a code change". **That was wrong, and the data was already
+here.** The CCIR maps are not a latitude-by-local-time table. They are a
+six-harmonic Fourier series in *universal time* over a Legendre-like expansion in
+**modified dip latitude**, and nothing in the app knew what modip was. What was
+needed was the evaluator, not the file.
+
+```text
+A[j][k] = F2[0][j][k] (1 - R12/100) + F2[1][j][k] (R12/100)
+CF2[j]  = A[j][0] + sum_{i=1..6} ( A[j][2i-1] sin(i T) + A[j][2i] cos(i T) ),  T = 15 UT - 180 deg
+foF2    = sum_k CF2[k] sin(modip)^k
+        + sum_{m=1..8} sum_k CF2[..] sin(modip)^k cos(lat)^m { cos(m lon), sin(m lon) }
+```
+
+The term counts per longitude order are `[12, 12, 9, 5, 2, 1, 1, 1, 1]`, which is
+where `12 + 2*32 = 76` comes from; M(3000)F2 uses `[7, 8, 6, 3, 2, 1, 1]` for 49.
+
+### What it is worth, measured
+
+`bin/iono_check`, **70 219 GIRO ionosonde soundings**, 17 stations, four seasonal
+windows (2025-10, 2026-01, 2026-04, 2026-07). Nothing fitted, nothing absorbed.
+
+| backend | bias | RMS | median abs | SD of model | correlation |
+|---|---|---|---|---|---|
+| bundled grid | +0.07 | 1.70 | 1.02 | 1.91 | 0.723 |
+| climatology | +0.07 | 1.70 | 1.02 | 1.91 | 0.723 |
+| CCIR, daily SSN v2 | +0.31 | 1.20 | 0.65 | 2.44 | 0.888 |
+| CCIR, R12 v2 | +0.92 | 1.50 | 1.01 | 2.52 | 0.886 |
+| **CCIR, R12 v1** | **+0.03** | **1.10** | 0.71 | 2.16 | **0.894** |
+| CCIR, daily SSN v1 | -0.39 | 1.13 | 0.67 | 2.08 | 0.903 |
+
+Measured foF2 has SD 2.45 MHz and mean 6.34 MHz. So:
+
+- **RMS 1.70 → 1.10 MHz, a 35 % reduction.** The handoff called foF2's 1.70 MHz
+  "a SHAPE limit, not a constant", and said retuning the five diurnal constants
+  buys 3.6 %. That was right, and this is the shape.
+- **The compression is gone.** The old dispersion ratio was 1.91/2.45 = 0.78 -
+  the model swung less than the ionosphere. CCIR is 0.88 to 1.00 depending on
+  driver.
+- **Correlation 0.723 → 0.894.**
+- Every local-time bin, every latitude band and every season improves. The
+  biggest single win is southern-hemisphere winter: RMS 2.41 → 0.87, where the
+  climatology's winter-anomaly term read +1.99 MHz high. A single-season corpus
+  could never have shown that.
+- 15 of the 16 quotable stations improve; one (MHJ45) worsens, 1.24 → 1.33.
+
+### The sunspot scale is a unit, and it was wrong
+
+SILSO rescaled the international sunspot number by about **1.44** in July 2015.
+The CCIR maps were fitted in 1966, so their `R12 = 100` page means the *old*
+scale's hundred. Every sunspot number this project handles - `spaceweather`'s
+SIDC and NOAA feeds, `corpus/ssn_daily.tsv` - is the new one.
+
+Feeding the new number straight in leaves a **+0.92 MHz** bias. Dividing by 1.44
+leaves **+0.03 MHz**. Nothing was fitted to produce that: the factor is SILSO's
+published recalibration and the bias fell out of it. `ccir::SSN_V2_OVER_V1`.
+
+### The one known gap, stated rather than corrected
+
+The maps want **R12**, a twelve-month mean. The app only ever holds an observed
+daily or monthly number - NOAA reports `smoothed_ssn` as `-1` for any month less
+than six months old, so a running app cannot have R12 for "now".
+
+foF2 is concave in the driver, so averaging a wide daily spread through it reads
+low: measured, **-0.39 MHz** of bias against R12's +0.03. That is a driver
+mismatch with a known mechanism, and it is left in the open rather than papered
+over with an output scale. Feeding a smoothed sunspot number moves it; an
+operator who has one should enter it.
+
+### Modified dip latitude
+
+`tan(modip) = I / sqrt(cos lat)`, `I` the magnetic dip at 300 km. The shipped
+grid is IGRF epoch ~2001, and it is read rather than recomputed from the IGRF
+this project already carries: the coefficients were fitted in the modip of their
+own era, so recomputing the coordinate under a modern field would evaluate the
+map away from the coordinate it was fitted in.
+
+`tests::grid_modip_agrees_with_igrf_dip` checks the shipped grid against this
+project's own IGRF at epoch 2001 anyway - RMS under 2 degrees, worst under 6 -
+which is the test that would catch a transposed or misaligned lattice.
+
+The table is read two ways, deliberately:
+
+- `ModipGrid::at` is the four-point Lagrange form the maps are specified to be
+  read with, and is what any comparison against another implementation should
+  use;
+- `ModipGrid::sample_c1` is a Catmull-Rom tensor product, used by the tracer,
+  because the Lagrange form's *derivative* jumps at every cell edge and the ray
+  equations integrate straight through those jumps. Same reason `Fof2Plane` is
+  bicubic rather than bilinear.
+
+They agree at every node exactly. Between nodes the worst disagreement in modip
+is 0.57 degrees, next to a pole where modip runs 14 degrees in one grid row - and
+that is the wrong quantity to bound, because foF2 sees modip only through
+`sin(modip)`, whose derivative vanishes exactly there. The disagreement that
+reaches the tracer is under **0.05 MHz** anywhere on the globe, pinned by test.
+
+### Cost
+
+The F2 peak sample went from 342 ns to 482 ns per call, **+41 %**, measured by
+`bin/profile_solve`. Against a field sample of about 950 ns that is roughly
+**+10 % on one RHS evaluation** of the ray equations. The IGRF share of a solve
+drops from about 75 % to about 65 % because the denominator grew, not because
+IGRF got cheaper.
 
 ### Provenance of the bundled grid, read this
+
+**This backend is no longer the default** - `Fof2Backend::Ccir` is. Everything
+below still applies to it, and it remains selectable.
+
 
 `app/src/assets/fof2_grid.tsv` is laid out the way the operational maps are: a
 latitude by local-solar-time table per season, tabulated at two solar-activity
@@ -217,9 +334,11 @@ and licensed but **not read by any code**. See
 results are worth carrying forward:
 
 - foE was measurably wrong and was fixed as a result.
-- foF2's shape error has a floor around 1.70 MHz that the current functional
-  form cannot get below. That is a limit of the shape, not of the anchors, so
-  no amount of retuning constants will close it.
+- foF2's shape error has a floor around 1.70 MHz that the synthetic
+  climatology's functional form cannot get below. That is a limit of the shape,
+  not of the anchors, so no amount of retuning constants closes it. **Replacing
+  the shape does**: the CCIR maps reach 1.10 MHz on the same soundings. That is
+  what the section above measures, and it is why the default moved.
 
 All four seasons are mandatory when running this comparison. A single season
 confounds the seasonal term with the solar-cycle position.

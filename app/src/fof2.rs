@@ -73,16 +73,20 @@ pub enum Fof2Backend {
     ConstantSsn,
     /// The bundled climatology grid, varying with latitude and local solar time.
     Gridded,
+    /// The CCIR numerical maps - real measured coefficients. See
+    /// [`crate::ccir`]. The default, on the evidence in that module's docs.
+    Ccir,
 }
 
 impl Fof2Backend {
-    pub const ALL: [Self; 2] = [Self::Gridded, Self::ConstantSsn];
+    pub const ALL: [Self; 3] = [Self::Ccir, Self::Gridded, Self::ConstantSsn];
 
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::ConstantSsn => "constant (SSN only)",
             Self::Gridded => "gridded climatology (lat / local time / season)",
+            Self::Ccir => "CCIR numerical maps (measured coefficients)",
         }
     }
 }
@@ -482,7 +486,7 @@ pub struct Fof2Plane {
 /// derivative with respect to `t`. C1 continuous across cell boundaries, which
 /// matters here: a bilinear interpolant's gradient jumps at every cell edge,
 /// and the ray equations would integrate straight through those jumps.
-fn catmull_rom(p: [f64; 4], t: f64) -> (f64, f64) {
+pub(crate) fn catmull_rom(p: [f64; 4], t: f64) -> (f64, f64) {
     let (p0, p1, p2, p3) = (p[0], p[1], p[2], p[3]);
     let c0 = p1;
     let c1 = 0.5 * (p2 - p0);

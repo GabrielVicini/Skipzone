@@ -99,6 +99,19 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
                      assumptions panel. hmF2 and scale H remain yours directly.",
                     fof2_from_ssn(inputs.ssn)
                 ),
+                Fof2Backend::Ccir => format!(
+                    "The CCIR numerical maps - real measured coefficients, not a climatology of \
+                     this project's construction. foF2 is sampled at each ray point's own \
+                     latitude and LONGITUDE, from a Fourier series in universal time over an \
+                     expansion in modified dip latitude, so the equatorial anomaly follows the \
+                     MAGNETIC equator and two points at the same local time in different sectors \
+                     differ. Driven at R12 = {:.0} (SSN {:.0} converted to the pre-2015 sunspot \
+                     scale the maps were fitted on). Measured against 70219 GIRO ionosonde \
+                     soundings: RMS error 1.10 MHz, against 1.70 for the bundled grid. hmF2 and \
+                     scale H remain yours directly.",
+                    crate::ccir::map_r12_from_ssn_v2(inputs.ssn),
+                    inputs.ssn
+                ),
             },
         );
     });

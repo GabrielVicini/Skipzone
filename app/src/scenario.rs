@@ -29,6 +29,7 @@ use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
 use crate::antenna::{AntennaConfig, Ground};
 use crate::calib::Anchors;
+use crate::ccir::{self, CcirF2Peak, CcirMonth};
 use crate::chapman::{ConstantPeak, SlantFactor, SolarChapmanLayer};
 use crate::fof2::{self, Fof2Backend, Fof2Grid, GriddedF2Peak};
 use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
@@ -378,7 +379,7 @@ impl Default for Inputs {
             year: 2026,
             month: 1,
             ssn: 70.0,
-            fof2_backend: Fof2Backend::Gridded,
+            fof2_backend: Fof2Backend::Ccir,
             hmf2_km: 300.0,
             scale_height_km: 50.0,
             es_enabled: true,
@@ -774,6 +775,16 @@ fn resolve_fof2(
 ) -> (Fof2Backend, Box<dyn Fn(f64, f64) -> f64 + '_>) {
     let utc = inputs.utc_hours;
     match inputs.fof2_backend {
+        Fof2Backend::Ccir => match ccir_peak(inputs) {
+            Ok(peak) => (
+                Fof2Backend::Ccir,
+                Box::new(move |lat, lon| peak.fof2_at(lat, lon)),
+            ),
+            Err(_) => {
+                let f = fof2_from_ssn(inputs.ssn);
+                (Fof2Backend::ConstantSsn, Box::new(move |_, _| f))
+            }
+        },
         Fof2Backend::Gridded => match Fof2Grid::bundled() {
             Ok(grid) => {
                 let peak = GriddedF2Peak::new(grid.plane(season, inputs.ssn), utc);
@@ -794,6 +805,18 @@ fn resolve_fof2(
     }
 }
 
+/// The CCIR F2 peak source for a run: this month's maps, at this universal
+/// time, at this solar activity converted to the scale the maps were fitted on.
+///
+/// # Errors
+/// Whichever bundled asset failed to parse. The caller falls back to the
+/// constant model and says so, rather than substituting a different physics
+/// silently.
+fn ccir_peak(inputs: &Inputs) -> Result<CcirF2Peak, &'static str> {
+    let month = CcirMonth::bundled(inputs.month)?;
+    CcirF2Peak::new(month.plane(inputs.utc_hours, ccir::map_r12_from_ssn_v2(inputs.ssn)))
+}
+
 /// The provenance string for whichever backend ran. Every value the F2 layer
 /// was built from appears here; nothing about it is hidden from the panel.
 fn fof2_source_text(
@@ -804,13 +827,17 @@ fn fof2_source_text(
     tx: f64,
     rx: f64,
 ) -> String {
-    let fell_back = inputs.fof2_backend == Fof2Backend::Gridded && ran == Fof2Backend::ConstantSsn;
+    let fell_back =
+        inputs.fof2_backend != Fof2Backend::ConstantSsn && ran == Fof2Backend::ConstantSsn;
     match ran {
         Fof2Backend::ConstantSsn => {
             let why = if fell_back {
+                let asset = match inputs.fof2_backend {
+                    Fof2Backend::Ccir => ccir_peak(inputs).err().unwrap_or("unknown error"),
+                    _ => Fof2Grid::bundled().err().unwrap_or("unknown error"),
+                };
                 format!(
-                    "FELL BACK to the constant model: the bundled foF2 grid failed to load ({}). ",
-                    Fof2Grid::bundled().err().unwrap_or("unknown error")
+                    "FELL BACK to the constant model: the bundled foF2 data failed to load ({asset}). "
                 )
             } else {
                 String::new()
@@ -835,6 +862,24 @@ fn fof2_source_text(
             season.label(),
             inputs.ssn,
         ),
+        Fof2Backend::Ccir => format!(
+            "CCIR numerical maps, month {:02}, sampled at each ray point's own latitude and \
+             LONGITUDE (not local solar time): {mid:.2} MHz at the midpoint, {tx:.2} at the \
+             transmitter, {rx:.2} at the receiver. Real measured coefficients - a six-harmonic \
+             Fourier series in universal time over a Legendre expansion in MODIFIED DIP LATITUDE, \
+             interpolated in the coefficients between the R12 = 0 and R12 = 100 pages. \
+             Driven at R12 = {:.0}, which is SSN {:.0} divided by {:.2}: the sunspot number was \
+             rescaled by SILSO in 2015 and these maps were fitted in 1966, so the conversion is \
+             a unit change and not a calibration. MEASURED against 70219 GIRO soundings over \
+             four seasonal windows: RMS error 1.10 MHz against the bundled climatology's 1.70, \
+             correlation 0.894 against 0.723, bias +0.03 MHz. The remaining known gap is that \
+             the maps want R12, a twelve-month mean, and this run has a daily number - worth \
+             about -0.4 MHz of bias when the two differ",
+            inputs.month,
+            ccir::map_r12_from_ssn_v2(inputs.ssn),
+            inputs.ssn,
+            ccir::SSN_V2_OVER_V1,
+        ),
     }
 }
 
@@ -851,6 +896,9 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     // worse still: it refuses past 85 deg, which would put a hard absorption
     // cliff on F2 at every terminator - see docs/derivations/chapman-grazing.md.)
     let f2_source: Box<dyn crate::chapman::PeakDensitySource> = match a.fof2_backend {
+        Fof2Backend::Ccir => Box::new(
+            ccir_peak(inputs).map_err(|e| format!("bundled CCIR maps failed to load: {e}"))?,
+        ),
         Fof2Backend::Gridded => {
             let grid = Fof2Grid::bundled()
                 .map_err(|e| format!("bundled foF2 grid failed to load: {e}"))?;
@@ -909,6 +957,9 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
             .layer(EARTH_RADIUS_M)
             .map_err(|e| format!("sporadic-E layer rejected: {e}"))?;
         let f2_source_2: Box<dyn crate::chapman::PeakDensitySource> = match a.fof2_backend {
+            Fof2Backend::Ccir => Box::new(
+                ccir_peak(inputs).map_err(|e| format!("bundled CCIR maps failed to load: {e}"))?,
+            ),
             Fof2Backend::Gridded => {
                 let grid = Fof2Grid::bundled()
                     .map_err(|e| format!("bundled foF2 grid failed to load: {e}"))?;
@@ -1052,7 +1103,11 @@ mod tests {
             ..Inputs::default()
         };
         let a = resolve(&inputs);
-        assert_eq!(a.fof2_backend, Fof2Backend::Gridded, "grid must be in use");
+        assert_eq!(
+            a.fof2_backend,
+            Fof2Backend::Ccir,
+            "the CCIR maps must be the default backend"
+        );
         let models = build_models(&inputs, &a).expect("models");
 
         // At 12 UTC, longitude 30 E is local mid-afternoon and longitude 150 W
@@ -1065,7 +1120,10 @@ mod tests {
         );
 
         // The equatorial anomaly crest at the same local time as the midlatitude
-        // point beats it.
+        // point beats it. 16 N at 30 E is a crest under both backends, but for
+        // different reasons: the climatology puts its crests at +-16 deg
+        // GEOGRAPHIC, while CCIR puts them either side of the MAGNETIC equator,
+        // which in the African sector sits several degrees north.
         let crest = sample_at(&models, 300.0, 16.0, 30.0);
         assert!(
             crest > day,
@@ -1094,7 +1152,26 @@ mod tests {
         );
         assert!(
             grid_swing > 100.0 * flat_swing,
-            "the grid must add real structure: {grid_swing:.3} vs residual {flat_swing:.2e}"
+            "the map must add real structure: {grid_swing:.3} vs residual {flat_swing:.2e}"
+        );
+
+        // The same three claims under the bundled climatology, so that changing
+        // the default did not quietly stop testing the backend it replaced.
+        let grid_inputs = Inputs {
+            fof2_backend: Fof2Backend::Gridded,
+            ..inputs.clone()
+        };
+        let ga = resolve(&grid_inputs);
+        assert_eq!(ga.fof2_backend, Fof2Backend::Gridded);
+        let gm = build_models(&grid_inputs, &ga).expect("models");
+        let (g_day, g_night) = (
+            sample_at(&gm, 300.0, 40.0, 30.0),
+            sample_at(&gm, 300.0, 40.0, -150.0),
+        );
+        assert!(g_day > 1.6 * g_night, "grid backend lost its diurnal swing");
+        assert!(
+            sample_at(&gm, 300.0, 16.0, 30.0) > g_day,
+            "grid backend lost its anomaly crest"
         );
     }
 
@@ -1249,8 +1326,31 @@ mod tests {
     #[test]
     fn new_assumptions_are_all_surfaced_with_provenance() {
         let a = resolve(&Inputs::default());
-        assert!(a.fof2_source.contains("NOT CCIR"), "{}", a.fof2_source);
-        assert!(a.fof2_source.contains("climatology"));
+        // The default is the CCIR maps. Its source line must name the data, the
+        // coordinate it is expanded in, and the sunspot-scale conversion - that
+        // last one especially, because a driver silently divided by 1.44 is
+        // exactly the kind of hidden step this contract exists to prevent.
+        assert!(a.fof2_source.contains("CCIR"), "{}", a.fof2_source);
+        assert!(
+            a.fof2_source.contains("MODIFIED DIP LATITUDE"),
+            "{}",
+            a.fof2_source
+        );
+        assert!(a.fof2_source.contains("1966"), "{}", a.fof2_source);
+        assert!(a.fof2_source.contains("R12"), "{}", a.fof2_source);
+
+        // And the climatology's disclaimer must survive being demoted: it is
+        // still selectable and it is still not CCIR data.
+        let gridded = resolve(&Inputs {
+            fof2_backend: Fof2Backend::Gridded,
+            ..Inputs::default()
+        });
+        assert!(
+            gridded.fof2_source.contains("NOT CCIR"),
+            "{}",
+            gridded.fof2_source
+        );
+        assert!(gridded.fof2_source.contains("climatology"));
         assert!(a.foe_source.contains("order-of-magnitude"));
         assert!(a.foe_source.contains("cos chi"));
         assert!(a.sporadic_e.source.contains("order-of-magnitude"));

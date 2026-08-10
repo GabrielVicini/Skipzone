@@ -607,6 +607,17 @@ pub(crate) fn scan_resolve_anchors(
             vec![4.0, prior.d_scale_height_km.value, 10.0],
             |a, v| a.ionosphere.d_scale_height_km.value = v,
         ),
+        // The one anchor that changes the absorption ZENITH LAW rather than its
+        // level: n = 1/2 + f H_D/H_nu. It belongs here and not in the cached fit
+        // for the reason this function exists - it is pure shape, and the
+        // absorption scale cannot absorb shape. 0.285 is the value the
+        // literature exponent (n ~ 0.75) implies; it is offered as a trial
+        // point, not as a prior. See `bin/zenith_probe`.
+        (
+            "D rise fraction [0..1]",
+            vec![0.0, 0.285, 0.6, prior.d_rise_fraction.value],
+            |a, v| a.ionosphere.d_rise_fraction.value = v,
+        ),
         (
             "nu reference alt [km]",
             vec![65.0, prior.nu_ref_alt_km.value, 80.0],

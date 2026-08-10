@@ -32,6 +32,9 @@
 pub mod antenna;
 pub mod app;
 pub mod calib;
+/// The CCIR foF2 / M(3000)F2 numerical maps, evaluated from the vendored
+/// coefficients.
+pub mod ccir;
 pub mod chapman;
 pub mod clock;
 pub mod coastline;

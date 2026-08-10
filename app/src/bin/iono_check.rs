@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use skipzone_app::calib::Anchors;
+use skipzone_app::ccir::CcirMonth;
 use skipzone_app::chapman::chapman_grazing;
 use skipzone_app::fof2::{self, DiurnalShape, Fof2Grid};
 use skipzone_app::solar::{self, Season};
@@ -60,6 +61,14 @@ struct Obs {
     foe: Option<f64>,
     /// Daily sunspot number for this observation's own date.
     ssn: f64,
+    /// Centred twelve-month mean of the daily series, i.e. R12 - the index the
+    /// CCIR maps are actually tabulated against - where the series covers
+    /// enough of the window to form one. See [`smoothed_ssn`].
+    r12: f64,
+    /// Days of daily SSN that went into `r12`, out of the 365 the window asks
+    /// for. Reported rather than hidden, because a truncated window on a rising
+    /// cycle biases the mean.
+    r12_days: usize,
 }
 
 impl Obs {
@@ -73,6 +82,45 @@ impl Obs {
     }
 }
 
+/// Every foF2 backend's answer for one observation, computed once.
+///
+/// Computed once because the cuts below re-bin the same numbers several ways,
+/// and rebuilding a `Fof2Plane` per observation per cut is what made this tool
+/// slow enough that adding a fourth backend would have been unpleasant.
+struct Models {
+    /// The bundled grid: what a real solve samples.
+    grid: f64,
+    /// The climatology the grid was generated from.
+    clim: f64,
+    /// CCIR, driven by the same daily SSN the other two get. This is the fair
+    /// head-to-head: same driver, same observation, different map.
+    ccir: f64,
+    /// CCIR, driven by R12 - the index it is actually tabulated against.
+    ccir_r12: f64,
+    /// CCIR driven by R12 converted back to the sunspot scale the maps were
+    /// FITTED on. See [`SSN_V2_OVER_V1`]: this is a unit conversion, not a
+    /// calibration knob.
+    ccir_r12_v1: f64,
+    /// CCIR on the day's own sunspot number, converted to the maps' scale.
+    /// This is the combination the APP could actually run: `spaceweather` gives
+    /// it an observed daily number and never a twelve-month mean.
+    ccir_daily_v1: f64,
+}
+
+impl Models {
+    /// Every backend's value, in [`BACKENDS`] order.
+    fn all(&self) -> [f64; 6] {
+        [
+            self.grid,
+            self.clim,
+            self.ccir,
+            self.ccir_r12,
+            self.ccir_r12_v1,
+            self.ccir_daily_v1,
+        ]
+    }
+}
+
 /// Running error accumulator: everything is reported in MHz, signed as
 /// `model - measured`, so POSITIVE means the model reads HIGH.
 #[derive(Default)]
@@ -82,6 +130,13 @@ struct Err2 {
     sum2: f64,
     abs: Vec<f64>,
     meas: f64,
+    /// Sums for the dispersion and correlation of the model against the
+    /// measurement. A model can be unbiased and still useless, by being flat;
+    /// bias and RMS alone do not say which.
+    mm: f64,
+    yy: f64,
+    my: f64,
+    mdl: f64,
 }
 
 impl Err2 {
@@ -92,6 +147,33 @@ impl Err2 {
         self.sum2 += e * e;
         self.abs.push(e);
         self.meas += measured;
+        self.mdl += model;
+        self.mm += model * model;
+        self.yy += measured * measured;
+        self.my += model * measured;
+    }
+
+    /// Standard deviation of the MODEL's own values.
+    #[allow(clippy::cast_precision_loss)]
+    fn sd_model(&self) -> f64 {
+        let n = self.n as f64;
+        (self.mm / n - (self.mdl / n).powi(2)).max(0.0).sqrt()
+    }
+
+    /// Standard deviation of the MEASUREMENTS, i.e. how much there was to
+    /// explain.
+    #[allow(clippy::cast_precision_loss)]
+    fn sd_measured(&self) -> f64 {
+        let n = self.n as f64;
+        (self.yy / n - (self.meas / n).powi(2)).max(0.0).sqrt()
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn correlation(&self) -> f64 {
+        let n = self.n as f64;
+        let cov = self.my / n - (self.mdl / n) * (self.meas / n);
+        let d = self.sd_model() * self.sd_measured();
+        if d > 0.0 { cov / d } else { f64::NAN }
     }
     #[allow(clippy::cast_precision_loss)]
     fn bias(&self) -> f64 {
@@ -193,6 +275,8 @@ fn main() -> ExitCode {
             fof2,
             foe: p.get(6).and_then(|s| s.parse::<f64>().ok()),
             ssn: 0.0,
+            r12: 0.0,
+            r12_days: 0,
         });
     }
 
@@ -233,6 +317,41 @@ fn main() -> ExitCode {
         used[used.len() - 1]
     );
 
+    // R12, for the CCIR maps, which are tabulated against it and not against a
+    // daily number. Where the daily series does not cover the whole centred
+    // year the mean is formed from what there is and the shortfall is reported.
+    let by_day: BTreeMap<i64, f64> = ssn_table
+        .iter()
+        .map(|(&(y, m, d), &s)| (day_number(y, m, d), s))
+        .collect();
+    let mut worst_cover = usize::MAX;
+    for o in &mut obs {
+        let (r12, days) = smoothed_ssn(&by_day, day_number(o.date.0, o.date.1, o.date.2));
+        o.r12 = if days == 0 { o.ssn } else { r12 };
+        o.r12_days = days;
+        worst_cover = worst_cover.min(days);
+    }
+    let mut r12s: Vec<f64> = obs.iter().map(|o| o.r12).collect();
+    r12s.sort_by(f64::total_cmp);
+    println!(
+        "R12       {:.0} to {:.0}, centred 12-month mean of that series. Thinnest window has\n          \
+         {worst_cover} of {SMOOTH_WINDOW_DAYS} days, so a window near the end of the series is a\n          \
+         truncated mean and is biased by the cycle's slope, not just noisy.",
+        r12s[0],
+        r12s[r12s.len() - 1]
+    );
+
+    // The observation windows, from the data rather than from a stale comment.
+    let mut months: BTreeMap<(i32, u32), usize> = BTreeMap::new();
+    for o in &obs {
+        *months.entry((o.date.0, o.date.1)).or_default() += 1;
+    }
+    let window_list: Vec<String> = months
+        .iter()
+        .map(|((y, m), n)| format!("{y}-{m:02} ({n})"))
+        .collect();
+    println!("WINDOWS   {}", window_list.join(", "));
+
     let grid = match Fof2Grid::bundled() {
         Ok(g) => g,
         Err(e) => {
@@ -243,35 +362,53 @@ fn main() -> ExitCode {
 
     // ---------------------------------------------------------------- foF2
     println!("\n--- foF2: THE HEADLINE ------------------------------------");
-    println!("  Two backends, because the app has two and they are supposed to agree: the");
-    println!("  bundled GRID (what a real run samples) and the CLIMATOLOGY that generated it.");
+    println!("  The app's two backends - the bundled GRID (what a real run samples) and the");
+    println!("  CLIMATOLOGY that generated it, which are supposed to agree - against the CCIR");
+    println!("  numerical maps, which are real measured coefficients and sat unread in");
+    println!("  data/nequick/ until app/src/ccir.rs was written.");
+    println!();
+    println!("  CCIR appears four times because it takes a solar driver and there are two");
+    println!("  choices in each of two independent directions, neither of them free:");
+    println!("    DAILY vs R12   - the maps are tabulated against R12, a twelve-month mean,");
+    println!("                     but the app only ever holds an observed daily number;");
+    println!(
+        "    v2 vs v1       - SILSO rescaled the sunspot number by {SSN_V2_OVER_V1:.2} in 2015 and the"
+    );
+    println!("                     maps were fitted in 1966, so feeding v2 straight in is a");
+    println!("                     unit error. Dividing is a conversion, not a fit.");
 
-    let mut g_all = Err2::default();
-    let mut c_all = Err2::default();
-    for o in &obs {
-        let season = o.season();
-        let plane = grid.plane(season, o.ssn);
-        g_all.push(plane.sample(o.lat, o.lst_h()).0, o.fof2);
-        c_all.push(
-            fof2::climatology_fof2(o.lat, o.lst_h(), season, o.ssn),
-            o.fof2,
+    let models = evaluate(&obs, grid);
+
+    let mut all: [Err2; 6] = Default::default();
+    for (o, m) in obs.iter().zip(&models) {
+        for (acc, v) in all.iter_mut().zip(m.all()) {
+            acc.push(v, o.fof2);
+        }
+    }
+    println!(
+        "\n  {:<16} {:>7} {:>10} {:>9} {:>9} {:>12} {:>8} {:>7}",
+        "backend", "n", "measured", "bias", "RMS", "median |err|", "SD mdl", "corr"
+    );
+    for (name, e) in BACKENDS.iter().zip(all.iter_mut()) {
+        let (n, meas, bias, rms, med) = (e.n, e.mean_measured(), e.bias(), e.rms(), e.median_abs());
+        let (sd, corr) = (e.sd_model(), e.correlation());
+        println!(
+            "  {name:<16} {n:>7} {meas:>10.2} {bias:>+9.2} {rms:>9.2} {med:>12.2} {sd:>8.2} {corr:>7.3}"
         );
     }
     println!(
-        "\n  {:<14} {:>7} {:>10} {:>9} {:>9} {:>12}",
-        "backend", "n", "measured", "bias", "RMS", "median |err|"
+        "\n  SD of the measured foF2 is {:.2} MHz. A backend whose SD is well below that is",
+        all[0].sd_measured()
     );
-    for (name, e) in [("grid", &mut g_all), ("climatology", &mut c_all)] {
-        let (n, meas, bias, rms, med) = (e.n, e.mean_measured(), e.bias(), e.rms(), e.median_abs());
-        println!("  {name:<14} {n:>7} {meas:>10.2} {bias:>+9.2} {rms:>9.2} {med:>12.2}");
-    }
+    println!("  COMPRESSING - it will read low on the high days and high on the low ones, and");
+    println!("  a level scale cannot fix that. Correlation is the part a level scale keeps.");
 
     cut(
         "foF2 by LOCAL SOLAR TIME",
-        "  The diurnal shape is one cosine harmonic by construction. This is where that\n  \
-         costs, and it is the cheapest thing in the model to improve.",
+        "  The app's diurnal shape is one cosine harmonic by construction. CCIR carries six\n  \
+         harmonics in universal time, which is the single biggest structural difference.",
         &obs,
-        grid,
+        &models,
         |o| {
             let l = o.lst_h();
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -282,10 +419,11 @@ fn main() -> ExitCode {
 
     cut(
         "foF2 by LATITUDE",
-        "  The equatorial-anomaly and polar-trough terms use GEOGRAPHIC latitude as a stand-in\n  \
-         for magnetic dip latitude, which the module docs flag as a real limitation.",
+        "  The app's equatorial-anomaly and polar-trough terms use GEOGRAPHIC latitude as a\n  \
+         stand-in for magnetic dip latitude, which the module docs flag as a real limitation.\n  \
+         CCIR is expanded in MODIFIED DIP LATITUDE, so this cut is where that should show.",
         &obs,
-        grid,
+        &models,
         |o| {
             let a = o.lat.abs();
             let b = if a < 20.0 {
@@ -304,11 +442,21 @@ fn main() -> ExitCode {
     );
 
     cut(
+        "foF2 by SEASON (local)",
+        "  All four windows, split by the local season each observation fell in. Every\n  \
+         seasonal term in the app is untested by a single-season run; this is the cut that\n  \
+         tests them.",
+        &obs,
+        &models,
+        |o| format!("{}-{:02}  {}", o.date.0, o.month, o.season().label()),
+    );
+
+    cut(
         "foF2 by STATION",
         "  A station is a fixed latitude, longitude and instrument. A bias that belongs to one\n  \
          station is not a model error in the same sense as one shared across many.",
         &obs,
-        grid,
+        &models,
         |o| o.station.clone(),
     );
 
@@ -395,7 +543,8 @@ fn main() -> ExitCode {
     println!("  sounding at one point; it says what the layer is, not what a 2000 km oblique");
     println!("  path through it loses. Absorption, ground reflections and the noise floor are");
     println!("  untouched by this file.");
-    println!("  SPAN: one week in July, so the seasonal terms are not tested at all.");
+    println!("  SPAN: the windows listed at the top, and nothing outside them. In particular");
+    println!("  one position on the solar cycle, so nothing here tests the solar-activity law.");
 
     ExitCode::SUCCESS
 }
@@ -670,42 +819,138 @@ fn corpus_ssn(path: &str) -> f64 {
     v[v.len() / 2]
 }
 
-fn cut(title: &str, note: &str, obs: &[Obs], grid: &Fof2Grid, key: impl Fn(&Obs) -> String) {
+/// The backends, in the order [`evaluate`] fills them and every table prints
+/// them. One list, so a column heading cannot drift from the number under it.
+const BACKENDS: [&str; 6] = [
+    "grid",
+    "climatology",
+    "ccir (daily v2)",
+    "ccir (R12 v2)",
+    "ccir (R12 v1)",
+    "ccir (daily v1)",
+];
+
+/// Which backends the per-cut tables show. `climatology` is dropped from them
+/// because it is the function the grid was generated from and the headline
+/// shows the two agreeing to a hundredth of a megahertz; carrying it through
+/// every cut would be two columns of the same number.
+const CUT_BACKENDS: [usize; 3] = [0, 4, 5];
+
+/// Ratio of the SILSO version 2.0 sunspot number to the version 1 series it
+/// replaced in July 2015. The recalibration multiplied the whole historical
+/// record by about this factor.
+///
+/// It matters here because the two ends of the calculation are on different
+/// scales and nothing in between says so. `corpus/ssn_daily.tsv` is
+/// `SN_d_tot_V2.0.csv`, i.e. version 2. The CCIR maps were fitted in 1966
+/// against R12 on the version 1 scale, and their `R12 = 100` page means
+/// version 1's hundred. Feeding a version 2 number straight in is a unit
+/// error worth roughly a third of the solar term.
+///
+/// This is a CONVERSION with a citable provenance, not a fitted coefficient,
+/// and it is applied to the driver rather than to the model's output - a scale
+/// on the output would be a level fudge and would say nothing about which of
+/// the two scales was wrong.
+const SSN_V2_OVER_V1: f64 = 1.44;
+
+/// Every backend's foF2, for every observation, computed once.
+fn evaluate(obs: &[Obs], grid: &Fof2Grid) -> Vec<Models> {
+    // The grid collapses to a plane per (season, SSN) pair, and the corpus has
+    // far fewer distinct pairs than observations; CCIR collapses to a plane per
+    // (month, UT, R12). Neither is cached here - the planes are cheap next to
+    // the parse - but the CCIR month IS parsed once per process, by OnceLock.
+    obs.iter()
+        .map(|o| {
+            let season = o.season();
+            let plane = grid.plane(season, o.ssn);
+            let lst = o.lst_h();
+            let ccir = |r12: f64| {
+                CcirMonth::bundled(o.month)
+                    .expect("bundled CCIR coefficients parse")
+                    .plane(o.utc_h, r12)
+                    .fof2(o.lat, o.lon)
+                    .expect("bundled modip grid parses")
+            };
+            Models {
+                grid: plane.sample(o.lat, lst).0,
+                clim: fof2::climatology_fof2(o.lat, lst, season, o.ssn),
+                ccir: ccir(o.ssn),
+                ccir_r12: ccir(o.r12),
+                ccir_r12_v1: ccir(o.r12 / SSN_V2_OVER_V1),
+                ccir_daily_v1: ccir(o.ssn / SSN_V2_OVER_V1),
+            }
+        })
+        .collect()
+}
+
+fn cut(title: &str, note: &str, obs: &[Obs], models: &[Models], key: impl Fn(&Obs) -> String) {
     println!("\n--- {title} ---");
     println!("{note}");
-    let mut cells: BTreeMap<String, (Err2, Err2)> = BTreeMap::new();
-    for o in obs {
-        let season = o.season();
-        let plane = grid.plane(season, o.ssn);
+    let mut cells: BTreeMap<String, [Err2; 6]> = BTreeMap::new();
+    for (o, m) in obs.iter().zip(models) {
         let e = cells.entry(key(o)).or_default();
-        e.0.push(plane.sample(o.lat, o.lst_h()).0, o.fof2);
-        e.1.push(
-            fof2::climatology_fof2(o.lat, o.lst_h(), season, o.ssn),
-            o.fof2,
-        );
+        for (acc, v) in e.iter_mut().zip(m.all()) {
+            acc.push(v, o.fof2);
+        }
     }
-    println!(
-        "\n  {:<16} {:>7} {:>10} {:>11} {:>10} {:>12} {:>11}",
-        "cut", "n", "measured", "grid bias", "grid RMS", "clim bias", "clim RMS"
-    );
+    print!("\n  {:<18} {:>7} {:>9}", "cut", "n", "measured");
+    for b in CUT_BACKENDS {
+        print!(" {:>19}", format!("{} bias/RMS", BACKENDS[b]));
+    }
+    println!();
     let mut thin = 0usize;
-    for (k, (g, c)) in &mut cells {
-        if g.n < MIN_QUOTABLE {
-            thin += g.n;
+    for (k, e) in &mut cells {
+        if e[0].n < MIN_QUOTABLE {
+            thin += e[0].n;
             continue;
         }
-        println!(
-            "  {:<16} {:>7} {:>10.2} {:>+11.2} {:>10.2} {:>+12.2} {:>11.2}",
-            k,
-            g.n,
-            g.mean_measured(),
-            g.bias(),
-            g.rms(),
-            c.bias(),
-            c.rms()
-        );
+        print!("  {:<18} {:>7} {:>9.2}", k, e[0].n, e[0].mean_measured());
+        for b in CUT_BACKENDS {
+            print!(" {:>+11.2} {:>7.2}", e[b].bias(), e[b].rms());
+        }
+        println!();
     }
     if thin > 0 {
         println!("  ({thin} observation(s) in cells below the {MIN_QUOTABLE} floor are not shown)");
+    }
+}
+
+/// Width of the smoothing window for R12, in days: a centred twelve months.
+const SMOOTH_WINDOW_DAYS: usize = 365;
+
+/// Days since 1970-01-01 for a proleptic Gregorian date. Howard Hinnant's
+/// `days_from_civil`, which is exact for every date in range and needs no
+/// table; used only to make "within 182 days of" a subtraction.
+fn day_number(y: i32, m: u32, d: u32) -> i64 {
+    let y = i64::from(if m <= 2 { y - 1 } else { y });
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let m = i64::from(m);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Centred mean of the daily sunspot series about a day, and how many days of
+/// the window were actually available.
+///
+/// This is R12 in intent. It is R12 in fact only where the window is complete;
+/// near the end of the published series it is a truncated mean, which on a
+/// sloping cycle is biased rather than merely noisy, so the count is returned
+/// and reported rather than swallowed.
+fn smoothed_ssn(by_day: &BTreeMap<i64, f64>, day: i64) -> (f64, usize) {
+    #[allow(clippy::cast_possible_wrap)]
+    let half = SMOOTH_WINDOW_DAYS as i64 / 2;
+    let mut sum = 0.0;
+    let mut n = 0usize;
+    for (_, v) in by_day.range(day - half..=day + half) {
+        sum += v;
+        n += 1;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    if n == 0 {
+        (0.0, 0)
+    } else {
+        (sum / n as f64, n)
     }
 }

@@ -132,6 +132,18 @@ Inputs and their defaults:
 | `--fit=PATH` | `corpus/fit.tsv` | WSPR corpus, used only for its median SSN |
 | `--propose` | off | Print suggested anchor changes rather than only the error |
 
+It scores **six** foF2 backends side by side: the bundled grid, the climatology
+that generated it, and the CCIR maps under each of four solar drivers (daily
+sunspot number or R12, on the modern SILSO scale or converted back to the
+pre-2015 one the maps were fitted in). The last two axes are not free choices;
+which one is right is a fact about units and about what R12 means, and the table
+is how it was established. See
+[Ionosphere Model](Ionosphere-Model.md#the-ccir-maps-what-replaced-the-guess-and-by-how-much).
+
+It also prints the windows it found in the data rather than a hard-coded claim
+about them, and the model's own standard deviation next to the measurement's, so
+a backend that is unbiased by being flat cannot hide.
+
 If either auxiliary file is missing the run continues but says so on stderr,
 because falling back to a median or to a mid-cycle SSN of 90 changes what the
 run measures.
@@ -168,6 +180,24 @@ through the D region), sweeps both scale heights, and reports the smallest
 exponent anywhere inside the calibration's own bounds. Runs in about 1.4 s -
 there is no ray tracing in it, only vertical quadratures. See
 [Ionosphere Model](Ionosphere-Model) for what it found.
+
+### `rise_wiring_check`
+
+Answers two questions a flat calibration row cannot distinguish between: is the
+anchor reaching the solver at all, and does the corpus have any leverage on it.
+
+```bash
+cargo run --release -p skipzone-app --bin rise_wiring_check -- corpus/fit.tsv 1200
+```
+
+First it solves one high-sun low-band path at several rise fractions and prints
+the absorption actually charged - a dead anchor and an unidentifiable one
+produce the same table in `wspr_calibrate`, and only this tells them apart.
+Then it solves a corpus subsample at `f = 1` and `f = 0` and reports the
+**spread** of the per-spot change, broken down by band. The spread is the point:
+a fit refits the absorption scale and an offset, so anything common to every
+spot is absorbed exactly, and only variation across spots is identifiable. See
+[Calibration](Calibration) for what it found.
 
 ### `solve_digest`
 

@@ -1,17 +1,18 @@
 # NeQuick G reference data
 
-**Status: staged, not wired up. No code in this repository reads these files.**
+**Status: in use.** `app/src/ccir.rs` compiles all thirteen files in with
+`include_str!` and evaluates the CCIR foF2 map, which is the app's default F2
+peak-density source. Measured against 70 219 GIRO ionosonde soundings it reads
+foF2 to 1.10 MHz RMS against the previous model's 1.70; see
+`wiki/Ionosphere-Model.md`.
 
-They are here so that a future NeQuick-G ionosphere backend has its reference
-data already vendored and already licensed, and so the provenance is recorded
-while it is still verifiable. Until that backend exists, the app's ionosphere
-comes from `app/src/chapman.rs`, `app/src/fof2.rs` and `app/src/sporadic_e.rs`,
-and from the bundled grid in `app/src/assets/fof2_grid.tsv`.
+The M(3000)F2 half of each file is parsed and evaluated but not yet consumed.
 
-Do not confuse the two. The bundled `fof2_grid.tsv` is **not** derived from
-these files. Its header says so, and so does `app/src/bin/iono_check.rs`: its
-layout is the operational one but its values come from the app's own
-order-of-magnitude climatology. It is not CCIR, not URSI and not IRI.
+Do not confuse these with `app/src/assets/fof2_grid.tsv`, which is **not**
+derived from them: its layout is the operational one but its values come from
+the app's own order-of-magnitude climatology. It is not CCIR, not URSI and not
+IRI, it is still selectable as `Fof2Backend::Gridded`, and it is no longer the
+default.
 
 ## Contents
 
@@ -35,5 +36,8 @@ ITU-R P.531-16 to 5.6e-7 relative.
 
 ## If you are removing this
 
-Delete the whole `data/nequick/` directory in one go. Keeping the coefficient
-files without `_SOURCE_AND_LICENSE.txt` would breach the licence.
+Do not, without also removing `app/src/ccir.rs` and moving the default foF2
+backend back to `Fof2Backend::Gridded` - the app will not compile otherwise.
+If you do remove it, delete the whole `data/nequick/` directory in one go:
+keeping the coefficient files without `_SOURCE_AND_LICENSE.txt` would breach the
+licence.

@@ -212,6 +212,26 @@ The report includes, beyond the fit itself:
 - **Decode probability and false-positive rate**, over the negatives.
 - **The identification table** above.
 
+## Every WSPR number on this page predates the CCIR change
+
+**2026-08-09.** The default foF2 backend moved from the bundled synthetic
+climatology to the CCIR numerical maps (`app/src/ccir.rs`, see
+[Ionosphere Model](Ionosphere-Model.md#the-ccir-maps-what-replaced-the-guess-and-by-how-much)).
+That is a physics change under everything below: it moves foF2 by of order a
+megahertz, so it moves which paths exist, which layer answers, and therefore
+every fitted number on this page.
+
+Nothing here has been re-fitted against it. The RMS-eff, AUC, slope and
+bound-profile figures quoted below were all measured on the old F2 layer and
+should be read as history until a full run is done. The `iono_check` figures are
+unaffected - they never involved the calibrator.
+
+The one thing that can be said without a re-run: the model was **spread-limited,
+not bias-limited**, and the CCIR change is a large reduction in a source of
+spread (foF2 RMS 1.70 -> 1.10 MHz, correlation 0.723 -> 0.894 against 70 219
+soundings). Whether that reaches the link budget is exactly what has not been
+measured.
+
 ## Results worth carrying forward
 
 Two conclusions from past runs are recorded so they are not rediscovered at
@@ -242,6 +262,45 @@ cost:
   whether the corpus agrees is an open question, and one worth being careful
   about, since a single northern-summer Europe/North-America corpus is a weak
   judge of a solar-zenith law.
+
+- **MEASURED 2026-08-09: this corpus cannot identify the zenith law at all, and
+  no WSPR corpus of this construction ever will.** The scan is flat to 0.01 dB
+  RMS across `f = 0 .. 1` while the same scan resolves 0.55 dB from
+  `nu reference alt` and 0.33 dB from `E scale height`, so it is not a
+  resolution problem. `bin/rise_wiring_check` measures why. Collapsing the
+  exponent from 1.39 to 0.50 is worth **10.22 dB on the most sensitive spot in
+  the corpus** and **+0.02 dB at the median**:
+
+  | | per-spot change in charged absorption, `f=0` minus `f=1` |
+  |---|---|
+  | mean | +0.28 dB - absorbed exactly by the scale and offset |
+  | sd | 0.92 dB - the only identifiable part, against a 13.6 dB residual IQR |
+  | p50 / p90 / max | +0.02 / +0.49 / +10.22 dB |
+  | moves > 1 dB | 36 of 679 spots (5 %) |
+
+  And the 5 % tail is almost entirely two bands:
+
+  | band | n | mean | max abs | n(>1 dB) |
+  |---|---|---|---|---|
+  | 160 m | 110 | +0.82 | 10.22 | **18** |
+  | 80 m | 114 | +0.29 | 2.20 | **15** |
+  | 60 m | 118 | +0.19 | 1.16 | 2 |
+  | 40 m | 145 | +0.14 | 1.11 | 1 |
+  | 30 m and above | 192 | <= +0.15 | <= 0.72 | **0** |
+
+  33 of the 36 informative spots are 160 m and 80 m in daylight. The corpus
+  holds 50 daytime 160 m spots and 172 daytime 80 m spots out of 9126. Adding
+  more spots of the usual mix adds signal and noise in the same ratio and
+  changes nothing.
+
+  **So a flat row here is a null result about the DATA, not evidence that
+  `f = 1` is correct.** Do not read it as confirmation of the textbook layer.
+  A corpus that could judge the zenith law would be built deliberately: low
+  bands, in daylight, across a wide span of solar zenith angle at held-fixed
+  range - which is the experiment `bin/mode_audit` has to synthesise precisely
+  because WSPR does not contain it. A riometer measures the same exponent
+  directly, with no station effects, no unknown antennas and no decode
+  threshold in the way.
 
   `d_rise_fraction` is also the one anchor whose prior sits ON a bound, because
   1.0 is simultaneously the physical maximum and the incumbent model. That is

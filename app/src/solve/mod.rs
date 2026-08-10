@@ -897,21 +897,35 @@ mod tests {
 
         // Denver -> London in January, walked in UTC to a midpoint zenith angle
         // just past the old 85 deg cliff.
+        // The frequency is searched alongside the hour rather than fixed. The
+        // claim under test is about the D REGION at the terminator, and it needs
+        // a path to price; which band closes at a given terminator geometry is a
+        // property of whatever foF2 model is in force and is not what this test
+        // is asserting. Fixing the band would make this test fail whenever the
+        // F2 layer moved, for a reason that has nothing to do with the D region.
         let mut chosen: Option<(Inputs, scenario::Assumptions)> = None;
         let mut utc = 17.5_f64;
-        while utc <= 20.0 {
-            let inputs = Inputs {
-                utc_hours: utc,
-                ..Inputs::default()
-            };
-            let a = scenario::resolve(&inputs);
-            if (85.0..88.0).contains(&a.solar.zenith_angle_deg) {
-                chosen = Some((inputs, a));
-                break;
+        'search: while utc <= 20.0 {
+            for freq in [14.1_f64, 10.1, 7.1, 5.357, 3.57] {
+                let inputs = Inputs {
+                    utc_hours: utc,
+                    freq_mhz: freq,
+                    ..Inputs::default()
+                };
+                let a = scenario::resolve(&inputs);
+                if !(85.0..88.0).contains(&a.solar.zenith_angle_deg) {
+                    break;
+                }
+                let models = scenario::build_models(&inputs, &a).expect("models build");
+                if !solve(&inputs, &a, &models).solutions.is_empty() {
+                    chosen = Some((inputs, a));
+                    break 'search;
+                }
             }
             utc += 0.1;
         }
-        let (inputs, a) = chosen.expect("a terminator geometry in 17.5..=20 UTC");
+        let (inputs, a) =
+            chosen.expect("a terminator geometry in 17.5..=20 UTC with a solved path on some band");
         assert!(a.solar.is_day(), "sun is still up just past 85 deg");
 
         // The D region must still be producing at the midpoint: sample the
@@ -1013,11 +1027,22 @@ mod tests {
             ..Inputs::default()
         };
         let out = run(&inputs);
-        if out.solutions.is_empty() {
+        // The near-miss sweep runs only when NEITHER stack answered - see
+        // `solve`, where it is gated on `solutions.is_empty() &&
+        // es_solutions.is_empty()`. An Es-supported path is still an answer, so
+        // requiring an explanation when Es answered would be asking the sweep to
+        // explain a silence that is not there. This precondition used to be
+        // written against the deterministic stack alone and was never exercised,
+        // because under the previous foF2 model this geometry always produced a
+        // deterministic solution; the CCIR maps put it on Es instead.
+        if out.solutions.is_empty() && out.es_solutions.is_empty() {
             assert!(
                 !out.near_misses.is_empty() || !out.sweep_notes.is_empty(),
                 "expected near-misses or an explanation"
             );
+        }
+        for w in out.near_misses.windows(2) {
+            assert!(w[0].miss_km <= w[1].miss_km, "near misses not sorted");
         }
     }
 
