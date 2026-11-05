@@ -3,12 +3,12 @@
 //!
 //! The map itself is the output - this dialog only says what to compute and
 //! reports how the run is going. Nothing here calculates anything; it reads
-//! `state.results.coverage` and emits an [`Action`].
+//! `state.results.coverage` and emits [`Action`]s.
 
 use egui::{Button, Color32, Context, ProgressBar, RichText, Ui, vec2};
 
 use crate::state::{AppState, Busy, Modal};
-use crate::ui::actions::Action;
+use crate::ui::actions::{Action, InputChange, edited};
 use crate::ui::theme::{self, ACCENT, MUTED, WARN};
 use crate::ui::widgets::{card, data_grid, hint, kv, section};
 use skipzone_predict::coverage::{CoverageCell, MAX_POINTS, MIN_RANGE_KM};
@@ -19,7 +19,7 @@ use skipzone_predict::solve::mode_label;
 /// CPU, so even across every core a grid this size runs for many minutes.
 const LARGE_GRID: usize = 600;
 
-pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+pub fn show(ctx: &Context, state: &AppState, out: &mut Vec<Action>) {
     let open = state.ui.modals.coverage;
     super::chrome::dialog(
         ctx,
@@ -32,7 +32,7 @@ pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
     );
 }
 
-fn body(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
+fn body(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) {
     ui.label(
         RichText::new(
             "One transmitter, a grid of receiver positions. Every grid point is a full \
@@ -45,7 +45,7 @@ fn body(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
 
     ui.add_space(8.0);
     section(ui, "Grid");
-    let points = grid_controls(ui, state);
+    let points = grid_controls(ui, state, out);
 
     ui.add_space(8.0);
     run_controls(ui, state, points, out);
@@ -57,9 +57,11 @@ fn body(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
     section(ui, "Display");
     ui.horizontal(|ui| {
         ui.label(RichText::new("Tile opacity").small().color(MUTED));
-        ui.add(
-            egui::Slider::new(&mut state.inputs.display.coverage_alpha, 40..=255).show_value(false),
-        );
+        if let Some(alpha) = edited(state.inputs.display.coverage_alpha, |a| {
+            ui.add(egui::Slider::new(a, 40..=255).show_value(false));
+        }) {
+            out.push(Action::SetInput(InputChange::CoverageAlpha(alpha)));
+        }
     });
     hint(
         ui,
@@ -78,8 +80,10 @@ fn body(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
 
 /// The resolution and extent controls. Returns how many grid points the current
 /// settings would solve.
-fn grid_controls(ui: &mut Ui, state: &mut AppState) -> usize {
-    let cfg = &mut state.inputs.coverage;
+fn grid_controls(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) -> usize {
+    // Edited as a copy: the readout below describes what the controls show
+    // now, and the change is emitted once both have been drawn.
+    let mut cfg = state.inputs.coverage;
     ui.horizontal(|ui| {
         ui.label(RichText::new("Resolution").small().color(MUTED));
         ui.add(
@@ -105,8 +109,10 @@ fn grid_controls(ui: &mut Ui, state: &mut AppState) -> usize {
         )
         .on_hover_text("Half-width of the box centred on the transmitter.");
     });
+    if cfg != state.inputs.coverage {
+        out.push(Action::SetInput(InputChange::CoverageGrid(cfg)));
+    }
 
-    let cfg = state.inputs.coverage;
     let points = cfg
         .grid(state.inputs.scenario.tx_lat, state.inputs.scenario.tx_lon)
         .len();

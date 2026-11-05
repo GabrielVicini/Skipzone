@@ -480,4 +480,27 @@ mod tests {
         assert_eq!(key(&s), Some(PatternKey::of(&s.inputs.scenario)));
         assert_ne!(tx_label(&s), Some(iso_label), "recomputed");
     }
+
+    /// The coverage controls change the next run's grid and the tile
+    /// opacity, and leave the scenario alone.
+    #[test]
+    fn coverage_controls_set_the_grid_and_opacity() {
+        let (mut s, jobs) = setup();
+        let scenario = s.inputs.scenario.clone();
+        let grid = CoverageConfig {
+            half_span_deg: 12.0,
+            points_per_deg: 0.5,
+        };
+        apply(
+            &mut s,
+            &jobs,
+            [
+                Action::SetInput(InputChange::CoverageGrid(grid)),
+                Action::SetInput(InputChange::CoverageAlpha(80)),
+            ],
+        );
+        assert_eq!(s.inputs.coverage, grid);
+        assert_eq!(s.inputs.display.coverage_alpha, 80);
+        assert_eq!(s.inputs.scenario, scenario);
+    }
 }

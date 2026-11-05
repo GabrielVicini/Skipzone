@@ -15,6 +15,7 @@
 use skipzone_iono::clock::CivilDate;
 use skipzone_iono::fof2::Fof2Backend;
 use skipzone_predict::antenna::AntennaConfig;
+use skipzone_predict::coverage::CoverageConfig;
 use skipzone_predict::noise::{NoiseEnvironment, OperatingMode};
 use skipzone_predict::scenario::GroundType;
 
@@ -68,6 +69,10 @@ pub enum InputChange {
     MaxHops(u32),
     DomainTopKm(f64),
     ShowCoastlines(bool),
+    /// The coverage grid's resolution and extent.
+    CoverageGrid(CoverageConfig),
+    /// Fill opacity of the coverage tiles.
+    CoverageAlpha(u8),
     /// One end's antenna, from the Antennas dialog.
     Antenna {
         station: Station,
@@ -116,6 +121,8 @@ impl InputChange {
             Self::MaxHops(n) => s.max_hops = n,
             Self::DomainTopKm(v) => s.domain_top_km = v,
             Self::ShowCoastlines(on) => inputs.display.show_coastlines = on,
+            Self::CoverageGrid(config) => inputs.coverage = config,
+            Self::CoverageAlpha(alpha) => inputs.display.coverage_alpha = alpha,
             Self::Antenna { station, config } => match station {
                 Station::Tx => s.tx_antenna = config,
                 Station::Rx => s.rx_antenna = config,
