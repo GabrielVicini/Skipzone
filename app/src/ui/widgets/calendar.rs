@@ -5,7 +5,7 @@
 use egui::{Align, Button, Color32, Grid, Layout, RichText, Ui};
 
 use crate::ui::scratch::CalendarState;
-use crate::ui::theme::{ACCENT, MUTED};
+use crate::ui::theme::ACCENT;
 use skipzone_iono::clock::{self, CivilDate, MONTH_NAMES, WEEKDAY_INITIALS};
 
 /// What the operator picked.
@@ -57,7 +57,7 @@ pub fn picker(ui: &mut Ui, cal: &mut CalendarState, selected: CivilDate) -> Opti
         .spacing([2.0, 2.0])
         .show(ui, |ui| {
             for initial in WEEKDAY_INITIALS {
-                ui.label(RichText::new(initial).small().color(MUTED));
+                super::caption(ui, initial);
             }
             ui.end_row();
 

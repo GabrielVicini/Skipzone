@@ -7,12 +7,12 @@
 //! and renders the curves in [`crate::state::AntennaPatterns`], which are
 //! recomputed only when an input they depend on changes.
 
-use egui::{Color32, ComboBox, Context, DragValue, Grid, RichText, Sense, Stroke, Ui, pos2, vec2};
+use egui::{ComboBox, Context, DragValue, RichText, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::state::{AntennaPatterns, AppState, Modal, Station};
 use crate::ui::actions::{Action, InputChange, edited};
-use crate::ui::theme::WARN;
-use crate::ui::widgets::{card, data_grid, hint, kv, labelled_drag, section};
+use crate::ui::theme::{self, WARN};
+use crate::ui::widgets::{card, data_grid, form_grid, hint, kv, labelled_drag, section};
 use skipzone_predict::antenna::{AntennaConfig, AntennaKind, GainCurve};
 use skipzone_predict::scenario::Inputs;
 
@@ -111,36 +111,33 @@ fn end(ui: &mut Ui, title: &str, id: &str, cfg: &mut AntennaConfig, freq_mhz: f6
                 }
             });
 
-        Grid::new(format!("antenna_params_{id}"))
-            .num_columns(2)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                if cfg.kind.uses_height() {
-                    let label = if cfg.kind == AntennaKind::VerticalMonopole {
-                        "Base height above ground"
-                    } else {
-                        "Height above ground"
-                    };
-                    labelled_drag(
-                        ui,
-                        label,
-                        DragValue::new(&mut cfg.height_m)
-                            .speed(0.5)
-                            .range(0.0..=200.0)
-                            .suffix(" m"),
-                    );
-                }
-                if cfg.kind.uses_design_freq() {
-                    labelled_drag(
-                        ui,
-                        "Cut for (design freq)",
-                        DragValue::new(&mut cfg.efhw_design_mhz)
-                            .speed(0.1)
-                            .range(1.0..=30.0)
-                            .suffix(" MHz"),
-                    );
-                }
-            });
+        form_grid(ui, format!("antenna_params_{id}"), |ui| {
+            if cfg.kind.uses_height() {
+                let label = if cfg.kind == AntennaKind::VerticalMonopole {
+                    "Base height above ground"
+                } else {
+                    "Height above ground"
+                };
+                labelled_drag(
+                    ui,
+                    label,
+                    DragValue::new(&mut cfg.height_m)
+                        .speed(0.5)
+                        .range(0.0..=200.0)
+                        .suffix(" m"),
+                );
+            }
+            if cfg.kind.uses_design_freq() {
+                labelled_drag(
+                    ui,
+                    "Cut for (design freq)",
+                    DragValue::new(&mut cfg.efhw_design_mhz)
+                        .speed(0.1)
+                        .range(1.0..=30.0)
+                        .suffix(" MHz"),
+                );
+            }
+        });
 
         match cfg.kind {
             AntennaKind::Isotropic => hint(
@@ -245,10 +242,7 @@ fn plot(ui: &mut Ui, tx: &GainCurve, rx: &GainCurve) {
         db -= 5.0;
     }
 
-    for (curve, color) in [
-        (tx, Color32::from_rgb(90, 160, 240)),
-        (rx, Color32::from_rgb(240, 150, 70)),
-    ] {
+    for (curve, color) in [(tx, theme::TX_CURVE), (rx, theme::RX_CURVE)] {
         let pts: Vec<_> = curve
             .points()
             .map(|(deg, g)| pos2(x_of(deg), y_of(g)))

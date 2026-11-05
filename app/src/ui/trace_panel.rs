@@ -18,6 +18,7 @@ use crate::ui::actions::Action;
 use crate::ui::panels;
 use crate::ui::scratch::ViewScratch;
 use crate::ui::theme::{self, BAD, MUTED};
+use crate::ui::widgets;
 
 const DEFAULT_WIDTH: f32 = 430.0;
 const MIN_WIDTH: f32 = 320.0;
@@ -80,7 +81,7 @@ fn body(ui: &mut Ui, state: &AppState, actions: &mut Vec<Action>) {
             actions.push(Action::Calculate);
         }
         if busy {
-            ui.add(egui::Spinner::new().size(14.0));
+            widgets::busy_spinner(ui);
         }
         if let Some(out) = &state.results.main.outcome {
             ui.label(

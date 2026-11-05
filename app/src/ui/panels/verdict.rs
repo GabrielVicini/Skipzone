@@ -10,7 +10,7 @@
 //! a path that needs an Es sheet is not usable in the same sense as an F2 path,
 //! and one yes/no would make the F2 skip zone look unreachable.
 
-use egui::{CornerRadius, Margin, RichText, Stroke, Ui};
+use egui::{RichText, Ui};
 
 use crate::ui::theme::{self, FAIL, MUTED, WARN};
 use skipzone_predict::noise::PathState;
@@ -71,14 +71,9 @@ pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
         },
     };
 
-    egui::Frame::NONE
-        .fill(colour.gamma_multiply(0.18))
-        .stroke(Stroke::new(1.0, colour))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(8, 5))
-        .show(ui, |ui| {
-            ui.colored_label(colour, RichText::new(text).strong());
-        });
+    theme::chip_frame(colour).show(ui, |ui| {
+        ui.colored_label(colour, RichText::new(text).strong());
+    });
 
     mode_breakdown(ui, out);
 }

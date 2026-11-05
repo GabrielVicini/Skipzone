@@ -3,8 +3,8 @@
 
 use egui::{CollapsingHeader, RichText, Ui};
 
-use crate::ui::theme::{BAD, MUTED, WARN};
-use crate::ui::widgets::{data_grid, head_cells, hint, num, wide_table};
+use crate::ui::theme::{BAD, WARN};
+use crate::ui::widgets::{self, data_grid, head_cells, hint, num, wide_table};
 use skipzone_predict::solve::{SolveOutcome, mode_label};
 
 pub fn near_miss_panel(ui: &mut Ui, out: &SolveOutcome) {
@@ -60,7 +60,7 @@ pub fn errors_panel(ui: &mut Ui, out: &SolveOutcome) {
         .default_open(!out.errors.is_empty())
         .show(ui, |ui| {
             if out.errors.is_empty() {
-                ui.label(RichText::new("none").small().color(MUTED));
+                widgets::caption(ui, "none");
                 return;
             }
             for e in &out.errors {

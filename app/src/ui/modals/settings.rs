@@ -4,11 +4,11 @@
 //! between runs. This dialog defines the model (ionosphere, absorbing layer,
 //! noise environment, field and ground), which is usually set once.
 
-use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
+use egui::{ComboBox, Context, DragValue, RichText, Ui, vec2};
 
 use crate::state::{AppState, Modal};
 use crate::ui::actions::{Action, InputChange, edited};
-use crate::ui::widgets::{card, hint, labelled_drag, section};
+use crate::ui::widgets::{card, choice, form_grid, hint, labelled_drag, section};
 use skipzone_iono::fof2::Fof2Backend;
 use skipzone_predict::noise::{
     MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
@@ -54,54 +54,51 @@ fn edit<T: Copy + PartialEq>(
 fn ionosphere(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Ionosphere");
     card(ui, |ui| {
-        Grid::new("settings_iono")
-            .num_columns(2)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                ui.label("foF2 model");
-                edit(out, inputs.fof2_backend, InputChange::Fof2Backend, |v| {
-                    ComboBox::from_id_salt("fof2_backend")
-                        .selected_text(v.label())
-                        .show_ui(ui, |ui| {
-                            for b in Fof2Backend::ALL {
-                                ui.selectable_value(v, b, b.label());
-                            }
-                        });
-                });
-                ui.end_row();
-                edit(out, inputs.ssn, InputChange::Ssn, |v| {
-                    labelled_drag(
-                        ui,
-                        "Sunspot number",
-                        DragValue::new(v).speed(1.0).range(0.0..=300.0),
-                    );
-                });
-                edit(out, inputs.hmf2_km, InputChange::Hmf2Km, |v| {
-                    labelled_drag(
-                        ui,
-                        "hmF2 (peak height)",
-                        DragValue::new(v)
-                            .speed(1.0)
-                            .range(90.0..=600.0)
-                            .suffix(" km"),
-                    );
-                });
-                edit(
-                    out,
-                    inputs.scale_height_km,
-                    InputChange::ScaleHeightKm,
-                    |v| {
-                        labelled_drag(
-                            ui,
-                            "Chapman scale H",
-                            DragValue::new(v)
-                                .speed(1.0)
-                                .range(5.0..=200.0)
-                                .suffix(" km"),
-                        );
-                    },
+        form_grid(ui, "settings_iono", |ui| {
+            ui.label("foF2 model");
+            edit(out, inputs.fof2_backend, InputChange::Fof2Backend, |v| {
+                ComboBox::from_id_salt("fof2_backend")
+                    .selected_text(v.label())
+                    .show_ui(ui, |ui| {
+                        for b in Fof2Backend::ALL {
+                            ui.selectable_value(v, b, b.label());
+                        }
+                    });
+            });
+            ui.end_row();
+            edit(out, inputs.ssn, InputChange::Ssn, |v| {
+                labelled_drag(
+                    ui,
+                    "Sunspot number",
+                    DragValue::new(v).speed(1.0).range(0.0..=300.0),
                 );
             });
+            edit(out, inputs.hmf2_km, InputChange::Hmf2Km, |v| {
+                labelled_drag(
+                    ui,
+                    "hmF2 (peak height)",
+                    DragValue::new(v)
+                        .speed(1.0)
+                        .range(90.0..=600.0)
+                        .suffix(" km"),
+                );
+            });
+            edit(
+                out,
+                inputs.scale_height_km,
+                InputChange::ScaleHeightKm,
+                |v| {
+                    labelled_drag(
+                        ui,
+                        "Chapman scale H",
+                        DragValue::new(v)
+                            .speed(1.0)
+                            .range(5.0..=200.0)
+                            .suffix(" km"),
+                    );
+                },
+            );
+        });
         hint(
             ui,
             &match inputs.fof2_backend {
@@ -157,33 +154,30 @@ fn ionosphere(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
                 );
             });
             ui.add_enabled_ui(inputs.es_manual, |ui| {
-                Grid::new("settings_es")
-                    .num_columns(2)
-                    .spacing([10.0, 4.0])
-                    .show(ui, |ui| {
-                        edit(out, inputs.foes_mhz, InputChange::FoesMhz, |v| {
-                            labelled_drag(
-                                ui,
-                                "foEs",
-                                DragValue::new(v)
-                                    .speed(0.1)
-                                    .range(1.0..=30.0)
-                                    .suffix(" MHz"),
-                            );
-                        });
-                        edit(
-                            out,
-                            inputs.es_probability,
-                            InputChange::EsProbability,
-                            |v| {
-                                labelled_drag(
-                                    ui,
-                                    "Occurrence probability",
-                                    DragValue::new(v).speed(0.01).range(0.0..=1.0),
-                                );
-                            },
+                form_grid(ui, "settings_es", |ui| {
+                    edit(out, inputs.foes_mhz, InputChange::FoesMhz, |v| {
+                        labelled_drag(
+                            ui,
+                            "foEs",
+                            DragValue::new(v)
+                                .speed(0.1)
+                                .range(1.0..=30.0)
+                                .suffix(" MHz"),
                         );
                     });
+                    edit(
+                        out,
+                        inputs.es_probability,
+                        InputChange::EsProbability,
+                        |v| {
+                            labelled_drag(
+                                ui,
+                                "Occurrence probability",
+                                DragValue::new(v).speed(0.01).range(0.0..=1.0),
+                            );
+                        },
+                    );
+                });
             });
         });
     });
@@ -210,43 +204,40 @@ fn absorption(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
         );
         if inputs.collision_manual {
             ui.add_space(4.0);
-            Grid::new("settings_collisions")
-                .num_columns(2)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    edit(out, inputs.nu0_per_s, InputChange::Nu0PerS, |v| {
-                        labelled_drag(
-                            ui,
-                            "nu at ref alt",
-                            DragValue::new(v).speed(1e3).range(0.0..=1e9).suffix(" /s"),
-                        );
-                    });
-                    edit(out, inputs.nu_ref_alt_km, InputChange::NuRefAltKm, |v| {
-                        labelled_drag(
-                            ui,
-                            "ref altitude",
-                            DragValue::new(v)
-                                .speed(1.0)
-                                .range(50.0..=300.0)
-                                .suffix(" km"),
-                        );
-                    });
-                    edit(
-                        out,
-                        inputs.nu_scale_height_km,
-                        InputChange::NuScaleHeightKm,
-                        |v| {
-                            labelled_drag(
-                                ui,
-                                "nu scale H",
-                                DragValue::new(v)
-                                    .speed(0.5)
-                                    .range(2.0..=100.0)
-                                    .suffix(" km"),
-                            );
-                        },
+            form_grid(ui, "settings_collisions", |ui| {
+                edit(out, inputs.nu0_per_s, InputChange::Nu0PerS, |v| {
+                    labelled_drag(
+                        ui,
+                        "nu at ref alt",
+                        DragValue::new(v).speed(1e3).range(0.0..=1e9).suffix(" /s"),
                     );
                 });
+                edit(out, inputs.nu_ref_alt_km, InputChange::NuRefAltKm, |v| {
+                    labelled_drag(
+                        ui,
+                        "ref altitude",
+                        DragValue::new(v)
+                            .speed(1.0)
+                            .range(50.0..=300.0)
+                            .suffix(" km"),
+                    );
+                });
+                edit(
+                    out,
+                    inputs.nu_scale_height_km,
+                    InputChange::NuScaleHeightKm,
+                    |v| {
+                        labelled_drag(
+                            ui,
+                            "nu scale H",
+                            DragValue::new(v)
+                                .speed(0.5)
+                                .range(2.0..=100.0)
+                                .suffix(" km"),
+                        );
+                    },
+                );
+            });
         }
     });
 }
@@ -278,61 +269,56 @@ fn noise(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
 
         ui.add_space(6.0);
         ui.label(RichText::new("Mode preset (sets bandwidth + threshold)").small());
-        ComboBox::from_id_salt("settings_op_mode")
-            .selected_text(inputs.op_mode.label())
-            .show_ui(ui, |ui| {
-                for mode in OperatingMode::ALL {
-                    // Picking a preset seeds the bandwidth and threshold below.
-                    if ui
-                        .selectable_label(inputs.op_mode == mode, mode.label())
-                        .clicked()
-                    {
-                        out.push(Action::SetInput(InputChange::OpMode(mode)));
-                    }
-                }
-            });
+        // Picking a preset seeds the bandwidth and threshold below.
+        if let Some(mode) = choice(
+            ui,
+            "settings_op_mode",
+            None,
+            inputs.op_mode,
+            &OperatingMode::ALL,
+            OperatingMode::label,
+        ) {
+            out.push(Action::SetInput(InputChange::OpMode(mode)));
+        }
 
         ui.add_space(4.0);
-        Grid::new("settings_snr")
-            .num_columns(2)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                edit(out, inputs.tx_power_w, InputChange::TxPower, |v| {
-                    labelled_drag(
-                        ui,
-                        "TX power",
-                        DragValue::new(v)
-                            .speed(5.0)
-                            .range(0.1..=10_000.0)
-                            .suffix(" W"),
-                    );
-                });
-                edit(out, inputs.bandwidth_hz, InputChange::BandwidthHz, |v| {
-                    labelled_drag(
-                        ui,
-                        "RX bandwidth",
-                        DragValue::new(v)
-                            .speed(10.0)
-                            .range(10.0..=20_000.0)
-                            .suffix(" Hz"),
-                    );
-                });
-                edit(
-                    out,
-                    inputs.snr_threshold_db,
-                    InputChange::SnrThresholdDb,
-                    |v| {
-                        labelled_drag(
-                            ui,
-                            "SNR threshold",
-                            DragValue::new(v)
-                                .speed(0.5)
-                                .range(-30.0..=60.0)
-                                .suffix(" dB"),
-                        );
-                    },
+        form_grid(ui, "settings_snr", |ui| {
+            edit(out, inputs.tx_power_w, InputChange::TxPower, |v| {
+                labelled_drag(
+                    ui,
+                    "TX power",
+                    DragValue::new(v)
+                        .speed(5.0)
+                        .range(0.1..=10_000.0)
+                        .suffix(" W"),
                 );
             });
+            edit(out, inputs.bandwidth_hz, InputChange::BandwidthHz, |v| {
+                labelled_drag(
+                    ui,
+                    "RX bandwidth",
+                    DragValue::new(v)
+                        .speed(10.0)
+                        .range(10.0..=20_000.0)
+                        .suffix(" Hz"),
+                );
+            });
+            edit(
+                out,
+                inputs.snr_threshold_db,
+                InputChange::SnrThresholdDb,
+                |v| {
+                    labelled_drag(
+                        ui,
+                        "SNR threshold",
+                        DragValue::new(v)
+                            .speed(0.5)
+                            .range(-30.0..=60.0)
+                            .suffix(" dB"),
+                    );
+                },
+            );
+        });
         hint(
             ui,
             "A path is called USABLE only when its SNR clears this threshold; a path that \
@@ -443,24 +429,21 @@ fn surface(ui: &mut Ui, inputs: &Inputs, show_coastlines: bool, out: &mut Vec<Ac
 fn geometry(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Solver geometry");
     card(ui, |ui| {
-        Grid::new("settings_geometry")
-            .num_columns(2)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                edit(out, inputs.max_hops, InputChange::MaxHops, |v| {
-                    labelled_drag(ui, "Max hops", DragValue::new(v).range(1..=8));
-                });
-                edit(out, inputs.domain_top_km, InputChange::DomainTopKm, |v| {
-                    labelled_drag(
-                        ui,
-                        "Domain top",
-                        DragValue::new(v)
-                            .speed(10.0)
-                            .range(400.0..=2000.0)
-                            .suffix(" km"),
-                    );
-                });
+        form_grid(ui, "settings_geometry", |ui| {
+            edit(out, inputs.max_hops, InputChange::MaxHops, |v| {
+                labelled_drag(ui, "Max hops", DragValue::new(v).range(1..=8));
             });
+            edit(out, inputs.domain_top_km, InputChange::DomainTopKm, |v| {
+                labelled_drag(
+                    ui,
+                    "Domain top",
+                    DragValue::new(v)
+                        .speed(10.0)
+                        .range(400.0..=2000.0)
+                        .suffix(" km"),
+                );
+            });
+        });
         hint(
             ui,
             "Multi-hop paths home one hop of 1/N the great-circle arc, then propagate N \

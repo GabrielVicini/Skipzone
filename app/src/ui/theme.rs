@@ -100,6 +100,76 @@ pub fn popup_frame() -> Frame {
         })
 }
 
+/// Fill of a top-bar menu button while its menu is open.
+pub const MENU_OPEN_FILL: Color32 = Color32::from_rgba_premultiplied(0x18, 0x18, 0x18, 0x18);
+
+/// Frame for the verdict chip: a tinted fill and an outline in `colour`.
+pub fn chip_frame(colour: Color32) -> Frame {
+    Frame::NONE
+        .fill(colour.gamma_multiply(0.18))
+        .stroke(Stroke::new(1.0, colour))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(8, 5))
+}
+
+// Stations
+
+/// The transmitter, in the header row and on the map.
+pub const TX_COLOR: Color32 = Color32::from_rgb(0xD0, 0x21, 0x1C);
+/// The receiver, in the header row and on the map.
+pub const RX_COLOR: Color32 = Color32::from_rgb(0x14, 0x65, 0xC0);
+/// The transmitter's gain curve in the Antennas plot.
+pub const TX_CURVE: Color32 = Color32::from_rgb(90, 160, 240);
+/// The receiver's gain curve in the Antennas plot.
+pub const RX_CURVE: Color32 = Color32::from_rgb(240, 150, 70);
+
+// Charts
+
+/// Background of a chart's plot area.
+pub const PLOT_BG: Color32 = Color32::from_rgb(0x16, 0x1A, 0x20);
+/// Chart gridlines.
+pub const PLOT_GRID: Color32 = Color32::from_gray(0x2E);
+/// The crosshair under the pointer.
+pub const PLOT_HOVER: Color32 = Color32::from_rgba_premultiplied(0x60, 0x60, 0x60, 0x60);
+/// Background of the verdict band.
+pub const BAND_BG: Color32 = Color32::from_gray(0x1E);
+/// Frequency labels on the verdict band.
+pub const BAND_LABEL: Color32 = Color32::from_gray(0xE0);
+
+/// Best FREQ series. The same quantity has the same colour in every chart.
+pub const SERIES_SNR: Color32 = Color32::from_rgb(0x6E, 0xC8, 0xF2);
+pub const SERIES_POWER: Color32 = Color32::from_rgb(0x8E, 0xD0, 0x81);
+pub const SERIES_NOISE: Color32 = Color32::from_rgb(0xF2, 0x9A, 0x76);
+pub const SERIES_LOSS: Color32 = Color32::from_rgb(0xC0, 0xA6, 0xF0);
+pub const SERIES_ABSORPTION: Color32 = Color32::from_rgb(0xF2, 0xD3, 0x5C);
+
+// Map
+
+/// Deep water, and the colour of anything the land layer does not cover.
+pub const MAP_OCEAN: Color32 = Color32::from_rgb(0x0E, 0x1C, 0x28);
+/// Land: a low-saturation grey a little lighter than the water, leaving the
+/// colours for the coverage ramp and the ray paths.
+pub const MAP_LAND: Color32 = Color32::from_rgb(0x27, 0x2E, 0x33);
+/// Lakes read as water, because to the ground-reflection model they are water.
+pub const MAP_LAKE: Color32 = Color32::from_rgb(0x11, 0x24, 0x33);
+/// The void outside +/-90 latitude. Not map, not water - nothing, and it says
+/// so rather than pretending the world continues.
+pub const MAP_VOID: Color32 = Color32::from_rgb(0x08, 0x0A, 0x0D);
+/// Shoreline stroke drawn over the raster from the full-detail rings.
+pub const MAP_COAST: Color32 = Color32::from_rgb(0x46, 0x56, 0x62);
+pub const GRATICULE: Color32 = Color32::from_rgba_premultiplied(0x3A, 0x46, 0x50, 0x90);
+pub const GRATICULE_MAJOR: Color32 = Color32::from_rgba_premultiplied(0x54, 0x64, 0x72, 0xB0);
+pub const GRATICULE_LABEL: Color32 = Color32::from_rgb(0x7A, 0x8A, 0x96);
+/// Night shading. Its alpha follows the solar elevation.
+pub const NIGHT_RGB: [u8; 3] = [4, 8, 22];
+pub const SUN_FILL: Color32 = Color32::from_rgb(0xFF, 0xD1, 0x54);
+pub const SUN_RING: Color32 = Color32::from_rgb(0xB8, 0x86, 0x00);
+/// Colours for the coastline debug overlay's two layers: land outlines and
+/// lake outlines. Chosen to read over both the basemap and the night shading
+/// without competing with the per-solution path colours.
+pub const LAND_OUTLINE: Color32 = Color32::from_rgb(0xFF, 0x6D, 0x00);
+pub const LAKE_OUTLINE: Color32 = Color32::from_rgb(0x00, 0xB8, 0xD4);
+
 // Text and spacing
 
 /// Text and spacing scale with the window width, so the same readouts stay

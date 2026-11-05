@@ -13,12 +13,10 @@
 
 use egui::{Align2, Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::ui::theme::MUTED;
+use crate::ui::theme::{self, MUTED};
 
 const AXIS_LEFT: f32 = 52.0;
 const AXIS_BOTTOM: f32 = 18.0;
-const PLOT_BG: Color32 = Color32::from_rgb(0x16, 0x1A, 0x20);
-const GRID: Color32 = Color32::from_gray(0x2E);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SeriesKind {
@@ -136,7 +134,7 @@ impl<'a> Chart<'a> {
 
         let (y_lo, y_hi) = self.y_bounds();
         let painter = ui.painter_at(rect);
-        painter.rect_filled(plot, 4.0, PLOT_BG);
+        painter.rect_filled(plot, 4.0, theme::PLOT_BG);
 
         let x_of = |x: f64| {
             let t = (x - self.x_range.0) / (self.x_range.1 - self.x_range.0).max(1e-12);
@@ -156,7 +154,7 @@ impl<'a> Chart<'a> {
             let py = y_of(y);
             painter.line_segment(
                 [pos2(plot.left(), py), pos2(plot.right(), py)],
-                Stroke::new(1.0, GRID),
+                Stroke::new(1.0, theme::PLOT_GRID),
             );
             painter.text(
                 pos2(plot.left() - 6.0, py),
@@ -171,7 +169,7 @@ impl<'a> Chart<'a> {
             let px = x_of(x);
             painter.line_segment(
                 [pos2(px, plot.top()), pos2(px, plot.bottom())],
-                Stroke::new(1.0, GRID.gamma_multiply(0.6)),
+                Stroke::new(1.0, theme::PLOT_GRID.gamma_multiply(0.6)),
             );
             painter.text(
                 pos2(px, plot.bottom() + 3.0),
@@ -245,7 +243,7 @@ impl<'a> Chart<'a> {
         let painter = ui.painter_at(plot);
         painter.line_segment(
             [pos2(pos.x, plot.top()), pos2(pos.x, plot.bottom())],
-            Stroke::new(1.0, Color32::from_white_alpha(0x60)),
+            Stroke::new(1.0, theme::PLOT_HOVER),
         );
         let t = f64::from((pos.x - plot.left()) / plot.width().max(1.0));
         Some(self.x_range.0 + t * (self.x_range.1 - self.x_range.0))

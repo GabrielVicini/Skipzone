@@ -16,7 +16,6 @@ use crate::ui::theme;
 use skipzone_predict::coverage::{CoverageCell, LAT_LIMIT_DEG};
 use skipzone_predict::solve::Solution;
 
-use super::basemap;
 use super::projection::{Proj, unwrap_run};
 
 /// The three copies of the world a layer must consider. The view can never be
@@ -25,10 +24,6 @@ use super::projection::{Proj, unwrap_run};
 const WORLD_SHIFTS: [f64; 3] = [-360.0, 0.0, 360.0];
 
 // Graticule
-
-const GRATICULE: Color32 = Color32::from_rgba_premultiplied(0x3A, 0x46, 0x50, 0x90);
-const GRATICULE_MAJOR: Color32 = Color32::from_rgba_premultiplied(0x54, 0x64, 0x72, 0xB0);
-const GRATICULE_LABEL: Color32 = Color32::from_rgb(0x7A, 0x8A, 0x96);
 
 /// Candidate graticule spacings, coarsest first. The first one that puts its
 /// lines at least [`MIN_GRID_PX`] apart on screen wins, so the lattice thins out
@@ -60,9 +55,9 @@ pub fn graticule(painter: &Painter, proj: &Proj) {
         if lat.abs() <= 90.0 {
             let y = proj.project(lat, proj.camera().lon).y;
             let color = if lat.abs() < 1e-9 {
-                GRATICULE_MAJOR
+                theme::GRATICULE_MAJOR
             } else {
-                GRATICULE
+                theme::GRATICULE
             };
             painter.line_segment(
                 [pos2(view.left(), y), pos2(view.right(), y)],
@@ -73,7 +68,7 @@ pub fn graticule(painter: &Painter, proj: &Proj) {
                 Align2::LEFT_BOTTOM,
                 format_lat(lat),
                 FontId::monospace(10.0),
-                GRATICULE_LABEL,
+                theme::GRATICULE_LABEL,
             );
         }
         lat += step;
@@ -86,9 +81,9 @@ pub fn graticule(painter: &Painter, proj: &Proj) {
         let x = proj.project_unwrapped(0.0, lon).x;
         let wrapped = super::projection::wrap_lon(lon);
         let color = if wrapped.abs() < 1e-9 || (wrapped.abs() - 180.0).abs() < 1e-9 {
-            GRATICULE_MAJOR
+            theme::GRATICULE_MAJOR
         } else {
-            GRATICULE
+            theme::GRATICULE
         };
         painter.line_segment(
             [pos2(x, view.top()), pos2(x, view.bottom())],
@@ -99,7 +94,7 @@ pub fn graticule(painter: &Painter, proj: &Proj) {
             Align2::LEFT_TOP,
             format_lon(wrapped),
             FontId::monospace(10.0),
-            GRATICULE_LABEL,
+            theme::GRATICULE_LABEL,
         );
         lon += step;
     }
@@ -184,7 +179,10 @@ pub fn terminator(painter: &Painter, proj: &Proj, decl_deg: f64, sub_lon_deg: f6
             let cos_chi =
                 (lat.sin() * sin_d + lat.cos() * cos_d * (lon - sub).cos()).clamp(-1.0, 1.0);
             let elev = cos_chi.asin().to_degrees();
-            let color = Color32::from_rgba_unmultiplied(4, 8, 22, night_alpha(elev));
+            let color = {
+                let [r, g, b] = theme::NIGHT_RGB;
+                Color32::from_rgba_unmultiplied(r, g, b, night_alpha(elev))
+            };
             mesh.vertices.push(Vertex {
                 pos: pos2(px, py),
                 uv: WHITE_UV,
@@ -211,22 +209,12 @@ pub fn terminator(painter: &Painter, proj: &Proj, decl_deg: f64, sub_lon_deg: f6
     // Subsolar sun marker, when it falls on screen.
     let sun = proj.project(decl_deg, sub_lon_deg);
     if area.contains(sun) {
-        painter.circle_filled(sun, 6.0, Color32::from_rgb(0xFF, 0xD1, 0x54));
-        painter.circle_stroke(
-            sun,
-            6.0,
-            Stroke::new(1.5, Color32::from_rgb(0xB8, 0x86, 0x00)),
-        );
+        painter.circle_filled(sun, 6.0, theme::SUN_FILL);
+        painter.circle_stroke(sun, 6.0, Stroke::new(1.5, theme::SUN_RING));
     }
 }
 
 // Coastline
-
-/// Colours for the debug overlay's two layers: land outlines and lake outlines.
-/// Chosen to read over both the basemap and the night shading without competing
-/// with the per-solution path colours.
-const LAND_OUTLINE: Color32 = Color32::from_rgb(0xFF, 0x6D, 0x00);
-const LAKE_OUTLINE: Color32 = Color32::from_rgb(0x00, 0xB8, 0xD4);
 
 /// Smallest on-screen extent, in pixels, a ring is worth stroking at.
 const MIN_RING_PX: f64 = 2.5;
@@ -237,7 +225,7 @@ const MIN_SEGMENT_PX: f32 = 1.5;
 
 /// The shoreline, stroked from the full-detail rings over the raster basemap.
 ///
-/// Two jobs in one pass. Normally it is the quiet [`basemap::COAST`] hairline
+/// Two jobs in one pass. Normally it is the quiet [`theme::MAP_COAST`] hairline
 /// that keeps the coast crisp when the raster has been magnified past its
 /// resolution. With `debug` set it becomes the coastline auto-detection overlay:
 /// the land and lake rings in their own colours, so a hop's "sea water" or
@@ -247,9 +235,9 @@ pub fn coastline(painter: &Painter, proj: &Proj, debug: bool) {
         return;
     };
     let (land_color, lake_color, width) = if debug {
-        (LAND_OUTLINE, LAKE_OUTLINE, 1.0)
+        (theme::LAND_OUTLINE, theme::LAKE_OUTLINE, 1.0)
     } else {
-        (basemap::COAST, basemap::COAST, 1.0)
+        (theme::MAP_COAST, theme::MAP_COAST, 1.0)
     };
     let view = proj.rect().intersect(proj.world_rect());
     draw_rings(
@@ -511,8 +499,8 @@ pub fn paths(
         }
     }
 
-    station(painter, proj, tx, "TX", Color32::from_rgb(0xD0, 0x21, 0x1C));
-    station(painter, proj, rx, "RX", Color32::from_rgb(0x14, 0x65, 0xC0));
+    station(painter, proj, tx, "TX", theme::TX_COLOR);
+    station(painter, proj, rx, "RX", theme::RX_COLOR);
 }
 
 fn station(painter: &Painter, proj: &Proj, at: (f64, f64), label: &str, color: Color32) {

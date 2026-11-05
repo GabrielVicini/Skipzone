@@ -17,6 +17,7 @@
 
 use egui::{Color32, ColorImage, Context, TextureHandle, TextureOptions, TextureWrapMode};
 
+use crate::ui::theme::{MAP_LAKE, MAP_LAND, MAP_OCEAN};
 use skipzone_predict::coastline::{self, Outline};
 
 /// Raster size. Width is twice height because the projection is
@@ -24,33 +25,20 @@ use skipzone_predict::coastline::{self, Outline};
 pub const TEX_W: usize = 2048;
 pub const TEX_H: usize = 1024;
 
-/// Deep water, and the colour of anything the land layer does not cover.
-pub const OCEAN: Color32 = Color32::from_rgb(0x0E, 0x1C, 0x28);
-/// Land: a low-saturation grey a little lighter than the water, leaving the
-/// colours for the coverage ramp and the ray paths.
-pub const LAND: Color32 = Color32::from_rgb(0x27, 0x2E, 0x33);
-/// Lakes read as water, because to the ground-reflection model they are water.
-pub const LAKE: Color32 = Color32::from_rgb(0x11, 0x24, 0x33);
-/// The void outside +/-90 latitude. Not map, not water - nothing, and it says
-/// so rather than pretending the world continues.
-pub const VOID: Color32 = Color32::from_rgb(0x08, 0x0A, 0x0D);
-/// Shoreline stroke drawn over the raster from the full-detail rings.
-pub const COAST: Color32 = Color32::from_rgb(0x46, 0x56, 0x62);
-
 /// Build the basemap texture, or `None` if the coastline data could not be
 /// read. A missing basemap must degrade to an empty ocean, never to a panic:
 /// the map is still usable for geometry with no land drawn on it at all.
 #[must_use]
 pub fn load(ctx: &Context) -> Option<TextureHandle> {
     let coast = coastline::get().ok()?;
-    let mut pixels = vec![OCEAN; TEX_W * TEX_H];
+    let mut pixels = vec![MAP_OCEAN; TEX_W * TEX_H];
     for shape in coast.land_outlines() {
-        fill_shape(&mut pixels, shape, LAND);
+        fill_shape(&mut pixels, shape, MAP_LAND);
     }
     // Lakes after land, because a lake polygon lies inside a land polygon and
     // has to win - the same precedence the classifier applies.
     for shape in coast.lake_outlines() {
-        fill_shape(&mut pixels, shape, LAKE);
+        fill_shape(&mut pixels, shape, MAP_LAKE);
     }
     let image = ColorImage::new([TEX_W, TEX_H], pixels);
     // Repeating in `u` lets the whole world be drawn as one quad at any camera
@@ -174,12 +162,12 @@ mod tests {
         let Ok(coast) = coastline::get() else {
             return; // no data bundled: the app degrades to an empty ocean
         };
-        let mut pixels = vec![OCEAN; TEX_W * TEX_H];
+        let mut pixels = vec![MAP_OCEAN; TEX_W * TEX_H];
         for shape in coast.land_outlines() {
-            fill_shape(&mut pixels, shape, LAND);
+            fill_shape(&mut pixels, shape, MAP_LAND);
         }
         for shape in coast.lake_outlines() {
-            fill_shape(&mut pixels, shape, LAKE);
+            fill_shape(&mut pixels, shape, MAP_LAKE);
         }
         let at = |lat: f64, lon: f64| {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -188,16 +176,16 @@ mod tests {
             let col = lon_col(lon) as usize;
             pixels[row.min(TEX_H - 1) * TEX_W + col.min(TEX_W - 1)]
         };
-        assert_eq!(at(45.0, -100.0), LAND, "central North America");
-        assert_eq!(at(30.0, -40.0), OCEAN, "mid-Atlantic");
-        assert_eq!(at(43.6, -87.0), LAKE, "Lake Michigan");
-        assert_eq!(at(-25.0, 134.0), LAND, "central Australia");
+        assert_eq!(at(45.0, -100.0), MAP_LAND, "central North America");
+        assert_eq!(at(30.0, -40.0), MAP_OCEAN, "mid-Atlantic");
+        assert_eq!(at(43.6, -87.0), MAP_LAKE, "Lake Michigan");
+        assert_eq!(at(-25.0, 134.0), MAP_LAND, "central Australia");
     }
 
     /// Every texel must be written; an unpainted texel would show as black.
     #[test]
     fn the_whole_world_is_painted() {
-        let pixels = vec![OCEAN; TEX_W * TEX_H];
+        let pixels = vec![MAP_OCEAN; TEX_W * TEX_H];
         assert_eq!(pixels.len(), TEX_W * TEX_H);
         assert!(pixels.iter().all(|&p| p != Color32::TRANSPARENT));
     }

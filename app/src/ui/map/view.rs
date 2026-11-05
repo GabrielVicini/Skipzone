@@ -16,6 +16,7 @@ use egui::{CentralPanel, Color32, Frame, Mesh, Rect, Sense, TextureHandle, Ui, p
 use crate::state::AppState;
 use crate::ui::actions::Action;
 use crate::ui::scratch::ViewScratch;
+use crate::ui::theme;
 use skipzone_iono::solar;
 use skipzone_predict::scenario::Inputs;
 
@@ -119,7 +120,7 @@ fn paint(ui: &Ui, proj: &Proj, state: &AppState, basemap: Option<&TextureHandle>
 
     // The void first, so the world is drawn onto a surface that is visibly
     // not-the-world rather than onto whatever was there before.
-    painter.rect_filled(proj.rect(), 0.0, basemap::VOID);
+    painter.rect_filled(proj.rect(), 0.0, theme::MAP_VOID);
 
     let world = proj.world_rect();
     if let Some(tex) = basemap {
@@ -137,7 +138,7 @@ fn paint(ui: &Ui, proj: &Proj, state: &AppState, basemap: Option<&TextureHandle>
         );
         painter.add(mesh);
     } else {
-        painter.rect_filled(world, 0.0, basemap::OCEAN);
+        painter.rect_filled(world, 0.0, theme::MAP_OCEAN);
     }
     layers::coastline(&painter, proj, false);
     layers::graticule(&painter, proj);

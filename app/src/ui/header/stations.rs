@@ -11,8 +11,8 @@ use egui::{Color32, RichText, Ui};
 use crate::state::{AppState, Station};
 use crate::ui::actions::{Action, InputChange};
 use crate::ui::scratch::{LocationEntry, LocationMode, ViewScratch};
-use crate::ui::theme::MUTED;
-use crate::ui::widgets::fields;
+use crate::ui::theme::{self, MUTED};
+use crate::ui::widgets::{self, fields};
 
 /// TX above RX, both on the solid header background.
 pub fn rows(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
@@ -22,14 +22,14 @@ pub fn rows(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut 
         (
             Station::Tx,
             "TX",
-            Color32::from_rgb(0xD0, 0x21, 0x1C),
+            theme::TX_COLOR,
             &mut scratch.tx,
             (inputs.tx_lat, inputs.tx_lon),
         ),
         (
             Station::Rx,
             "RX",
-            Color32::from_rgb(0x14, 0x65, 0xC0),
+            theme::RX_COLOR,
             &mut scratch.rx,
             (inputs.rx_lat, inputs.rx_lon),
         ),
@@ -71,7 +71,7 @@ fn row(
         let valid = entry.is_valid();
         let typing = match entry.mode {
             LocationMode::Grid => {
-                fields::caption(ui, "grid");
+                widgets::caption(ui, "grid");
                 let response = fields::text(ui, &mut entry.grid_text, 84.0, valid);
                 if response.changed() {
                     committed = entry.parsed_grid();
@@ -85,9 +85,9 @@ fn row(
                 response.has_focus()
             }
             LocationMode::LatLon => {
-                fields::caption(ui, "lat");
+                widgets::caption(ui, "lat");
                 let lat_response = fields::text(ui, &mut entry.lat_text, 62.0, valid);
-                fields::caption(ui, "lon");
+                widgets::caption(ui, "lon");
                 let lon_response = fields::text(ui, &mut entry.lon_text, 62.0, valid);
                 if lat_response.changed() || lon_response.changed() {
                     committed = entry.parsed_lat_lon();

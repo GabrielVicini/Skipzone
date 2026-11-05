@@ -13,17 +13,10 @@ use crate::state::{AppState, Modal};
 use crate::ui::actions::{Action, InputChange};
 use crate::ui::theme::{self, ACCENT, MUTED};
 use crate::ui::widgets::chart::{Chart, Series};
-use crate::ui::widgets::{band, card, data_grid, hint, kv, section};
+use crate::ui::widgets::{self, band, card, data_grid, hint, kv, section};
 use skipzone_predict::noise::PathState;
 use skipzone_predict::solve::mode_label;
 use skipzone_predict::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepBest, SweepPoint};
-
-/// Colours used consistently across the three charts for the same quantity.
-const SNR_COLOR: Color32 = Color32::from_rgb(0x6E, 0xC8, 0xF2);
-const POWER_COLOR: Color32 = Color32::from_rgb(0x8E, 0xD0, 0x81);
-const NOISE_COLOR: Color32 = Color32::from_rgb(0xF2, 0x9A, 0x76);
-const LOSS_COLOR: Color32 = Color32::from_rgb(0xC0, 0xA6, 0xF0);
-const ABSORPTION_COLOR: Color32 = Color32::from_rgb(0xF2, 0xD3, 0x5C);
 
 pub fn show(ctx: &Context, state: &AppState, out: &mut Vec<Action>) {
     let busy = state.results.is_busy();
@@ -126,7 +119,7 @@ fn controls(ui: &mut Ui, best: Option<SweepBest>, params: Params, out: &mut Vec<
             out.push(Action::BestFrequency);
         }
         if params.busy {
-            ui.add(egui::Spinner::new().size(14.0));
+            widgets::busy_spinner(ui);
         }
         if let Some(best) = best
             && ui
@@ -167,8 +160,8 @@ fn charts(
     let mut chart = Chart::new(range)
         .height(160.0)
         .unit(" dB")
-        .series(Series::line(SNR_COLOR, &snr))
-        .series(Series::dots(SNR_COLOR, &snr))
+        .series(Series::line(theme::SERIES_SNR, &snr))
+        .series(Series::dots(theme::SERIES_SNR, &snr))
         .rule(params.threshold_db, theme::OK, "threshold")
         .marker(params.tuned_mhz, Color32::WHITE, "tuned");
     if let Some(mhz) = best_mhz {
@@ -185,8 +178,8 @@ fn charts(
     let mut chart = Chart::new(range)
         .height(150.0)
         .unit(" dBm")
-        .series(Series::line(POWER_COLOR, &rx_power))
-        .series(Series::line(NOISE_COLOR, &noise))
+        .series(Series::line(theme::SERIES_POWER, &rx_power))
+        .series(Series::line(theme::SERIES_NOISE, &noise))
         .marker(params.tuned_mhz, Color32::WHITE, "tuned");
     if let Some(mhz) = best_mhz {
         chart = chart.marker(mhz, ACCENT, "best");
@@ -195,8 +188,8 @@ fn charts(
     swatches(
         ui,
         &[
-            (POWER_COLOR, "received power"),
-            (NOISE_COLOR, "noise floor at the receiver"),
+            (theme::SERIES_POWER, "received power"),
+            (theme::SERIES_NOISE, "noise floor at the receiver"),
         ],
     );
 
@@ -204,8 +197,8 @@ fn charts(
     let mut chart = Chart::new(range)
         .height(150.0)
         .unit(" dB")
-        .series(Series::line(LOSS_COLOR, &loss))
-        .series(Series::line(ABSORPTION_COLOR, &absorption))
+        .series(Series::line(theme::SERIES_LOSS, &loss))
+        .series(Series::line(theme::SERIES_ABSORPTION, &absorption))
         .marker(params.tuned_mhz, Color32::WHITE, "tuned");
     if let Some(mhz) = best_mhz {
         chart = chart.marker(mhz, ACCENT, "best");
@@ -214,8 +207,8 @@ fn charts(
     swatches(
         ui,
         &[
-            (LOSS_COLOR, "total system loss"),
-            (ABSORPTION_COLOR, "ionospheric absorption"),
+            (theme::SERIES_LOSS, "total system loss"),
+            (theme::SERIES_ABSORPTION, "ionospheric absorption"),
         ],
     );
 
@@ -281,8 +274,7 @@ fn readout(ui: &mut Ui, points: &[SweepPoint], hovered: Option<f64>, params: Par
 fn swatches(ui: &mut Ui, entries: &[(Color32, &str)]) {
     ui.horizontal_wrapped(|ui| {
         for (colour, label) in entries {
-            ui.colored_label(*colour, RichText::new("\u{2014}").strong());
-            ui.label(RichText::new(*label).small().color(MUTED));
+            widgets::swatch(ui, *colour, RichText::new("\u{2014}").strong(), label);
         }
     });
 }

@@ -1,14 +1,74 @@
 //! Small building blocks shared by every readout: section headers, key/value
 //! rows, framed cards and striped data grids.
 
-use egui::{DragValue, Grid, Layout, RichText, ScrollArea, Ui};
+use egui::{Color32, DragValue, Grid, Layout, ProgressBar, RichText, ScrollArea, Spinner, Ui};
 
-use crate::ui::theme::{self, MUTED};
+use crate::ui::theme::{self, ACCENT, MUTED};
+
+/// Small muted caption next to a control.
+pub fn caption(ui: &mut Ui, text: impl Into<String>) {
+    ui.label(RichText::new(text).small().color(MUTED));
+}
 
 /// Small muted explanatory text under a control.
 pub fn hint(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
-    ui.label(RichText::new(text).small().color(MUTED));
+    caption(ui, text);
+}
+
+/// One legend entry: a glyph in `colour`, then a muted caption.
+pub fn swatch(ui: &mut Ui, colour: Color32, glyph: RichText, text: &str) {
+    ui.colored_label(colour, glyph);
+    caption(ui, text);
+}
+
+/// The spinner shown while a job runs.
+pub fn busy_spinner(ui: &mut Ui) {
+    ui.add(Spinner::new().size(14.0));
+}
+
+/// A progress bar in the accent colour, with a small caption inside.
+pub fn progress_bar(fraction: f32, text: String) -> ProgressBar {
+    ProgressBar::new(fraction)
+        .fill(ACCENT.gamma_multiply(0.7))
+        .text(RichText::new(text).small())
+}
+
+/// Dropdown over `options`. Returns the option clicked this frame, if any,
+/// even when it is the current one.
+pub fn choice<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    width: Option<f32>,
+    current: T,
+    options: &[T],
+    label: impl Fn(T) -> &'static str,
+) -> Option<T> {
+    let mut combo = egui::ComboBox::from_id_salt(id).selected_text(label(current));
+    if let Some(width) = width {
+        combo = combo.width(width);
+    }
+    let mut picked = None;
+    combo.show_ui(ui, |ui| {
+        for &option in options {
+            if ui
+                .selectable_label(current == option, label(option))
+                .clicked()
+            {
+                picked = Some(option);
+            }
+        }
+    });
+    picked
+}
+
+/// Two-column grid of labelled controls, as the dialogs use.
+pub fn form_grid<R>(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl FnOnce(&mut Ui) -> R) -> R {
+    Grid::new(id)
+        .num_columns(2)
+        .spacing([10.0, 4.0])
+        .show(ui, add)
+        .inner
 }
 
 /// Heading above a group of controls.

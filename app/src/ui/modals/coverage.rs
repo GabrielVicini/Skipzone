@@ -5,12 +5,12 @@
 //! reports how the run is going. Nothing here calculates anything; it reads
 //! `state.results.coverage` and emits [`Action`]s.
 
-use egui::{Button, Color32, Context, ProgressBar, RichText, Ui, vec2};
+use egui::{Button, Color32, Context, RichText, Ui, vec2};
 
 use crate::state::{AppState, Busy, Modal};
 use crate::ui::actions::{Action, InputChange, edited};
-use crate::ui::theme::{self, ACCENT, MUTED, WARN};
-use crate::ui::widgets::{card, data_grid, hint, kv, section};
+use crate::ui::theme::{self, MUTED, WARN};
+use crate::ui::widgets::{self, card, data_grid, hint, kv, section};
 use skipzone_predict::coverage::{CoverageCell, MAX_POINTS, MIN_RANGE_KM};
 use skipzone_predict::solve::mode_label;
 
@@ -56,7 +56,7 @@ fn body(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) {
     ui.add_space(8.0);
     section(ui, "Display");
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Tile opacity").small().color(MUTED));
+        widgets::caption(ui, "Tile opacity");
         if let Some(alpha) = edited(state.inputs.display.coverage_alpha, |a| {
             ui.add(egui::Slider::new(a, 40..=255).show_value(false));
         }) {
@@ -85,7 +85,7 @@ fn grid_controls(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) -> usize 
     // now, and the change is emitted once both have been drawn.
     let mut cfg = state.inputs.coverage;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Resolution").small().color(MUTED));
+        widgets::caption(ui, "Resolution");
         ui.add(
             egui::DragValue::new(&mut cfg.points_per_deg)
                 .speed(0.02)
@@ -100,7 +100,7 @@ fn grid_controls(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) -> usize 
         );
     });
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Extent").small().color(MUTED));
+        widgets::caption(ui, "Extent");
         ui.add(
             egui::DragValue::new(&mut cfg.half_span_deg)
                 .speed(0.5)
@@ -202,22 +202,16 @@ fn run_controls(ui: &mut Ui, state: &AppState, points: usize, out: &mut Vec<Acti
 
 fn progress(ui: &mut Ui, state: &AppState) {
     match state.results.busy {
-        Busy::Covering {
+        busy @ Busy::Covering {
             done,
             total,
             threads,
         } => {
-            #[allow(clippy::cast_precision_loss)]
-            let fraction = if total > 0 {
-                (done as f32 / total as f32).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            ui.add(
-                ProgressBar::new(fraction)
-                    .fill(ACCENT.gamma_multiply(0.7))
-                    .text(RichText::new(format!("{done} / {total} points")).small()),
-            );
+            let fraction = busy.fraction().unwrap_or(0.0);
+            ui.add(widgets::progress_bar(
+                fraction,
+                format!("{done} / {total} points"),
+            ));
             ui.label(
                 RichText::new(format!(
                     "running on {threads} thread(s) - the coverage grid takes every core, \
@@ -284,7 +278,7 @@ fn legend(ui: &mut Ui) {
             );
             ui.add_space(2.0);
         }
-        ui.label(RichText::new("dB SNR").small().color(MUTED));
+        widgets::caption(ui, "dB SNR");
     });
     for (colour, caption) in [
         (
@@ -300,11 +294,12 @@ fn legend(ui: &mut Ui) {
     ] {
         ui.horizontal(|ui| {
             let (r, g, b, _) = colour.to_tuple();
-            ui.colored_label(
+            widgets::swatch(
+                ui,
                 Color32::from_rgb(r, g, b),
                 RichText::new("\u{25A0}").strong(),
+                caption,
             );
-            ui.label(RichText::new(caption).small().color(MUTED));
         });
     }
 }

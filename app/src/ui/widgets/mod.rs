@@ -11,5 +11,6 @@ pub mod layout;
 pub mod menu;
 
 pub use layout::{
-    card, data_grid, head_cells, hint, kv, labelled_drag, num, section, sub_head, wide_table,
+    busy_spinner, caption, card, choice, data_grid, form_grid, head_cells, hint, kv, labelled_drag,
+    num, progress_bar, section, sub_head, swatch, wide_table,
 };

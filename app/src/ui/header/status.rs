@@ -1,9 +1,10 @@
 //! The calculating indicator and progress bar, top right.
 
-use egui::{ProgressBar, RichText, Spinner, Ui};
+use egui::{RichText, Ui};
 
 use crate::state::AppState;
-use crate::ui::theme::{ACCENT, FAIL, MUTED};
+use crate::ui::theme::FAIL;
+use crate::ui::widgets;
 
 /// Right-aligned status readout. Silent when idle and nothing has failed, so
 /// the corner of the map stays clear during normal work.
@@ -28,14 +29,9 @@ pub fn status(ui: &mut Ui, state: &AppState) {
         return;
     };
     if let Some(fraction) = state.results.busy.fraction() {
-        ui.add(
-            ProgressBar::new(fraction)
-                .desired_width(180.0)
-                .fill(ACCENT.gamma_multiply(0.7))
-                .text(RichText::new(label).small()),
-        );
+        ui.add(widgets::progress_bar(fraction, label).desired_width(180.0));
     } else {
-        ui.label(RichText::new(label).small().color(MUTED));
+        widgets::caption(ui, label);
     }
-    ui.add(Spinner::new().size(14.0));
+    widgets::busy_spinner(ui);
 }

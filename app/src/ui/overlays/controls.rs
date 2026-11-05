@@ -4,11 +4,12 @@
 //! what mode, how much power - as opposed to the modelling assumptions, which
 //! live behind Settings.
 
-use egui::{ComboBox, DragValue, RichText, Ui};
+use egui::{ComboBox, DragValue, Ui};
 
 use crate::state::{AppState, Modal};
 use crate::ui::actions::{Action, InputChange, edited};
-use crate::ui::theme::{self, MUTED};
+use crate::ui::theme;
+use crate::ui::widgets;
 use skipzone_predict::noise::{OperatingMode, dbm_from_watts};
 
 /// Transmitter power presets, watts: QRP through the common legal limits.
@@ -53,7 +54,7 @@ pub fn overlay(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) {
 }
 
 fn frequency(ui: &mut Ui, freq_mhz: f64) -> Option<Action> {
-    ui.label(RichText::new("Frequency").small().color(MUTED));
+    widgets::caption(ui, "Frequency");
     let freq = edited(freq_mhz, |f| {
         ui.add_sized(
             [ui.available_width(), 20.0],
@@ -67,26 +68,24 @@ fn frequency(ui: &mut Ui, freq_mhz: f64) -> Option<Action> {
 }
 
 fn mode(ui: &mut Ui, op_mode: OperatingMode) -> Option<Action> {
-    ui.label(RichText::new("Mode").small().color(MUTED));
-    let mut picked = None;
-    ComboBox::from_id_salt("mode_select")
-        .width(ui.available_width())
-        .selected_text(op_mode.label())
-        .show_ui(ui, |ui| {
-            for m in OperatingMode::ALL {
-                // The preset seeds the bandwidth and threshold; both stay
-                // editable in Settings, so the verdict is never decided by a
-                // constant baked into the code.
-                if ui.selectable_label(op_mode == m, m.label()).clicked() {
-                    picked = Some(m);
-                }
-            }
-        });
+    widgets::caption(ui, "Mode");
+    // The preset seeds the bandwidth and threshold; both stay editable in
+    // Settings, so the verdict is never decided by a constant baked into the
+    // code.
+    let width = ui.available_width();
+    let picked = widgets::choice(
+        ui,
+        "mode_select",
+        Some(width),
+        op_mode,
+        &OperatingMode::ALL,
+        OperatingMode::label,
+    );
     picked.map(|m| Action::SetInput(InputChange::OpMode(m)))
 }
 
 fn power(ui: &mut Ui, tx_power_w: f64) -> Option<Action> {
-    ui.label(RichText::new("Power").small().color(MUTED));
+    widgets::caption(ui, "Power");
     let watts = edited(tx_power_w, |w| {
         ComboBox::from_id_salt("power_select")
             .width(ui.available_width())

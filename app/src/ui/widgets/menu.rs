@@ -27,7 +27,7 @@ where
 {
     let is_open = *open == Some(id);
     let fill = if is_open {
-        Color32::from_white_alpha(0x18)
+        theme::MENU_OPEN_FILL
     } else {
         Color32::TRANSPARENT
     };

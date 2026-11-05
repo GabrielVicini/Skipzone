@@ -8,6 +8,7 @@
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 
+use super::swatch;
 use crate::ui::theme::{self, ACCENT, MUTED};
 use skipzone_predict::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepPoint};
 
@@ -17,7 +18,7 @@ pub fn band(ui: &mut Ui, points: &[SweepPoint], tuned_mhz: f64, best: Option<Swe
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, Color32::from_gray(0x1E));
+    painter.rect_filled(rect, 4.0, theme::BAND_BG);
 
     let span = (SWEEP_MAX_MHZ - SWEEP_MIN_MHZ).max(1e-9);
     #[allow(clippy::cast_possible_truncation)]
@@ -84,7 +85,7 @@ pub fn band(ui: &mut Ui, points: &[SweepPoint], tuned_mhz: f64, best: Option<Swe
             Align2::CENTER_BOTTOM,
             format!("{f:.0}"),
             FontId::proportional(9.0),
-            Color32::from_gray(0xE0),
+            theme::BAND_LABEL,
         );
     }
 }
@@ -93,8 +94,7 @@ pub fn band(ui: &mut Ui, points: &[SweepPoint], tuned_mhz: f64, best: Option<Swe
 pub fn legend(ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         for (colour, text) in theme::state_legend() {
-            ui.colored_label(colour, egui::RichText::new("\u{25A0}").small());
-            ui.label(egui::RichText::new(text).small().color(MUTED));
+            swatch(ui, colour, egui::RichText::new("\u{25A0}").small(), text);
         }
         ui.label(
             egui::RichText::new("| white = tuned, cyan = best")

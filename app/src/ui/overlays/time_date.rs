@@ -9,7 +9,8 @@ use egui::{Popup, RectAlign, RichText, Slider, Ui};
 use crate::state::AppState;
 use crate::ui::actions::{Action, InputChange};
 use crate::ui::scratch::ViewScratch;
-use crate::ui::theme::{self, MUTED};
+use crate::ui::theme;
+use crate::ui::widgets;
 use crate::ui::widgets::calendar::{self, Pick};
 use crate::ui::widgets::fields;
 use skipzone_iono::clock;
@@ -35,7 +36,7 @@ fn time_control(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &
             {
                 out.push(Action::SetInput(InputChange::UtcHours(hours)));
             }
-            ui.label(RichText::new("UTC").small().color(MUTED));
+            widgets::caption(ui, "UTC");
 
             let mut hours = current;
             let slider = ui.add(
