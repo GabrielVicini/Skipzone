@@ -62,8 +62,6 @@ impl App for SkipzoneApp {
             // state. Draw once more to show the new one.
             ui.ctx().request_repaint();
         }
-        for action in actions {
-            update::update(&mut self.state, action, &self.jobs);
-        }
+        update::update_all(&mut self.state, actions, &self.jobs);
     }
 }

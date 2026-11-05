@@ -4,20 +4,22 @@
 //! the launch elevation of the first hop and the arrival elevation of the last,
 //! and both gains enter the link budget - see [`skipzone_predict::antenna`] and
 //! [`skipzone_predict::solve`]. Nothing in this file computes a gain; it selects a model
-//! and renders the curve that model produces.
+//! and renders the curves in [`crate::state::AntennaPatterns`], which are
+//! recomputed only when an input they depend on changes.
 
 use egui::{Color32, ComboBox, Context, DragValue, Grid, RichText, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::state::{AppState, Modal};
-use crate::ui::actions::Action;
+use crate::state::{AntennaPatterns, AppState, Modal, Station};
+use crate::ui::actions::{Action, InputChange, edited};
 use crate::ui::theme::WARN;
 use crate::ui::widgets::{card, data_grid, hint, kv, labelled_drag, section};
 use skipzone_predict::antenna::{AntennaConfig, AntennaKind, GainCurve};
 use skipzone_predict::scenario::Inputs;
 
-pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+pub fn show(ctx: &Context, state: &AppState, out: &mut Vec<Action>) {
     let open = state.ui.modals.antennas;
-    let inputs = &mut state.inputs.scenario;
+    let inputs = &state.inputs.scenario;
+    let patterns = state.results.antenna_patterns.as_ref();
     super::chrome::dialog(
         ctx,
         Modal::Antennas,
@@ -25,35 +27,30 @@ pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
         "Antennas",
         vec2(560.0, 640.0),
         out,
-        |ui, _| body(ui, inputs),
+        |ui, out| body(ui, inputs, patterns, out),
     );
 }
 
-fn body(ui: &mut Ui, inputs: &mut Inputs) {
-    let f_hz = inputs.freq_mhz * 1e6;
+fn body(ui: &mut Ui, inputs: &Inputs, patterns: Option<&AntennaPatterns>, out: &mut Vec<Action>) {
     let ground = inputs.ground_type.as_antenna_ground();
 
-    end(
-        ui,
-        "Transmitting antenna",
-        "tx",
-        &mut inputs.tx_antenna,
-        inputs.freq_mhz,
-    );
-    end(
-        ui,
-        "Receiving antenna",
-        "rx",
-        &mut inputs.rx_antenna,
-        inputs.freq_mhz,
-    );
+    for (station, title, id, config) in [
+        (Station::Tx, "Transmitting antenna", "tx", inputs.tx_antenna),
+        (Station::Rx, "Receiving antenna", "rx", inputs.rx_antenna),
+    ] {
+        if let Some(config) = edited(config, |cfg| end(ui, title, id, cfg, inputs.freq_mhz)) {
+            out.push(Action::SetInput(InputChange::Antenna { station, config }));
+        }
+    }
 
-    let tx = inputs.tx_antenna.curve(ground, f_hz);
-    let rx = inputs.rx_antenna.curve(ground, f_hz);
+    // Filled in by update whenever this dialog is open.
+    let Some(AntennaPatterns { tx, rx, .. }) = patterns else {
+        return;
+    };
 
     section(ui, "Pattern at the current frequency");
     card(ui, |ui| {
-        plot(ui, &tx, &rx);
+        plot(ui, tx, rx);
         hint(
             ui,
             &format!(

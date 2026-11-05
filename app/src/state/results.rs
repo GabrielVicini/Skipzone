@@ -3,8 +3,9 @@
 //! Each result records the job generation it came from (see
 //! [`crate::jobs::Jobs`]), so it can be told apart from a later run.
 
+use skipzone_predict::antenna::{AntennaConfig, GainCurve};
 use skipzone_predict::coverage::CoverageCell;
-use skipzone_predict::scenario::{Assumptions, ProfileRow};
+use skipzone_predict::scenario::{Assumptions, GroundType, Inputs, ProfileRow};
 use skipzone_predict::solve::{Solution, SolveOutcome};
 use skipzone_predict::sweep::{SweepBest, SweepPoint};
 
@@ -148,6 +149,50 @@ pub struct JobErrors {
     pub coverage: Option<String>,
 }
 
+/// The inputs an antenna gain curve depends on.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct PatternKey {
+    tx: AntennaConfig,
+    rx: AntennaConfig,
+    ground: GroundType,
+    freq_mhz: f64,
+}
+
+impl PatternKey {
+    #[must_use]
+    pub fn of(inputs: &Inputs) -> Self {
+        Self {
+            tx: inputs.tx_antenna,
+            rx: inputs.rx_antenna,
+            ground: inputs.ground_type,
+            freq_mhz: inputs.freq_mhz,
+        }
+    }
+}
+
+/// Both ends' gain against elevation at the tuned frequency.
+pub struct AntennaPatterns {
+    pub key: PatternKey,
+    pub tx: GainCurve,
+    pub rx: GainCurve,
+}
+
+impl AntennaPatterns {
+    /// Evaluate both curves. Each is a few hundred pattern evaluations, run
+    /// in parallel inside predict, so this is for when the inputs change and
+    /// not for every frame.
+    #[must_use]
+    pub fn compute(inputs: &Inputs) -> Self {
+        let ground = inputs.ground_type.as_antenna_ground();
+        let f_hz = inputs.freq_mhz * 1e6;
+        Self {
+            key: PatternKey::of(inputs),
+            tx: inputs.tx_antenna.curve(ground, f_hz),
+            rx: inputs.rx_antenna.curve(ground, f_hz),
+        }
+    }
+}
+
 /// Everything computed from the inputs, and the state of the job computing it.
 #[derive(Default)]
 pub struct Results {
@@ -157,6 +202,9 @@ pub struct Results {
     pub busy: Busy,
     /// Model-build failures, one slot per job kind.
     pub errors: JobErrors,
+    /// The gain curves the Antennas dialog plots. Kept while the dialog is
+    /// closed and recomputed only when the inputs they depend on change.
+    pub antenna_patterns: Option<AntennaPatterns>,
 }
 
 impl Results {

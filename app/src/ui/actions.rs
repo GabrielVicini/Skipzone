@@ -14,6 +14,7 @@
 
 use skipzone_iono::clock::CivilDate;
 use skipzone_iono::fof2::Fof2Backend;
+use skipzone_predict::antenna::AntennaConfig;
 use skipzone_predict::noise::{NoiseEnvironment, OperatingMode};
 use skipzone_predict::scenario::GroundType;
 
@@ -67,6 +68,11 @@ pub enum InputChange {
     MaxHops(u32),
     DomainTopKm(f64),
     ShowCoastlines(bool),
+    /// One end's antenna, from the Antennas dialog.
+    Antenna {
+        station: Station,
+        config: AntennaConfig,
+    },
 }
 
 impl InputChange {
@@ -110,6 +116,10 @@ impl InputChange {
             Self::MaxHops(n) => s.max_hops = n,
             Self::DomainTopKm(v) => s.domain_top_km = v,
             Self::ShowCoastlines(on) => inputs.display.show_coastlines = on,
+            Self::Antenna { station, config } => match station {
+                Station::Tx => s.tx_antenna = config,
+                Station::Rx => s.rx_antenna = config,
+            },
         }
     }
 }

@@ -8,9 +8,36 @@
 use skipzone_iono::clock;
 
 use crate::jobs::{Jobs, Request, Response};
-use crate::state::{AppState, Busy};
+use crate::state::{AntennaPatterns, AppState, Busy, PatternKey};
 use crate::ui::actions::{Action, InputChange};
 use crate::ui::map::view::ZOOM_STEP;
+
+/// Apply a frame's actions in order, then bring derived results up to date.
+pub fn update_all(state: &mut AppState, actions: Vec<Action>, jobs: &Jobs) {
+    for action in actions {
+        update(state, action, jobs);
+    }
+    refresh_patterns(state);
+}
+
+/// Recompute the antenna gain curves if the Antennas dialog is open and an
+/// input they depend on changed. Once per frame at most, after the actions.
+fn refresh_patterns(state: &mut AppState) {
+    if !state.ui.modals.antennas {
+        return;
+    }
+    let inputs = &state.inputs.scenario;
+    let key = PatternKey::of(inputs);
+    if state
+        .results
+        .antenna_patterns
+        .as_ref()
+        .is_some_and(|p| p.key == key)
+    {
+        return;
+    }
+    state.results.antenna_patterns = Some(AntennaPatterns::compute(inputs));
+}
 
 /// Apply one action.
 pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
@@ -394,5 +421,63 @@ mod tests {
         };
         assert_eq!(s.inputs.scenario, expected);
         assert!(s.inputs.display.show_coastlines);
+    }
+
+    /// The antenna curves are computed when the dialog opens and again only
+    /// when an input they depend on changes.
+    #[test]
+    fn antenna_patterns_follow_their_inputs_only() {
+        use skipzone_predict::antenna::{AntennaConfig, AntennaKind};
+
+        let (mut s, jobs) = setup();
+        update_all(&mut s, vec![], &jobs);
+        assert!(s.results.antenna_patterns.is_none(), "not while closed");
+
+        update_all(&mut s, vec![Action::OpenModal(Modal::Antennas)], &jobs);
+        let key = |s: &AppState| s.results.antenna_patterns.as_ref().map(|p| p.key);
+        assert_eq!(key(&s), Some(PatternKey::of(&s.inputs.scenario)));
+
+        // Plant isotropic curves under the current key: a recompute would
+        // replace them with the real dipole curves.
+        let isotropic = AntennaConfig {
+            kind: AntennaKind::Isotropic,
+            ..AntennaConfig::default()
+        };
+        let planted = AntennaPatterns::compute(&Inputs {
+            tx_antenna: isotropic,
+            rx_antenna: isotropic,
+            ..s.inputs.scenario.clone()
+        });
+        let iso_label = planted.tx.label().to_string();
+        s.results.antenna_patterns = Some(AntennaPatterns {
+            key: PatternKey::of(&s.inputs.scenario),
+            ..planted
+        });
+        let tx_label = |s: &AppState| {
+            s.results
+                .antenna_patterns
+                .as_ref()
+                .map(|p| p.tx.label().to_string())
+        };
+
+        update_all(
+            &mut s,
+            vec![Action::SetInput(InputChange::Ssn(10.0))],
+            &jobs,
+        );
+        assert_eq!(tx_label(&s), Some(iso_label.clone()), "kept");
+
+        let config = AntennaConfig {
+            kind: AntennaKind::VerticalMonopole,
+            ..s.inputs.scenario.rx_antenna
+        };
+        let change = InputChange::Antenna {
+            station: Station::Rx,
+            config,
+        };
+        update_all(&mut s, vec![Action::SetInput(change)], &jobs);
+        assert_eq!(s.inputs.scenario.rx_antenna, config);
+        assert_eq!(key(&s), Some(PatternKey::of(&s.inputs.scenario)));
+        assert_ne!(tx_label(&s), Some(iso_label), "recomputed");
     }
 }

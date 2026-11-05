@@ -19,7 +19,10 @@ use skipzone_predict::coverage::CoverageConfig;
 use skipzone_predict::scenario::Inputs;
 use skipzone_predict::solve::Solution;
 
-pub use results::{Busy, CoverageResults, JobErrors, Results, SolveResults, SweepResults};
+pub use results::{
+    AntennaPatterns, Busy, CoverageResults, JobErrors, PatternKey, Results, SolveResults,
+    SweepResults,
+};
 pub use ui::{MapState, Modal, Modals, Selection, UiState};
 
 /// One end of the path.
