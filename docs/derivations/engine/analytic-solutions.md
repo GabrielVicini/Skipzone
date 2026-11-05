@@ -113,10 +113,7 @@ J_k := I_k(r_t) - I_k(rb):
     P_total     = 2 [ s0 + J4 + C^2 J3 ]
     apex        = r_t  (true height of reflection; and X, n^2 r^2 = C^2 there)
 
-At r_t, F = 0: I2 and I4's sqrt(F) terms vanish; asinh arguments are finite
-(u(r_t) = -1), so every expression is evaluable without limits.
-
-## 5 Linear-gradient rays: parabolas, not circles (spec correction)
+## 5 Linear-gradient rays: parabolas, not circles
 
 Flat stratified geometry, Snell n sin(theta) = C_f: the ray curvature is
 d(theta)/d(arc) = -(1/n) dn/dz sin(theta) = -(C_f/n^2) dn/dz. A circular arc
@@ -128,9 +125,8 @@ dx/dz = C_f/sqrt(n^2 - C_f^2):
     x - x_turn = -(2 C_f/k) sqrt(1 - C_f^2 - k z)
     =>  z(x) = (1 - C_f^2)/k - (k/(4 C_f^2)) (x - x_turn)^2
 
-an exact **parabola** (the statement "linear gradient gives exact circular
-arcs" in the task brief is therefore incorrect as written; the nearest true
-statements are the two above). In spherical geometry neither profile is
+an exact **parabola**. This is the flat-geometry property `LinearLayer` cites;
+no test checks it, because in spherical geometry neither profile is
 elementary (n^2 r^2 - C^2 becomes cubic), so the spherical tracer is checked
 against:
 

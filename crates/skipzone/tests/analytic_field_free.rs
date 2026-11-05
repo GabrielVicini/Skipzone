@@ -329,7 +329,7 @@ fn convergence_order_is_five() {
     );
     let beta = Radians::from_degrees(35.0);
     let az = Radians::from_degrees(90.0);
-    // Span crosses the apex (smooth in sigma; docs/derivations/engine/haselgrove.md §7).
+    // Span crosses the apex (smooth in sigma; docs/derivations/engine/haselgrove.md §6).
     let span = 900e3;
     let sol = |n: usize| {
         tracer

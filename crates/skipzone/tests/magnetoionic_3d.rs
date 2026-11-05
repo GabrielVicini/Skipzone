@@ -219,7 +219,7 @@ fn modes_split_with_field() {
 /// out of the magnetic meridian: a meridian-plane near-vertical O-mode ray
 /// runs into the Spitze cusp (wave normal driven into field alignment at
 /// X -> 1, the Ellis-window degeneracy) where the tracer correctly reports
-/// step collapse - see docs/derivations/engine/haselgrove.md §7 and the companion test
+/// step collapse - see docs/derivations/engine/haselgrove.md §6 and the companion test
 /// below. Off-meridian, the apex wave normal is nearly transverse to B and
 /// the cutoff residual is O(m_horizontal^2) ~ 1e-4; tolerance 3e-3 also
 /// covers the position drift entering Y.
@@ -271,7 +271,7 @@ fn vertical_reflection_conditions_with_field() {
 /// degeneracy, docs/derivations/engine/appleton-hartree.md §6); the physical ray has a cusp
 /// and smooth integration is impossible there. Contract: the tracer fails
 /// with the typed step-collapse error instead of returning a wrong path
-/// (docs/derivations/engine/haselgrove.md §7).
+/// (docs/derivations/engine/haselgrove.md §6).
 #[test]
 fn spitze_meridian_ray_fails_typed() {
     let layer = chapman(9e6);

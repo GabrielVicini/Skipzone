@@ -3,7 +3,7 @@
 - **Crate:** `crates/skipzone`
 - **Implemented in:** `src/hamiltonian.rs::RayEquations::rhs`, `src/hamiltonian.rs::RayEquations::hamiltonian`, `src/hamiltonian.rs::RayEquations::initial_state`, `src/trace.rs::Tracer::trace`
 - **Tested by:** `tests/analytic_field_free.rs::bouguer_invariant_and_apex_condition_along_ray`, `tests/magnetoionic_3d.rs::reciprocity_forward_backward`, `tests/magnetoionic_3d.rs::spitze_meridian_ray_fails_typed`, `tests/absorption.rs::field_free_absorption_matches_quadrature`
-- **Section anchors used by code:** §1, §2, §3, §4, §6, §7
+- **Section anchors used by code:** §1, §2, §3, §4, §5, §6
 
 Symbols and sign conventions: [conventions.md](../conventions.md).
 
@@ -102,15 +102,11 @@ group index mu' = 1/mu).
 
 Absorption in nepers; the field amplitude decays as exp(-A).
 
-## 5 Doppler
+The tracer computes no Doppler shift. Every medium in the workspace is static,
+so the shift is zero; a caller that wants one differentiates the phase path P
+across model epochs.
 
-For a time-varying medium the received frequency shifts by
-df = -(f/c) dP/dt|_medium. All media in this crate are static, so the shift
-is identically zero; the observable P is what a caller differentiates across
-model epochs to get Doppler. No integrand is carried for it (documented
-scope decision, not an omission).
-
-## 6 Initialization and termination
+## 5 Initialization and termination
 
 Launch at point q0 with unit wave normal k_hat (from elevation/azimuth):
 cos(Th) from k_hat and b; n0^2 = Re AH; if n0^2 <= 0 the mode is evanescent
@@ -118,7 +114,7 @@ at the source (typed error); else m = sqrt(n0^2) k_hat, which puts the state
 exactly on shell (n depends only on direction, so no iteration is needed).
 H = 0 is then a conserved diagnostic; its drift measures integrator error.
 
-## 7 Conditioning near reflection
+## 6 Conditioning near reflection
 
 At an O-mode apex n^2 -> 0: v -> m -> 0, so d(position)/dsigma -> 0 while
 dm/dsigma -> (1/2) grad n^2, finite. The trajectory is smooth in sigma; this

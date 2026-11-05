@@ -80,12 +80,15 @@ through chi.
 `erfcx(t)`, t >= 0 (the argument in (3) is always non-negative), is computed
 without any external crate:
 
-  * t < 2: erfcx(t) = e^{t^2} (1 - erf(t)) with erf from its Maclaurin series
+  * t < 3: erfcx(t) = e^{t^2} (1 - erf(t)) with erf from its Maclaurin series
     erf(t) = (2/sqrt(pi)) sum_{n>=0} (-1)^n t^{2n+1} / (n! (2n+1)); e^{t^2} <=
-    e^4 here so no overflow.
-  * t >= 2: the classical continued fraction (Abramowitz & Stegun 7.1.14)
+    e^9 here so no overflow.
+  * t >= 3: the classical continued fraction (Abramowitz & Stegun 7.1.14)
         sqrt(pi) erfcx(t) = 1 / ( t + (1/2)/( t + (2/2)/( t + (3/2)/( t + ... ))))
-    evaluated backward; converges to double precision in ~40 terms for t >= 2.
+    evaluated to 48 levels by the forward continuant recurrence
+    A_k = t A_{k-1} + (k/2) A_{k-2} (B_k likewise), whose ratio is the k-th
+    convergent; `erfcx_forward_recurrence_matches_backward` checks it against
+    backward evaluation.
 
 Both are exercised in `chapman.rs` tests against reference values
 erfcx(0)=1, erfcx(1)=0.427583..., erfcx(2)=0.255396..., erfcx(5)=0.110704....
@@ -143,7 +146,21 @@ tests, both modes of (3) and across the 90 deg branch.
 
 For chi well past 90 deg the `e^{X(1-sin chi)}` term in (3b) overflows f64
 (argument exceeds ~709 near chi ~ 100 deg at X = 1076). By then `Ch e^{-z}`
-already dwarfs everything and Ne is 0 to machine precision, so the layer
-returns vacuum once the exponent `f` underflows (`f < -700`) or the grazing
-term overflows. This is the correct physics - no ionising flux reaches the
-deep-night D region - reached without a hand-set zenith threshold.
+already dwarfs everything and the sunlit layer is 0 to machine precision, so
+`chapman_grazing` returns `Ch = +inf` once the exponent passes 700 and the
+layer drops its photochemical part once `f < -700`.
+
+What remains is the night floor (`SolarChapmanLayer::with_night_floor`): a
+residual alpha-Chapman profile with the same peak height and no zenith
+dependence, standing in for the cosmic-ray and Lyman-alpha ionisation a
+Chapman layer does not describe. The layer returns the larger of the sunlit
+profile and the floor, so a fully sunlit layer is unchanged. With no floor set
+the deep-night layer is vacuum.
+
+## 6 Partial rise
+
+`SolarChapmanLayer::with_rise_fraction(f)` keeps only a fraction f of the
+upward translation `H ln Ch`, writing u = z - f ln Ch and
+Ne = Nm Ch^{-1/2} exp(1/2 (1 - u - e^{-u})). At f = 1 this is (1) with
+sec -> Ch. The reason, the absorption zenith law it implies and the derivative
+are in the rustdoc of `with_rise_fraction` and `sample_partial_rise`.

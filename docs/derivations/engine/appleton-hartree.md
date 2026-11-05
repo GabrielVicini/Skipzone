@@ -129,7 +129,7 @@ Both are algebraically identical to (AH); the O form makes the X → 1
 behaviour manifest: n² → 1 - X/U, which vanishes at X = 1, Z = 0. This is
 the O reflection condition for every θ except the degenerate window below.
 
-## 6 Conditioning and known degeneracies (spec: state them)
+## 6 Conditioning and known degeneracies
 
 - **X = 1, θ = 0 (Ellis window / critical coupling).** The limits X→1 and
   θ→0 do not commute; the dispersion surfaces are degenerate and no global
@@ -139,6 +139,10 @@ the O reflection condition for every θ except the degenerate window below.
   documents that within the sliver |W| ≲ (coupling scale) the O/X labels
   can swap; full mode-conversion physics is out of scope. HF rays with
   apex wave-normal not exactly field-aligned never enter the sliver.
+- **Root coalescence (S_m = 0 with Y_T > 0).** A branch point of the
+  dispersion surface, where dS_m is singular. A float-exact hit has measure
+  zero; the code returns the degenerate root and omits the singular dS_m term
+  rather than return NaN.
 - **Resonances** (denominator → 0, n² → ∞): upper-hybrid family for the X
   mode; the gyroresonance Y = 1 sits below HF for F-region fields
   (ω_H/2π ≈ 1.4 MHz) but the formula itself is exact there; the tracer's

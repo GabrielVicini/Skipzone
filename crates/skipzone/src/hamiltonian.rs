@@ -196,7 +196,7 @@ where
     }
 
     /// State exactly on the dispersion shell at a launch point
-    /// (docs/derivations/engine/haselgrove.md §6).
+    /// (docs/derivations/engine/haselgrove.md §5).
     ///
     /// # Errors
     /// `EvanescentLaunch` if Re n^2 <= 0 for this mode at the launch point;
