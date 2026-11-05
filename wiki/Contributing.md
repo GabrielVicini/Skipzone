@@ -1,70 +1,75 @@
 # Contributing
 
-The project is pre-alpha and moving. This page is about how to make a change
-that will survive review rather than about process ceremony.
+To send a change, fork the repository, make the change, and run the checks in
+[Before you push](#before-you-push). If you only read one section, read
+[the regression lock](#the-regression-lock). For how the crates fit together,
+see [Architecture](Architecture).
 
-## Before you start
+<!-- OWNER: what kinds of contributions you want right now (bug reports, physics review, pull requests), and whether to open an issue before a large pull request. -->
 
-Read [Conventions](Conventions). Most of the rules there exist because
-breaking one produced a wrong answer that looked right, and a change that
-violates one will be asked to change.
+## Building
 
-## The check that has to pass
+You need a stable Rust toolchain, edition 2024. The app needs Rust 1.92 or
+newer, because that is eframe 0.35's minimum. CI pins 1.97.
+
+On Linux, eframe and winit need the X11 and Wayland development headers. CI
+installs these on Ubuntu 24.04:
+
+```bash
+sudo apt-get install -y --no-install-recommends \
+  libxkbcommon-dev libwayland-dev libxcb1-dev \
+  libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+  libx11-dev libgl1-mesa-dev
+```
+
+Then, from the repository root:
+
+```bash
+cargo run --release                      # build and launch the desktop app
+cargo build --release -p skipzone --lib  # the engine alone, with none of the app's dependencies
+```
+
+## Testing
+
+```bash
+cargo test --workspace --all-targets
+```
+
+The tests need no network access and no `corpus/` directory. Many of them run
+real solves.
+
+The engine also has Criterion benchmarks of one traced hop and a 64-ray fan:
+
+```bash
+cargo bench -p skipzone
+```
+
+## Before you push
+
+These are the checks CI runs, in the form you run them locally:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets       # with RUSTFLAGS=-D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
-cargo build --package skipzone --lib
-cargo doc --package skipzone --no-deps       # with RUSTDOCFLAGS=-D warnings
+cargo build -p skipzone --lib
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+python3 scripts/check-boundaries.py
+cargo deny --workspace --all-features check     # needs: cargo install cargo-deny
 ```
 
-That is exactly what CI runs. See [Building and CI](Building-and-CI).
+If you changed anything under `docs/` or `wiki/`, also run the docs link check:
 
-## Changing the physics
+```bash
+python3 scripts/check-docs.py
+```
 
-**Derive it first.** Add or extend a file in `docs/derivations/`, then implement
-it, then cite the section in a code comment. A pull request that adds an
-equation with no derivation will be asked for one, and the derivation is the
-part that gets reviewed hardest.
+## The regression lock
 
-Then find the oracle. Every piece of physics in this project is checked against
-something independent:
-
-| Kind of change | Check it against |
-|---|---|
-| A new field model | The dipole closed form, plus divergence and curl invariants |
-| A new density profile | A closed-form range/apex if one exists, otherwise the Bouguer quadrature reference |
-| A new gradient | Finite differences, in a `*_matches_fd` test |
-| An integrator change | The convergence-order test |
-| A conditioning fix | The regime it fixes, plus the regime it must not break |
-
-If your change has no independent check, say so explicitly in the pull request.
-That is sometimes the right answer, but it should be a stated decision.
-
-## Changing an anchor
-
-Anchors are the unverified values in `crates/skipzone-predict/src/calib.rs`. Changing one is
-allowed. Changing one **because a fit wanted it** is not, unless the fit could
-identify it.
-
-Before moving an anchor:
-
-1. Check the identification table in
-   [Calibration](Calibration#what-that-makes-unidentifiable-on-purpose). If
-   the quantity is in the "no, absorbed" column, WSPR cannot see it and a fit
-   that moved it fitted something else.
-2. Check whether the fit hit the bound. A bound being reached is a finding: the
-   residual is not produced by the quantity being pushed, and the error is
-   elsewhere.
-3. Update the docstring's stated range and trust level along with the value.
-
-`iono_check --propose` will print suggested changes. Applying one is a separate,
-deliberate commit with its own test, not part of the run that suggested it.
-
-## Changing performance
-
-Use `solve_digest`.
+Every calibrated number in Skipzone was fitted against solver output. A
+refactor that moves any ray invalidates that fit. So capture a digest before
+the change and another after it. Each run takes more than ten minutes on a
+four-core machine.
 
 ```bash
 cargo run --release -p skipzone-lab --bin solve_digest > before.txt
@@ -73,60 +78,204 @@ cargo run --release -p skipzone-lab --bin solve_digest > after.txt
 diff before.txt after.txt
 ```
 
-An optimisation that skips work is only safe if it changes which rays are
-*traced* and not which are *found*. An empty diff is that proof. A non-empty
-diff needs an explanation of every line before the change lands.
+There are two cases:
 
-`profile_solve` tells you where the time actually goes, which is usually not
-where it feels like it goes.
+- **A refactor or optimisation must leave the digest byte-identical.**
+- A change meant to alter the physics produces a diff. Explain every changed
+  line in the pull request.
 
-## Changing the layer boundaries
+`profile_solve` shows where the time in a solve goes before you optimise it.
 
-The app's five layers depend downward only. Two invariants are greppable and
-both should be checked after touching that area:
+## Commit style
 
-```bash
-grep -rn "use skipzone::" app/src/ui app/src/state     # must be empty
-grep -rln "egui" app/src | grep -v "app/src/ui/" | grep -v app/src/app.rs
+- Imperative mood: "add", "fix", "move".
+- A scope prefix naming what changed: `engine:`, `iono:`, `predict:`, `lab:`,
+  `app:`, `ci:`, `docs:`, `wiki:` or `chore:`.
+- A short body explaining why.
+
+A real one from the history:
+
+```text
+ci: ban GUI crates in lab and the network crate in the app
+
+lab is the only crate with network access and has no GUI; the app is
+the only crate with a GUI. The boundary check now enforces both instead
+of leaving them to cargo tree by hand.
 ```
 
-The second should list only `app/src/main.rs` and `app/src/lib.rs` (a doc
-comment). If a computation-layer module needs to tell the UI something, that is
-what the `sweep::Wake` callback is for.
+If your change makes a wiki page wrong, fix the page in the same commit.
 
-## Adding a dependency
+## Conventions
 
-To the **app**: fine, with a comment in `app/Cargo.toml` saying what it is for.
-Every existing dependency there has one.
+### Physics
 
-To the **engine**: this is a significant change and needs an argument. The
-engine has two dependencies and a stated promise to stay buildable with nothing
-beyond `std` on any target with no system libraries. CI enforces the build; it
-cannot enforce the spirit.
+- **Derive first.** Write the derivation before the code, and cite its file in
+  a code comment. A pull request that adds an equation needs its derivation.
+  The derivations are indexed in
+  [`docs/README.md`](https://github.com/GabrielVicini/Skipzone/blob/master/docs/README.md).
+- **Coordinates and signs.** Time dependence is `exp(-i omega t)`, so a lossy
+  medium has `Im(n) > 0`. Budden and Davies use the opposite sign, so check this
+  first when porting a textbook formula. Coordinates are geocentric spherical
+  `(r, theta, phi)` with the local basis (up, south, east). The rest is in
+  [`conventions.md`](https://github.com/GabrielVicini/Skipzone/blob/master/docs/derivations/conventions.md).
+- **SI units and `f64` throughout.** Newtypes guard the public boundaries.
+- **Analytic derivatives, finite differences as the oracle.** Every model that
+  reports a gradient has a test named `*_matches_fd` or
+  `*_matches_finite_differences`.
+- **Find an independent check.** A new field model is tested against the dipole
+  closed form and the divergence and curl invariants. An integrator change is
+  tested against the convergence-order test. If your change has no independent
+  check, say so in the pull request.
 
-A dependency was removed from the engine once already: `rayon` was there for a
-single `trace_fan` function that only a benchmark called, while the app did its
-own batching. If a new engine dependency serves one function that nothing in
-production calls, it is the same mistake.
+### Code
 
-## Adding an antenna
+- **No `unsafe`.** The engine sets `unsafe_code = "forbid"`. Changing that needs
+  a measured benchmark and an isolated, documented exception.
+- **Errors.** Return an error only when the computation can no longer be
+  trusted. A ray that lands or escapes is a normal result. A layer whose trace
+  failed shows as failed in the UI, so a user can tell it from "nothing
+  arrives".
+- **Fallbacks.** When the code substitutes a guessed value, it records the
+  substitution, so the run can report it.
+- **Small samples.** A report cut with fewer than 30 samples prints no error
+  figure. A median of a handful of points is mostly their own noise.
+- **Document what a number is.** Each unverified anchor has a docstring
+  giving its unit, its plausible range and how far it can be trusted.
+- **Comments explain why.** Where a decision was measured, put the measurement
+  in the comment.
+- **Widgets.** In the app, widgets return a `ui::Action` instead of changing
+  state directly.
+- **Dependencies.** Each dependency in a `Cargo.toml` has a comment saying what
+  it is for. Check the crate's allowed list in
+  [Architecture](Architecture#the-dependency-rule) before adding one.
 
-Closed-form patterns go in `crates/skipzone-predict/src/antenna/image.rs` with a `provenance` string
-saying where the model comes from and what it excludes. That string is held to
-the same standard as the existing ones, which cite NEC-4 comparisons.
+### Changing an anchor
 
-Measured or NEC-modelled patterns go through `crates/skipzone-predict/src/antenna/table.rs`, which
-is built and tested for exactly this and is deliberately not wired up yet. The
-module documentation has the four steps. Adding one should be a data file plus
-an `AntennaKind` variant, not a redesign. If it turns into a redesign, that is a
-bug in `table.rs`.
+The anchors are the unverified values in `crates/skipzone-predict/src/calib.rs`.
+Move one only if the calibration can identify it. `wspr_calibrate` prints an
+identification table at the end of its report saying which ones it can. If a
+fit pushes an anchor to its bound, the error is probably somewhere else in the
+model.
+`iono_check --propose` suggests changes, and applying one is a separate commit
+with its own test.
 
-## Documentation
+### Lints and rustdoc
 
-The wiki lives in `wiki/` in the repository so it versions with the code. A
-change that makes a wiki page wrong should fix the page in the same commit.
+The engine runs `clippy::pedantic` at warn level. `crates/skipzone/Cargo.toml`
+allows five lints, each with a comment: physics notation such as `Y_L` follows
+the derivations, and exact float comparisons back bit-identity invariants. The
+other crates use the default lint set. CI denies all warnings.
 
-Write for someone who is competent and unfamiliar. State what a thing is, then
-what it is not, then why. The "what it is not" is the part that saves time.
+Two rustdoc traps catch people:
 
-Avoid em dashes.
+- A unit in brackets, such as `r [m]`, parses as an intra-doc link to `m`. Wrap
+  it in backticks or a ` ```text ` fence.
+- A wrapped doc line that starts with `- ` reads as a list item, and clippy
+  then wants the continuation indented.
+
+Formatting is `rustfmt` defaults. There is no `rustfmt.toml`.
+
+## Wiki links
+
+The wiki lives in `wiki/`. Between pages, link with the bare page title and no
+`.md`, for example `[Architecture](Architecture#the-dependency-rule)`. A link
+ending in `.md` serves the raw markdown on the GitHub wiki.
+
+## CI
+
+[`.github/workflows/ci.yml`](https://github.com/GabrielVicini/Skipzone/blob/master/.github/workflows/ci.yml)
+runs on every push to `master` and every pull request.
+
+| Job | What it checks |
+|---|---|
+| `fmt` | `cargo fmt --all -- --check` |
+| `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` |
+| `test` | `cargo test --workspace --all-targets` on Ubuntu 24.04, Windows and macOS, then `cargo build -p skipzone --lib` to prove the engine builds alone |
+| `msrv` | `cargo check` of `skipzone`, `skipzone-iono` and `skipzone-predict`, each on the `rust-version` its `Cargo.toml` declares |
+| `docs` | `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS=-D warnings` |
+| `boundaries` | `scripts/check-boundaries.py`, the dependency rule in [Architecture](Architecture#the-dependency-rule) |
+| `deny` | `cargo deny` advisories, then bans, licences and sources, configured in `deny.toml` |
+
+Two more workflows run on their own triggers. `wiki.yml` mirrors `wiki/` to
+the GitHub wiki on every push to `master` that touches it. It needs a
+`WIKI_TOKEN` secret: a fine-grained token with Contents read and write on the
+repository. Without the secret it skips with a notice. `release.yml`
+builds release archives from version tags, described [below](#building-a-release).
+
+Dependabot opens update pull requests monthly for Cargo dependencies and for
+GitHub Actions. The advisory ignores in `deny.toml` are GUI-stack crates with
+no fixed release reachable from eframe 0.35. Revisit them when Dependabot
+offers a newer eframe.
+
+## Bumping the pinned toolchain
+
+CI pins the toolchain so a new stable release cannot add lints without warning.
+The pin is `RUST_TOOLCHAIN` in the `env` block of both `ci.yml` and
+`release.yml`. To move it, for example to 1.98:
+
+```bash
+rustup toolchain install 1.98
+cargo +1.98 clippy --workspace --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo +1.98 doc --workspace --no-deps
+```
+
+Fix whatever the new lints find, change `RUST_TOOLCHAIN` in both files, and
+commit everything as one `ci:` commit.
+
+The `msrv` job is separate. It reads each crate's `rust-version` from its
+`Cargo.toml`, so raising a crate's MSRV needs no workflow change. The README
+badge shows the engine's MSRV, so update it too.
+
+## Data and assets
+
+Every data file the app needs is compiled in with `include_str!` or
+`include_bytes!`.
+
+| File | What it is | Licence |
+|---|---|---|
+| `crates/skipzone/data/igrf14coeffs.txt` | IGRF-14 geomagnetic field coefficients, valid 1900 to 2030 | Published by IAGA, freely available |
+| `crates/skipzone-iono/data/nequick/` | Monthly CCIR foF2 and M(3000)F2 maps and the modified-dip grid, from the Galileo NeQuick G reference data | EUPL-1.2, (C) European Union 2019 |
+| `crates/skipzone-iono/src/assets/fof2_grid.tsv` | A foF2 climatology grid generated by `gen_fof2_grid`. Its values are Skipzone's own construction and are not CCIR, URSI or IRI data | MIT |
+| `crates/skipzone-predict/src/assets/ne_50m_land.shp` | Natural Earth 1:50m land polygons, for the land and sea mask | Public domain |
+| `crates/skipzone-predict/src/assets/ne_50m_lakes.shp` | Natural Earth 1:50m lake polygons | Public domain |
+
+The NeQuick directory has its own `README.md` and `_SOURCE_AND_LICENSE.txt`.
+The EUPL requires that notice to travel with the data, so keep the directory
+whole. If you ever remove the data, remove the entire directory in one commit.
+The release archives ship the notice as `NEQUICK-DATA-LICENSE.txt`.
+
+`fof2_grid.tsv` is the one generated file in the repository. If you change the
+climatology, regenerate it and commit the file with the change:
+
+```bash
+cargo run -p skipzone-lab --bin gen_fof2_grid
+```
+
+The test `fof2::tests::bundled_grid_matches_its_generator` fails if the file
+and the generator disagree.
+
+Only the `.shp` geometry files from Natural Earth are shipped, because the
+coastline code reads polygons and no attributes.
+
+These are gitignored and stay out of commits: `target/`, `corpus/`,
+`release/`, `graphify-out/` and `.idea/`.
+
+## Building a release
+
+Push a tag that starts with `v`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+`release.yml` then builds `skipzone-app-bin` with `--locked` for four targets:
+Windows x86_64, Linux x86_64, macOS arm64 and macOS x86_64. Each archive holds
+the binary, `LICENSE`, `README.md` and `NEQUICK-DATA-LICENSE.txt`. The last job
+publishes a GitHub release with the archives, a `SHA256SUMS.txt` and generated
+release notes.
+
+The workflow does not read the version in any `Cargo.toml`, so keep the tag
+and the crate versions in step yourself.
+
+<!-- OWNER: your release policy, if you have one (version numbering, when to tag, whether a release needs a CHANGELOG entry). -->

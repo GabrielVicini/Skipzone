@@ -1,246 +1,149 @@
 # Command Line Tools
 
-Ten binaries besides the GUI. None is required to use the application. They
-exist so that every claim the model makes can be checked, and so that the
-checking is reproducible rather than something someone did once.
+Besides the desktop app, Skipzone ships a terminal predictor, `hfpredict`,
+and eleven harnesses that check the model against measurements. You need none
+of them to use the app. Every command below runs from the repository root, and
+each tool builds on first use.
 
-One lives in the engine crate; the rest are app harnesses. All of them drive the
-same library code the GUI does, which is why `app/` is a library with a thin
-`main.rs` on top rather than a plain binary.
+Only two tools touch the network: `wspr_corpus` and `wspr_live_check`. Three
+read a `corpus/` directory of fetched data that is not in the repository. The
+table below marks both.
 
-## Engine
+## `hfpredict`
 
-### `hfpredict`
+`hfpredict` answers "does a reflected path exist between these two points at
+this frequency and time?" It lives in `crates/skipzone-predict/src/bin/`.
 
-A first-order HF path predictor built only from engine code. Given a
-transmitter, a receiver, a frequency and a time of day, it assumes a single
-Chapman F2 layer whose foF2 and hmF2 come from a coarse midlatitude climatology
-table, then uses the validated homing to decide whether a reflected ray path
-exists and reports its geometry.
+```bash
+cargo run --release -p skipzone-predict --bin hfpredict -- \
+    --tx 51.5,-0.1 --rx 40.7,-74.0 --freq 14.1 --utc 18 --month 3 --solar high
+```
+
+That prints the great-circle distance and the ionosphere it assumed. If a path
+exists, it prints `RESULT: LIKELY CONNECTS` with the hop count and launch
+elevation. Otherwise it prints `RESULT: UNLIKELY TO CONNECT`. `--tx`, `--rx`,
+`--freq` and `--utc` are required. The other flags are:
+
+```text
+--month N           month 1..12, sets the season (default 6)
+--solar low|high    solar-cycle level (default low)
+--fof2 MHZ          override the looked-up F2 critical frequency
+--hmf2 KM           override the looked-up F2 peak height
+--scale-height KM   Chapman scale height (default 50)
+--max-hops N        equal-hop path attempts, 1..10 (default 3)
+```
+
+Its model is much simpler than the app's. It uses one Chapman F2 layer with
+foF2 and hmF2 from a coarse midlatitude table, no magnetic field and no
+absorption. A "connects" result is geometric reachability, and it says nothing
+about signal strength. For a result you can defend, pass measured values with
+`--fof2` and `--hmf2`. The full list of limits is in its `--help`:
 
 ```bash
 cargo run --release -p skipzone-predict --bin hfpredict -- --help
 ```
 
-It states its own honesty boundaries in full, and they are worth repeating
-because they are narrower than the GUI's:
+## The lab harnesses
 
-- The foF2/hmF2 table is order-of-magnitude climatology. It is consistent with
-  published midlatitude ranges but is not a measured or forecast value for the
-  specific path and time. The assumed numbers are printed so they can be
-  checked, and `--fof2` / `--hmf2` override them with real ionosonde or
-  prediction data. That is the defensible path for real work.
-- A single Chapman F2 layer only. No E or F1 layers, no horizontal gradients, no
-  sporadic E, no tilts.
-- Field-free O-mode by default. O and X are bit-identical without a field, so
-  there is no magnetoionic splitting here.
-- "Connects" means a ray reflects and reaches the receiver **geometrically**.
-  Absorption and signal strength are not modelled, so this is an MUF-style
-  reachability check, not a link budget.
-- Multi-hop uses the equal-hop assumption. Because the assumed ionosphere
-  depends only on height, every hop is geometrically identical, so an N-hop path
-  exists exactly when a single hop of 1/N the ground distance reflects.
+These live in `crates/skipzone-lab/src/bin/` and run as
+`cargo run --release -p skipzone-lab --bin <name>`. They drive the same
+prediction code as the GUI.
 
-## Corpus and calibration
+| Tool | What it is for | Needs |
+|---|---|---|
+| `wspr_corpus` | Fetch a reproducible WSPR corpus once and write it to disk | Network |
+| `wspr_calibrate` | Fit the unverified anchors against a saved corpus, with station effects as nuisance parameters | `corpus/` |
+| `wspr_validate` | Score the model against a saved list of WSPR spots | A spot file |
+| `wspr_live_check` | Fetch live WSPR spots and the sunspot number, score the model and list the worst misses | Network, unless given `--file` and `--ssn` |
+| `iono_check` | Score the modelled foF2 and foE against measured ionosonde values, in MHz | `corpus/` |
+| `mode_audit` | Show why the solver admits a path and what absorption it charges it | Nothing |
+| `zenith_probe` | Measure the solar-zenith law the D region produces, without tracing a ray | Nothing |
+| `rise_wiring_check` | Check that the D-region rise anchor reaches a solve, and how much leverage the corpus has on it | `corpus/` |
+| `solve_digest` | Print a stable fingerprint of everything `solve()` produces over a fixed scenario grid | Nothing |
+| `profile_solve` | Count where the time in one solve goes, by trace, step and model evaluation | Nothing |
+| `gen_fof2_grid` | Regenerate the bundled `fof2_grid.tsv` from its generator | Nothing |
 
-### `wspr_corpus`
-
-Fetches a reproducible WSPR corpus once and writes it to disk, so that every
-later calibration run scores the same spots.
+The engine also has one example, `nvis_probe`, which prints where
+high-elevation rays land in a simple layer. It is a diagnostic with no
+assertions:
 
 ```bash
-cargo run --release -p skipzone-lab --bin wspr_corpus -- \
-    --from 2026-07-02 --days 7 --out corpus/fit.tsv --neg corpus/fit_neg.tsv
+cargo run --release -p skipzone --example nvis_probe
 ```
 
-Writes positives (spots that were decoded) and negatives (receivers that were
-listening on that band at that time and did not decode the transmitter). The
-negatives are what make a false-positive rate computable at all.
-
-### `wspr_calibrate`
-
-The calibration driver. Fits the unverified anchors against the saved corpus
-with transmitter and receiver effects treated as nuisance parameters.
+### Fetching and calibrating
 
 ```bash
+# Fetch a week of spots (positives) and the receivers that heard nothing (negatives)
+cargo run --release -p skipzone-lab --bin wspr_corpus -- \
+    --from 2026-07-02 --days 7 --out corpus/fit.tsv --neg corpus/fit_neg.tsv
+
+# Fit against it, testing on a hold-out from a different week
 cargo run --release -p skipzone-lab --bin wspr_calibrate -- \
     --fit corpus/fit.tsv --holdout corpus/holdout.tsv --negatives corpus/fit_neg.tsv
 ```
 
-It is the largest tool in the project and is split into modules under
-`crates/skipzone-lab/src/bin/wspr_calibrate/`:
+Build the hold-out with a second `wspr_corpus` run over a different span.
+`wspr_calibrate` stops with an error if an input file is missing. Run either
+tool with `--help` for the full flag list, including `--antenna`, `--noise-env`
+and `--scan` on `wspr_calibrate`.
 
-| Module | Contents |
-|---|---|
-| `main.rs` | Entry point only |
-| `args.rs` | The command line surface and its documented defaults |
-| `solving.rs` | Reading the corpus and solving it into cached predictions |
-| `driver.rs` | The fit itself, plus the anchor scans |
-| `report.rs` | Everything printed; no fitting happens there |
-| `negatives.rs` | Negatives, decode probability, false-positive rate |
-| `jackknife.rs` | Day-level refits |
-
-Read [Calibration](Calibration) before believing any number it prints.
-
-Run `--help` for the full flag list. The defaults point at `corpus/`, and a
-missing file is a hard error, not a silent fallback.
-
-## Validation
-
-### `wspr_validate`
-
-Scores the model against a saved list of WSPR spots.
+### Scoring
 
 ```bash
-cargo run --release -p skipzone-lab --bin wspr_validate -- spots.tsv [--ssn 70] [--quiet]
-```
+# A saved spot list: timestamp, TX call, MHz, SNR, TX grid, dBm, RX call, RX grid, km
+cargo run --release -p skipzone-lab --bin wspr_validate -- spots.tsv --ssn 70
 
-### `wspr_live_check`
-
-Fetches real WSPR spots and the observed sunspot number, scores the model
-against them, and reports where it falls behind.
-
-```bash
-cargo run --release -p skipzone-lab --bin wspr_live_check
+# A 20-minute live window, at most 300 spots
 cargo run --release -p skipzone-lab --bin wspr_live_check -- --minutes 20 --limit 300
+
+# A fixed past window on one band
 cargo run --release -p skipzone-lab --bin wspr_live_check -- --band 14 --at "2026-07-24 03:22"
+
+# Offline: a saved file and a given sunspot number
 cargo run --release -p skipzone-lab --bin wspr_live_check -- --file spots.tsv --ssn 119
+
+# Ionosonde comparison, with explicit paths (these are the defaults)
+cargo run --release -p skipzone-lab --bin iono_check -- \
+    corpus/ionosonde.tsv --ssn=corpus/ssn_daily.tsv --fit=corpus/fit.tsv
 ```
 
-This is the only tool that reaches the network by default. It goes through
-`crates/skipzone-lab/src/net.rs`, which is one file with one function so that "what does this
-program talk to" has a single answer.
+`iono_check` takes its flags as `--name=VALUE`. Add `--propose` to print
+suggested anchor changes as well as the error. It fits nothing itself.
 
-### `iono_check`
-
-Scores the ionosphere model against measured ionosonde foF2 and foE. Unlike
-WSPR, an ionosonde has no antenna, no noise floor and no station effect for
-error to hide in, so the comparison is a straight measurement of model error in
-MHz with nothing absorbed and nothing fitted.
-
-```bash
-cargo run --release -p skipzone-lab --bin iono_check
-cargo run --release -p skipzone-lab --bin iono_check -- path/to/obs.tsv --ssn=corpus/ssn_daily.tsv --fit=corpus/fit.tsv
-```
-
-Inputs and their defaults:
-
-| Flag | Default | What it is |
-|---|---|---|
-| first positional | `corpus/ionosonde.tsv` | The GIRO observations |
-| `--ssn=PATH` | `corpus/ssn_daily.tsv` | SILSO daily sunspot number |
-| `--fit=PATH` | `corpus/fit.tsv` | WSPR corpus, used only for its median SSN |
-| `--propose` | off | Print suggested anchor changes rather than only the error |
-
-It scores **six** foF2 backends side by side: the bundled grid, the climatology
-that generated it, and the CCIR maps under each of four solar drivers (daily
-sunspot number or R12, on the modern SILSO scale or converted back to the
-pre-2015 one the maps were fitted in). The last two axes are not free choices;
-which one is right is a fact about units and about what R12 means, and the table
-is how it was established. See
-[Ionosphere Model](Ionosphere-Model#the-ccir-maps-what-replaced-the-guess-and-by-how-much).
-
-It also prints the windows it found in the data rather than a hard-coded claim
-about them, and the model's own standard deviation next to the measurement's, so
-a backend that is unbiased by being flat cannot hide.
-
-If either auxiliary file is missing the run continues but says so on stderr,
-because falling back to a median or to a mid-cycle SSN of 90 changes what the
-run measures.
-
-It does **not** fit anything. It reports error. Anything that looks like a
-correction belongs in a separate deliberate change with its own test.
-
-## Diagnostics
-
-### `mode_audit`
-
-Answers "why did the solver admit this path, and what did it charge it". Prints
-the D-region decomposition and the night-floor leverage for a chosen scenario.
+### Diagnostics
 
 ```bash
 cargo run --release -p skipzone-lab --bin mode_audit
-```
-
-### `zenith_probe`
-
-Answers "where does the D region's solar-zenith law come from, and can the
-calibration reach the right one". `mode_audit` measures the effective exponent
-end-to-end through a traced ray; this strips the ray away and integrates the
-absorption kernel `Ne nu / (omega^2 + nu^2)` up a bare vertical column, so the
-exponent that comes out is the layer's own.
-
-```bash
 cargo run --release -p skipzone-lab --bin zenith_probe
-```
+cargo run --release -p skipzone-lab --bin profile_solve
 
-It prints the measured exponent against the derived `1/2 + H_D/H_nu`, checks
-that the exponent is frequency-independent (it must be, since `nu << omega`
-through the D region), sweeps both scale heights, and reports the smallest
-exponent anywhere inside the calibration's own bounds. Runs in about 1.4 s -
-there is no ray tracing in it, only vertical quadratures. See
-[Ionosphere Model](Ionosphere-Model) for what it found.
-
-### `rise_wiring_check`
-
-Answers two questions a flat calibration row cannot distinguish between: is the
-anchor reaching the solver at all, and does the corpus have any leverage on it.
-
-```bash
+# Corpus file and subsample size (defaults: corpus/fit.tsv and 600)
 cargo run --release -p skipzone-lab --bin rise_wiring_check -- corpus/fit.tsv 1200
 ```
 
-First it solves one high-sun low-band path at several rise fractions and prints
-the absorption actually charged - a dead anchor and an unidentifiable one
-produce the same table in `wspr_calibrate`, and only this tells them apart.
-Then it solves a corpus subsample at `f = 1` and `f = 0` and reports the
-**spread** of the per-spot change, broken down by band. The spread is the point:
-a fit refits the absorption scale and an offset, so anything common to every
-spot is absorbed exactly, and only variation across spots is identifiable. See
-[Calibration](Calibration) for what it found.
+`solve_digest` is the regression lock for any refactor or optimisation.
+[Contributing](Contributing#the-regression-lock) explains how to use it.
 
-### `solve_digest`
+`gen_fof2_grid` regenerates the bundled foF2 grid.
+[Contributing](Contributing#data-and-assets) says when and how to run it.
 
-A stable fingerprint of everything `solve()` produces, over a scenario grid.
-This is the tool that makes a performance change safe: capture a digest before,
-make the change, capture one after, and diff.
+## The `corpus/` directory
 
-```bash
-cargo run --release -p skipzone-lab --bin solve_digest > before.txt
-# make the change
-cargo run --release -p skipzone-lab --bin solve_digest > after.txt
-diff before.txt after.txt
-```
+`corpus/` is gitignored working data. Create it at the repository root.
 
-An optimisation that skips rays which cannot reach the target is only safe if it
-changes which rays are *traced* and not which are *found*. An empty diff is that
-proof.
+| File | Where it comes from | Read by |
+|---|---|---|
+| `fit.tsv`, `fit_neg.tsv` | `wspr_corpus` | `wspr_calibrate`, `rise_wiring_check`, `iono_check` (median SSN only) |
+| `holdout.tsv` | `wspr_corpus`, over a different span | `wspr_calibrate` |
+| `ionosonde.tsv` | Fetched by hand from the Lowell GIRO DIDBase | `iono_check` |
+| `ssn_daily.tsv` | SILSO daily sunspot number, as tab-separated year, month, day, SSN | `iono_check` |
 
-### `profile_solve`
+No tool in the repository fetches the ionosonde or SILSO files. If
+`iono_check` cannot read `ssn_daily.tsv` or `fit.tsv`, it carries on with a
+fallback sunspot number and warns on stderr.
 
-Counts where the time in one solve actually goes: traces, integrator steps,
-density, field and collision evaluations, and the raw cost of one evaluation of
-each model.
-
-```bash
-cargo run --release -p skipzone-lab --bin profile_solve
-```
-
-The instrumentation is entirely app-side. The engine models are wrapped in
-counting decorators, so nothing in the engine is modified to be measurable.
-
-## Generators
-
-### `gen_fof2_grid`
-
-Regenerates `crates/skipzone-iono/src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
-
-```bash
-cargo run -p skipzone-lab --bin gen_fof2_grid
-```
-
-The table is data, bundled and checked in, so nothing is computed or fetched at
-runtime. The generator exists so the data's provenance is a checked-in program
-rather than a pasted blob. Run it and the file is reproduced exactly, and the
-test `fof2::tests::bundled_grid_matches_its_generator` fails if the checked-in
-file and the generator ever disagree.
+GIRO data is CC-BY-NC-SA 4.0, and each contributing station's operator must be
+acknowledged in any published use. The other services, `db1.wspr.live`, SILSO
+and NOAA SWPC, are volunteer- or publicly-run, so keep request rates modest.
+All network calls go through one function in `crates/skipzone-lab/src/net.rs`.
