@@ -38,8 +38,8 @@ desktop app.
 | `skipzone` | `crates/skipzone/` | The engine: IGRF and dipole field models, the Appleton-Hartree dispersion relation, the Haselgrove ray equations, the adaptive integrator and the homing search | 1.85 |
 | `skipzone-iono` | `crates/skipzone-iono/` | The ionosphere: Chapman layers, the CCIR foF2 and M(3000)F2 maps, the bundled foF2 grid, sporadic E, solar geometry, time and Maidenhead conversions | 1.88 |
 | `skipzone-predict` | `crates/skipzone-predict/` | Headless link prediction: scenarios, the solve, link budget, noise, antennas, ground reflection, the frequency sweep, area coverage, the calibration anchors and the `hfpredict` CLI | 1.88 |
-| `skipzone-lab` | `crates/skipzone-lab/` | Validation and calibration against WSPR spots, ionosonde data and solar indices, plus every harness binary | 1.92 (follows eframe) |
-| `skipzone-app` | `app/` | The egui desktop front end | 1.92 (follows eframe) |
+| `skipzone-lab` | `crates/skipzone-lab/` | Validation and calibration against WSPR spots, ionosonde data and solar indices, plus every harness binary | 1.95 (follows eframe) |
+| `skipzone-app` | `app/` | The egui desktop front end | 1.95 (follows eframe) |
 
 The engine knows nothing about the ionosphere. It traces through any type that
 implements its `ElectronDensity` trait. `skipzone-iono` provides

@@ -18,7 +18,7 @@ You use it through a desktop map app.
 
 There are no binary releases yet. When there are, they'll be on
 [GitHub Releases](https://github.com/GabrielVicini/Skipzone/releases).
-Until then you build from source with Rust 1.92 or newer:
+Until then you build from source with Rust 1.95 or newer:
 
 ```bash
 git clone https://github.com/GabrielVicini/Skipzone.git
