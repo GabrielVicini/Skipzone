@@ -7,7 +7,7 @@ use egui::Ui;
 
 use crate::jobs::Jobs;
 use crate::persist;
-use crate::state::AppState;
+use crate::state::{AppState, Clock};
 use crate::ui::scratch::ViewScratch;
 use crate::ui::shell;
 use crate::update;
@@ -39,7 +39,19 @@ impl SkipzoneApp {
     /// Tests pass their own storage here.
     #[must_use]
     pub fn restoring(cc: &CreationContext<'_>, jobs: Jobs, storage: Option<&dyn Storage>) -> Self {
-        let mut state = AppState::new();
+        Self::build(cc, jobs, storage, Clock::System)
+    }
+
+    /// Build the app on a given clock. Snapshot tests pin it so the time,
+    /// the date and the night shading are the same every run.
+    #[must_use]
+    pub fn build(
+        cc: &CreationContext<'_>,
+        jobs: Jobs,
+        storage: Option<&dyn Storage>,
+        clock: Clock,
+    ) -> Self {
+        let mut state = AppState::starting_at(clock);
         let mut scratch = ViewScratch::new(&cc.egui_ctx, &state);
         if let Some(storage) = storage {
             persist::load(storage, &mut state, &mut scratch);

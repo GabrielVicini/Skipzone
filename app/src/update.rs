@@ -5,8 +5,6 @@
 //! back. Each frame the app absorbs the responses, draws, then updates with
 //! the actions the draw produced, in order.
 
-use skipzone_iono::clock;
-
 use crate::jobs::{Jobs, Request, Response};
 use crate::state::{AntennaPatterns, AppState, Busy, PatternKey};
 use crate::ui::actions::{Action, InputChange};
@@ -84,7 +82,7 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
         Action::ZoomIn => state.ui.map.pending_zoom *= ZOOM_STEP,
         Action::ZoomOut => state.ui.map.pending_zoom /= ZOOM_STEP,
         Action::SetDateToday => {
-            let (today, _) = clock::utc_now();
+            let (today, _) = state.clock.now();
             InputChange::Date(today).apply(&mut state.inputs);
         }
         Action::RunCoverage => {
@@ -437,6 +435,21 @@ mod tests {
         assert!((s.inputs.scenario.utc_hours - 6.5).abs() < 1e-12);
         assert_eq!(s.inputs.date(), date);
         assert!(!s.inputs.display.show_terminator);
+    }
+
+    /// A fixed clock sets both the start-up time and the Today button.
+    #[test]
+    fn a_fixed_clock_drives_startup_and_today() {
+        let start = skipzone_iono::clock::CivilDate::new(2026, 6, 21);
+        let mut s = AppState::starting_at(crate::state::Clock::Fixed(start, 12.25));
+        assert_eq!(s.inputs.date(), start);
+        assert!((s.inputs.scenario.utc_hours - 12.25).abs() < 1e-12);
+
+        let jobs = Jobs::inline(|| {});
+        let other = skipzone_iono::clock::CivilDate::new(2027, 1, 2);
+        apply(&mut s, &jobs, [Action::SetInput(InputChange::Date(other))]);
+        apply(&mut s, &jobs, [Action::SetDateToday]);
+        assert_eq!(s.inputs.date(), start);
     }
 
     /// Opening and closing dialogs touches only the dialog named.

@@ -5,6 +5,7 @@
 //! * [`Results`] - what the background jobs computed from them, and what they
 //!   are doing now.
 //! * [`UiState`] - open dialogs, map placement and camera, the selected mode.
+//! * [`Clock`] - where "now" comes from.
 //!
 //! Views only read this. They report what the operator asked for as
 //! [`crate::ui::actions::Action`]s, and [`crate::update::update`] is the one
@@ -56,6 +57,27 @@ impl Default for Display {
     }
 }
 
+/// Where "now" comes from: the start-up date and time, and the calendar's
+/// Today button.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Clock {
+    /// The system clock, in UTC.
+    System,
+    /// A fixed date and UTC hour, so tests draw the same screen every run.
+    Fixed(CivilDate, f64),
+}
+
+impl Clock {
+    /// Today's UTC date and the hour of day.
+    #[must_use]
+    pub fn now(self) -> (CivilDate, f64) {
+        match self {
+            Self::System => clock::utc_now(),
+            Self::Fixed(date, hours) => (date, hours),
+        }
+    }
+}
+
 /// Everything the operator chose.
 pub struct AppInputs {
     /// The scenario and every model setting, as the solver takes them.
@@ -81,6 +103,7 @@ pub struct AppState {
     pub inputs: AppInputs,
     pub results: Results,
     pub ui: UiState,
+    pub clock: Clock,
 }
 
 impl AppState {
@@ -89,14 +112,22 @@ impl AppState {
     /// fixed, test-reproducible scenario rather than a moving target.
     #[must_use]
     pub fn new() -> Self {
-        let (today, hours) = clock::utc_now();
-        Self::with_scenario(Inputs {
+        Self::starting_at(Clock::System)
+    }
+
+    /// Start from the default scenario at what `clock` says is now.
+    #[must_use]
+    pub fn starting_at(clock: Clock) -> Self {
+        let (today, hours) = clock.now();
+        let mut state = Self::with_scenario(Inputs {
             year: today.year,
             month: today.month,
             day_of_month: today.day,
             utc_hours: hours,
             ..Inputs::default()
-        })
+        });
+        state.clock = clock;
+        state
     }
 
     /// Start from a given scenario, with nothing computed yet.
@@ -110,6 +141,7 @@ impl AppState {
             },
             results: Results::default(),
             ui: UiState::default(),
+            clock: Clock::System,
         }
     }
 
