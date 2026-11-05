@@ -1,6 +1,6 @@
 # Documentation
 
-Every document here either documents a crate or is a dated report. How the
+Every document here documents a crate, is a dated report, or is a dated planning note. How the
 project fits together, how to use the app and how to build it are in the
 [wiki](https://github.com/GabrielVicini/Skipzone/wiki). The API reference is
 `cargo doc --workspace --no-deps --open`.
@@ -33,6 +33,7 @@ commit they name, which may differ from the current code.
 | Report | What it covers |
 |---|---|
 | [2026-08 verification](reports/2026-08-verification.md) | Engine correctness, ionosphere against GIRO ionosonde data and end-to-end SNR against WSPR, at commit `d92bf9f`. For anyone weighing how far to trust a prediction. |
+| [Accuracy roadmap](notes/accuracy-roadmap.md) (note, 2026-11) | A held-out benchmark against ITU-R P.533, then candidate accuracy improvements with their data sources, licences, effort and expected effect, for choosing what to build first. |
 
 ## Keeping this honest
 
