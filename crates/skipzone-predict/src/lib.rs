@@ -17,6 +17,7 @@ pub mod coastline;
 pub mod compute;
 pub mod coverage;
 pub mod noise;
+pub mod run;
 pub mod scenario;
 pub mod solve;
 pub mod sweep;

@@ -234,6 +234,67 @@ pub fn available_cores() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
 
+/// Pool size for jobs that run while the operator keeps using the app: the
+/// point-to-point solve and the frequency sweep.
+///
+/// Parallel, holding two cores back so the interface stays responsive for the
+/// minute or more a sweep takes. Overridable by environment, so the parallel
+/// layer can be capped or switched off without a rebuild (for A/B timing, or
+/// to rule out a parallelism bug):
+///   * `SKIPZONE_COMPUTE=sequential` - single-threaded fallback.
+///   * `SKIPZONE_COMPUTE_THREADS=N`   - cap worker threads at N.
+#[must_use]
+pub fn background_pool_config() -> PoolConfig {
+    let cores = available_cores();
+    PoolConfig {
+        execution: execution_from_env(),
+        max_threads: Some(threads_from_env().unwrap_or(cores.saturating_sub(2).max(1))),
+    }
+}
+
+/// Pool size for the coverage grid: every core.
+///
+/// It is a one-off run the operator starts and then watches fill in, with
+/// nothing else competing for the machine. The same environment overrides as
+/// [`background_pool_config`] apply.
+#[must_use]
+pub fn coverage_pool_config() -> PoolConfig {
+    PoolConfig {
+        execution: execution_from_env(),
+        max_threads: Some(threads_from_env().unwrap_or_else(available_cores)),
+    }
+}
+
+/// `SKIPZONE_COMPUTE=sequential` switches the parallel layer off entirely.
+fn execution_from_env() -> Execution {
+    match std::env::var("SKIPZONE_COMPUTE").as_deref() {
+        Ok("sequential" | "seq" | "off" | "0") => Execution::Sequential,
+        _ => Execution::Parallel,
+    }
+}
+
+/// `SKIPZONE_COMPUTE_THREADS=N` caps every pool at N threads.
+pub(crate) fn threads_from_env() -> Option<usize> {
+    std::env::var("SKIPZONE_COMPUTE_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+}
+
+/// Build a pool, degrading to the single-threaded fallback if the thread pool
+/// cannot be created, which must never take the app down. `label` names the
+/// pool in the warning.
+#[must_use]
+pub fn build_pool(label: &str, config: PoolConfig) -> ComputePool {
+    ComputePool::new(config).unwrap_or_else(|e| {
+        eprintln!("[{label}] compute pool build failed ({e}); using sequential fallback");
+        ComputePool::new(PoolConfig {
+            execution: Execution::Sequential,
+            max_threads: None,
+        })
+        .expect("sequential pool construction is infallible")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

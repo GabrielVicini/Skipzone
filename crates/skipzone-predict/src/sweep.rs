@@ -16,17 +16,19 @@
 //! drive the module headlessly.
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use skipzone::magnetoionic::Mode;
 
-use crate::compute::{ComputePool, Execution, PoolConfig, Timing, available_cores};
-use crate::coverage::{CoverageCell, CoverageConfig};
+use crate::compute::{
+    ComputePool, Execution, Timing, background_pool_config, build_pool, coverage_pool_config,
+};
+use crate::coverage::{CoverageCell, CoverageConfig, CoverageEvent};
 use crate::noise::PathState;
-use crate::scenario::{self, Assumptions, Inputs, Models, ProfileRow};
+use crate::run::{self, MainResult, RunError};
+use crate::scenario::{self, Assumptions, Inputs, Models};
 use crate::solve::{self, SolveOutcome};
 
 /// HF band swept by "Find best frequency". The scan is coarse-to-fine: a cheap
@@ -157,11 +159,19 @@ pub struct SweepBest {
     pub point: SweepPoint,
 }
 
-/// A completed main solve, everything the UI needs to display it.
-pub struct MainResult {
-    pub assumptions: Assumptions,
-    pub profile: Vec<ProfileRow>,
-    pub outcome: SolveOutcome,
+/// Progress from [`run_sweep`], delivered as it happens.
+#[derive(Clone, Copy)]
+pub enum SweepEvent {
+    /// The sweep is about to start. `total` is an optimistic estimate: the
+    /// whole coarse grid plus one fine window.
+    Start { total: usize },
+    /// One solved frequency, in completion order. `total` is revised once the
+    /// fine window is known.
+    Point {
+        done: usize,
+        total: usize,
+        point: SweepPoint,
+    },
 }
 
 pub enum Job {
@@ -349,7 +359,8 @@ impl SolverService {
     }
 }
 
-/// Run one job to completion on the worker thread.
+/// Run one job to completion on the worker thread, translating the runner's
+/// events and result into messages.
 fn run_job(
     epoch: u64,
     job: Job,
@@ -358,11 +369,58 @@ fn run_job(
     msg_tx: &Sender<(u64, Msg)>,
     wake: &Wake,
 ) {
+    let send = |m: Msg| {
+        let _ = msg_tx.send((epoch, m));
+        wake();
+    };
+    let cancelled = || cancel.load(Ordering::Relaxed);
     match job {
-        Job::Main(inputs) => run_main(epoch, &inputs, msg_tx, wake),
-        Job::Sweep(inputs) => run_sweep(epoch, &inputs, pool, cancel, msg_tx, wake),
+        Job::Main(inputs) => match run::run_main(&inputs, &cancelled) {
+            Ok(r) => send(Msg::MainDone(Box::new(r))),
+            Err(RunError::Failed(e)) => send(Msg::MainFailed(e)),
+            // Only a superseded job is cancelled, and its result would be
+            // dropped by the epoch filter anyway.
+            Err(RunError::Cancelled) => {}
+        },
+        Job::Sweep(inputs) => {
+            let on_event = |e: SweepEvent| {
+                send(match e {
+                    SweepEvent::Start { total } => Msg::SweepStart { total },
+                    SweepEvent::Point { done, total, point } => {
+                        Msg::SweepProgress { done, total, point }
+                    }
+                });
+            };
+            match run_sweep(&inputs, pool, &cancelled, &on_event) {
+                Ok(best) => send(Msg::SweepDone { best }),
+                Err(RunError::Failed(e)) => send(Msg::SweepFailed(e)),
+                Err(RunError::Cancelled) => {}
+            }
+        }
         Job::Coverage(inputs, config) => {
-            run_coverage(epoch, &inputs, config, pool, cancel, msg_tx, wake);
+            let on_event = |e: CoverageEvent| {
+                send(match e {
+                    CoverageEvent::Start { total, threads } => {
+                        Msg::CoverageStart { total, threads }
+                    }
+                    CoverageEvent::Cell {
+                        done,
+                        total,
+                        threads,
+                        cell,
+                    } => Msg::CoverageProgress {
+                        done,
+                        total,
+                        threads,
+                        cell: Box::new(cell),
+                    },
+                });
+            };
+            match run::run_coverage(&inputs, config, pool, &cancelled, &on_event) {
+                Ok(()) => send(Msg::CoverageDone { cancelled: false }),
+                Err(RunError::Cancelled) => send(Msg::CoverageDone { cancelled: true }),
+                Err(RunError::Failed(e)) => send(Msg::CoverageFailed(e)),
+            }
         }
     }
 }
@@ -373,9 +431,8 @@ fn worker(
     wake: &Wake,
 ) {
     // One pool per job kind for the worker's whole lifetime: sizing a rayon pool
-    // costs a thread spawn per worker, so it is paid once. The two are sized
-    // differently (see `sweep_pool_config` and `coverage_pool_config`).
-    let pool = build_pool("sweep", sweep_pool_config());
+    // costs a thread spawn per worker, so it is paid once.
+    let pool = build_pool("sweep", background_pool_config());
     let coverage_pool = build_pool("coverage", coverage_pool_config());
     while let Ok((epoch, job, cancel)) = job_rx.recv() {
         // The pool a job gets is the only thing the worker decides.
@@ -387,115 +444,34 @@ fn worker(
     }
 }
 
-/// Execution config for the sweep's compute pool, overridable by environment so
-/// the parallel layer can be capped or switched off entirely without a rebuild
-/// (for A/B timing or debugging a suspected parallelism bug):
-///   * `SKIPZONE_COMPUTE=sequential` - single-threaded fallback.
-///   * `SKIPZONE_COMPUTE_THREADS=N`   - cap worker threads at N.
+/// The frequency sweep behind "Find best frequency": build the scenario models
+/// once, then call `solve()` at each candidate frequency, coarse pass first
+/// and then a fine window around the coarse best.
 ///
-/// Default: parallel, but holding two cores back.
+/// The pool's execution mode picks the path. In parallel each phase's whole
+/// grid runs at once; sequentially the coarse pass stops early once it is
+/// clearly past the optimum. Both give the same per-frequency results.
+/// `cancel` is checked before each frequency.
 ///
-/// The sweep runs in the background while the operator keeps using the map and
-/// panels, so two cores are reserved to keep the interface responsive for the
-/// minute or more it takes.
-fn sweep_pool_config() -> PoolConfig {
-    let cores = available_cores();
-    PoolConfig {
-        execution: execution_from_env(),
-        max_threads: Some(threads_from_env().unwrap_or(cores.saturating_sub(2).max(1))),
-    }
-}
-
-/// The coverage grid gets every core.
+/// Returns the winning frequency, which is `None` only if nothing was solved.
 ///
-/// It is a one-off run the operator starts and then watches fill in, with
-/// nothing else competing for the machine.
-fn coverage_pool_config() -> PoolConfig {
-    PoolConfig {
-        execution: execution_from_env(),
-        max_threads: Some(threads_from_env().unwrap_or_else(available_cores)),
-    }
-}
-
-/// `SKIPZONE_COMPUTE=sequential` switches the parallel layer off entirely, so a
-/// suspected parallelism bug can be A/B'd without a rebuild.
-fn execution_from_env() -> Execution {
-    match std::env::var("SKIPZONE_COMPUTE").as_deref() {
-        Ok("sequential" | "seq" | "off" | "0") => Execution::Sequential,
-        _ => Execution::Parallel,
-    }
-}
-
-/// `SKIPZONE_COMPUTE_THREADS=N` caps both pools at N threads.
-fn threads_from_env() -> Option<usize> {
-    std::env::var("SKIPZONE_COMPUTE_THREADS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-}
-
-/// Build a pool, degrading to the single-threaded fallback if the thread pool
-/// cannot be created (which must never take the app down).
-fn build_pool(label: &str, config: PoolConfig) -> ComputePool {
-    ComputePool::new(config).unwrap_or_else(|e| {
-        eprintln!("[{label}] compute pool build failed ({e}); using sequential fallback");
-        ComputePool::new(PoolConfig {
-            execution: Execution::Sequential,
-            max_threads: None,
-        })
-        .expect("sequential pool construction is infallible")
-    })
-}
-
-fn run_main(epoch: u64, inputs: &Inputs, msg_tx: &Sender<(u64, Msg)>, wake: &Wake) {
-    let a = scenario::resolve(inputs);
-    match scenario::build_models(inputs, &a) {
-        Ok(models) => {
-            let profile = scenario::sample_profile(&models, &a);
-            let outcome = solve::solve(inputs, &a, &models);
-            let _ = msg_tx.send((
-                epoch,
-                Msg::MainDone(Box::new(MainResult {
-                    assumptions: a,
-                    profile,
-                    outcome,
-                })),
-            ));
-        }
-        Err(e) => {
-            let _ = msg_tx.send((epoch, Msg::MainFailed(e)));
-        }
-    }
-    wake();
-}
-
-/// Build the scenario models once, then run the sweep on the chosen execution
-/// path. Model construction and the coarse-then-fine search structure are shared
-/// by both paths; only *where* each frequency's `solve()` runs differs.
-fn run_sweep(
-    epoch: u64,
+/// # Errors
+/// [`RunError::Failed`] when the models cannot be built, and
+/// [`RunError::Cancelled`] when `cancel` stopped the sweep. Points already
+/// delivered through `on_event` stay valid.
+pub fn run_sweep(
     inputs: &Inputs,
     pool: &ComputePool,
-    cancel: &AtomicBool,
-    msg_tx: &Sender<(u64, Msg)>,
-    wake: &Wake,
-) {
+    cancel: &(dyn Fn() -> bool + Sync),
+    on_event: &(dyn Fn(SweepEvent) + Sync),
+) -> Result<Option<SweepBest>, RunError> {
     let a = scenario::resolve(inputs);
-    let models = match scenario::build_models(inputs, &a) {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = msg_tx.send((epoch, Msg::SweepFailed(e)));
-            wake();
-            return;
-        }
-    };
-    match pool.execution() {
-        Execution::Parallel => {
-            run_sweep_parallel(epoch, inputs, &a, &models, pool, cancel, msg_tx, wake);
-        }
-        Execution::Sequential => {
-            run_sweep_sequential(epoch, inputs, &a, &models, cancel, msg_tx, wake);
-        }
-    }
+    let models = scenario::build_models(inputs, &a).map_err(RunError::Failed)?;
+    let best = match pool.execution() {
+        Execution::Parallel => run_sweep_parallel(inputs, &a, &models, pool, cancel, on_event),
+        Execution::Sequential => run_sweep_sequential(inputs, &a, &models, cancel, on_event),
+    }?;
+    Ok(best.map(|point| SweepBest { point }))
 }
 
 /// One candidate frequency -> its cached `SweepPoint`. Returns `None` only when
@@ -507,9 +483,9 @@ fn solve_point(
     inputs: &Inputs,
     a: &Assumptions,
     models: &Models,
-    cancel: &AtomicBool,
+    cancel: &(dyn Fn() -> bool + Sync),
 ) -> Option<SweepPoint> {
-    if cancel.load(Ordering::Relaxed) {
+    if cancel() {
         return None;
     }
     let mut fi = inputs.clone();
@@ -535,53 +511,37 @@ fn fold_best(seed: Option<SweepPoint>, points: &[SweepPoint]) -> Option<SweepPoi
 /// stop, which only saves sequential time; the complete coarse grid is a
 /// superset of what the sequential path evaluates, so per-frequency results are
 /// identical and the winner is never worse.
-#[allow(clippy::too_many_arguments)]
 fn run_sweep_parallel(
-    epoch: u64,
     inputs: &Inputs,
     a: &Assumptions,
     models: &Models,
     pool: &ComputePool,
-    cancel: &AtomicBool,
-    msg_tx: &Sender<(u64, Msg)>,
-    wake: &Wake,
-) {
+    cancel: &(dyn Fn() -> bool + Sync),
+    on_event: &(dyn Fn(SweepEvent) + Sync),
+) -> Result<Option<SweepPoint>, RunError> {
     let coarse = coarse_freqs();
     // Optimistic total for the bar: whole coarse grid plus one fine window.
     let total_estimate = coarse.len() + fine_freqs(0.5 * (SWEEP_MIN_MHZ + SWEEP_MAX_MHZ)).len();
-    let _ = msg_tx.send((
-        epoch,
-        Msg::SweepStart {
-            total: total_estimate,
-        },
-    ));
-    wake();
+    on_event(SweepEvent::Start {
+        total: total_estimate,
+    });
 
-    // Shared, lock-free progress counter; the mpsc Sender is !Sync so a clone is
-    // wrapped in a Mutex (progress is one message per solve, so contention is
-    // nil). Both are captured by the per-phase progress callbacks below.
+    // Shared by every pool thread's progress callback.
     let done = AtomicUsize::new(0);
-    let prog = Mutex::new(msg_tx.clone());
 
     let evaluate = |f: &f64| solve_point(*f, inputs, a, models, cancel);
 
-    // Run one grid in parallel, streaming a SweepProgress per solved frequency.
+    // Run one grid in parallel, reporting each solved frequency.
     let run_phase = |freqs: &[f64], total: usize| -> (Vec<SweepPoint>, Timing) {
         let (opt_points, timing) =
             pool.map_reporting(freqs, evaluate, |_, point: &Option<SweepPoint>| {
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
                 if let Some(point) = point {
-                    if let Ok(tx) = prog.lock() {
-                        let _ = tx.send((
-                            epoch,
-                            Msg::SweepProgress {
-                                done: n,
-                                total,
-                                point: *point,
-                            },
-                        ));
-                    }
-                    wake();
+                    on_event(SweepEvent::Point {
+                        done: n,
+                        total,
+                        point: *point,
+                    });
                 }
             });
         (opt_points.into_iter().flatten().collect(), timing)
@@ -589,6 +549,9 @@ fn run_sweep_parallel(
 
     // Phase 1: the full coarse grid.
     let (coarse_points, coarse_timing) = run_phase(&coarse, total_estimate);
+    if cancel() {
+        return Err(RunError::Cancelled);
+    }
     let mut best = fold_best(None, &coarse_points);
 
     // Phase 2: fine refinement around the coarse best.
@@ -596,6 +559,9 @@ fn run_sweep_parallel(
         let fine = fine_freqs(seed.freq_mhz);
         let total = done.load(Ordering::Relaxed) + fine.len();
         let (fine_points, timing) = run_phase(&fine, total);
+        if cancel() {
+            return Err(RunError::Cancelled);
+        }
         best = fold_best(best, &fine_points);
         timing
     } else {
@@ -607,44 +573,32 @@ fn run_sweep_parallel(
     };
 
     log_sweep_timing("parallel", &coarse_timing, &fine_timing);
-
-    let _ = msg_tx.send((
-        epoch,
-        Msg::SweepDone {
-            best: best.map(|point| SweepBest { point }),
-        },
-    ));
-    wake();
+    Ok(best)
 }
 
 /// Single-threaded path: a coarse scan with an uphill early stop, then a fine
 /// scan. The fallback when parallelism is off, and the equivalence baseline.
 fn run_sweep_sequential(
-    epoch: u64,
     inputs: &Inputs,
     a: &Assumptions,
     models: &Models,
-    cancel: &AtomicBool,
-    msg_tx: &Sender<(u64, Msg)>,
-    wake: &Wake,
-) {
+    cancel: &(dyn Fn() -> bool + Sync),
+    on_event: &(dyn Fn(SweepEvent) + Sync),
+) -> Result<Option<SweepPoint>, RunError> {
     let sweep_started = std::time::Instant::now();
     let mut per_item: Vec<Duration> = Vec::new();
 
     let coarse = coarse_freqs();
     // Optimistic total for the bar: coarse pass plus one fine window. Each
-    // progress message carries its own (possibly revised) total.
+    // progress event carries its own (possibly revised) total.
     let mut total = coarse.len() + fine_freqs(0.5 * (SWEEP_MIN_MHZ + SWEEP_MAX_MHZ)).len();
-    let _ = msg_tx.send((epoch, Msg::SweepStart { total }));
-    wake();
+    on_event(SweepEvent::Start { total });
 
-    let mut timed_solve = |f: f64| -> Option<SweepPoint> {
+    let mut timed_solve = |f: f64| -> Result<SweepPoint, RunError> {
         let started = std::time::Instant::now();
-        let point = solve_point(f, inputs, a, models, cancel);
-        if point.is_some() {
-            per_item.push(started.elapsed());
-        }
-        point
+        let point = solve_point(f, inputs, a, models, cancel).ok_or(RunError::Cancelled)?;
+        per_item.push(started.elapsed());
+        Ok(point)
     };
 
     // The winner uses the exact `better` rule (which resolves ties badness
@@ -657,7 +611,7 @@ fn run_sweep_sequential(
 
     // Phase 1: coarse scan, low to high, stopping once clearly past the optimum.
     for &f in &coarse {
-        let Some(point) = timed_solve(f) else { return };
+        let point = timed_solve(f)?;
         done += 1;
         best = Some(best.map_or(point, |b| better(b, point)));
         if point.badness() < best_badness - 1e-4 {
@@ -666,8 +620,7 @@ fn run_sweep_sequential(
         } else {
             worse_streak += 1;
         }
-        let _ = msg_tx.send((epoch, Msg::SweepProgress { done, total, point }));
-        wake();
+        on_event(SweepEvent::Point { done, total, point });
         if worse_streak >= UPHILL_PATIENCE {
             break; // going uphill: no need to fill out the rest of the band
         }
@@ -678,11 +631,10 @@ fn run_sweep_sequential(
         let fine = fine_freqs(seed.freq_mhz);
         total = done + fine.len();
         for &f in &fine {
-            let Some(point) = timed_solve(f) else { return };
+            let point = timed_solve(f)?;
             done += 1;
             best = Some(best.map_or(point, |b| better(b, point)));
-            let _ = msg_tx.send((epoch, Msg::SweepProgress { done, total, point }));
-            wake();
+            on_event(SweepEvent::Point { done, total, point });
         }
     }
 
@@ -692,97 +644,7 @@ fn run_sweep_sequential(
         threads: 1,
     };
     log_sweep_timing_single("sequential", &timing);
-
-    let _ = msg_tx.send((
-        epoch,
-        Msg::SweepDone {
-            best: best.map(|point| SweepBest { point }),
-        },
-    ));
-    wake();
-}
-
-/// Area coverage: build the models once, then run the existing point-to-point
-/// solve at every grid point across the coverage pool, streaming each finished
-/// cell the moment it lands.
-///
-/// `crate::coverage::solve_cell` is the unit of work; see that module for why
-/// one `Models` is valid for every grid point.
-#[allow(clippy::too_many_arguments)]
-fn run_coverage(
-    epoch: u64,
-    inputs: &Inputs,
-    config: CoverageConfig,
-    pool: &ComputePool,
-    cancel: &AtomicBool,
-    msg_tx: &Sender<(u64, Msg)>,
-    wake: &Wake,
-) {
-    let a = scenario::resolve(inputs);
-    let models = match scenario::build_models(inputs, &a) {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = msg_tx.send((epoch, Msg::CoverageFailed(e)));
-            wake();
-            return;
-        }
-    };
-
-    let step_deg = config.step_deg();
-    let points = config.grid(inputs.tx_lat, inputs.tx_lon);
-    let total = points.len();
-    let threads = pool.threads();
-    let _ = msg_tx.send((epoch, Msg::CoverageStart { total, threads }));
-    wake();
-
-    let done = AtomicUsize::new(0);
-    let prog = Mutex::new(msg_tx.clone());
-
-    let (_cells, timing) = pool.map_reporting(
-        &points,
-        |&(lat, lon)| {
-            // Checked per grid point, so pressing Cancel stops the remaining
-            // calculations rather than letting the whole grid drain.
-            if cancel.load(Ordering::Relaxed) {
-                return None;
-            }
-            Some(crate::coverage::solve_cell(
-                lat, lon, step_deg, inputs, &models,
-            ))
-        },
-        |_, cell: &Option<CoverageCell>| {
-            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-            if let Some(cell) = cell
-                && let Ok(tx) = prog.lock()
-            {
-                let _ = tx.send((
-                    epoch,
-                    Msg::CoverageProgress {
-                        done: n,
-                        total,
-                        threads,
-                        cell: Box::new(*cell),
-                    },
-                ));
-                wake();
-            }
-        },
-    );
-
-    let cancelled = cancel.load(Ordering::Relaxed);
-    eprintln!(
-        "[coverage] {} of {total} grid point(s) on {threads} thread(s) in {:.3} s \
-         (serial work {:.3} s, {:.1}x, mean {:.0} ms/point){}",
-        timing.per_item.len(),
-        timing.total.as_secs_f64(),
-        timing.work().as_secs_f64(),
-        timing.speedup(),
-        timing.mean_item().as_secs_f64() * 1e3,
-        if cancelled { " [CANCELLED]" } else { "" },
-    );
-
-    let _ = msg_tx.send((epoch, Msg::CoverageDone { cancelled }));
-    wake();
+    Ok(best)
 }
 
 /// One-line timing summary combining the coarse and fine phases, so the
@@ -838,7 +700,6 @@ mod tests {
     #[test]
     fn parallel_matches_sequential_and_reports_timing() {
         use crate::compute::{ComputePool, Execution, PoolConfig, available_cores};
-        use std::sync::atomic::AtomicBool;
 
         let inputs = Inputs::default();
         let a = scenario::resolve(&inputs);
@@ -851,9 +712,8 @@ mod tests {
         let mut freqs = coarse_freqs();
         freqs.extend(fine_freqs(14.0));
 
-        let never_cancel = AtomicBool::new(false);
         let evaluate =
-            |f: &f64| solve_point(*f, &inputs, &a, &models, &never_cancel).expect("not cancelled");
+            |f: &f64| solve_point(*f, &inputs, &a, &models, &|| false).expect("not cancelled");
 
         let seq = ComputePool::new(PoolConfig {
             execution: Execution::Sequential,
@@ -916,80 +776,28 @@ mod tests {
         );
     }
 
-    /// The coverage run's three behavioural promises, checked without a window:
-    /// every grid point is streamed as its own message (so the map fills in
-    /// progressively), the run
-    /// reports the thread count it is using, and a cancel mid-run stops the
-    /// remaining calculations while keeping everything already delivered.
+    /// A cancelled sweep says so on both execution paths, and solves nothing.
     #[test]
-    fn coverage_streams_each_point_and_cancel_keeps_what_was_computed() {
-        use crate::coverage::CoverageConfig;
+    fn cancelled_sweep_reports_cancelled_on_both_paths() {
+        use crate::compute::{ComputePool, Execution, PoolConfig};
+        use std::sync::Mutex;
 
-        // A small grid: enough points to cancel part-way through.
-        let config = CoverageConfig {
-            half_span_deg: 12.0,
-            points_per_deg: 0.25, // 4 deg steps => 7 x 7 minus the centre
-        };
-        let inputs = Inputs::default();
-        let expected = config.grid(inputs.tx_lat, inputs.tx_lon).len();
-        assert!(expected > 8, "need a grid worth cancelling, got {expected}");
-
-        let pool = build_pool("coverage-test", coverage_pool_config());
-        let wake = no_wake();
-
-        // Run 1: to completion. One message per grid point, in the order they
-        // finished, each carrying the pool's thread count.
-        let (tx, rx) = mpsc::channel();
-        let never = AtomicBool::new(false);
-        run_coverage(1, &inputs, config, &pool, &never, &tx, &wake);
-        drop(tx);
-        let msgs: Vec<Msg> = rx.into_iter().map(|(_, m)| m).collect();
-
-        let mut streamed = 0usize;
-        let mut started = None;
-        let mut finished = None;
-        for m in &msgs {
-            match m {
-                Msg::CoverageStart { total, threads } => started = Some((*total, *threads)),
-                Msg::CoverageProgress { threads, .. } => {
-                    streamed += 1;
-                    assert_eq!(*threads, pool.threads());
+        for execution in [Execution::Parallel, Execution::Sequential] {
+            let pool = ComputePool::new(PoolConfig {
+                execution,
+                max_threads: Some(2),
+            })
+            .unwrap();
+            let points = Mutex::new(0usize);
+            let count = |e: SweepEvent| {
+                if matches!(e, SweepEvent::Point { .. }) {
+                    *points.lock().unwrap() += 1;
                 }
-                Msg::CoverageDone { cancelled } => finished = Some(*cancelled),
-                _ => panic!("unexpected message kind from a coverage run"),
-            }
+            };
+            let end = run_sweep(&Inputs::default(), &pool, &|| true, &count);
+            assert!(matches!(end, Err(RunError::Cancelled)), "{execution:?}");
+            assert_eq!(*points.lock().unwrap(), 0, "{execution:?}");
         }
-        assert_eq!(started, Some((expected, pool.threads())));
-        assert_eq!(streamed, expected, "one message per computed grid point");
-        assert_eq!(finished, Some(false));
-
-        // The coverage pool must be the larger: the sweep holds cores back.
-        let sweep_threads = build_pool("sweep-test", sweep_pool_config()).threads();
-        if available_cores() > 2 && threads_from_env().is_none() {
-            assert!(
-                pool.threads() > sweep_threads,
-                "coverage ({}) should use more threads than the sweep ({sweep_threads})",
-                pool.threads(),
-            );
-        }
-
-        // Run 2: cancelled before it starts. Nothing further is computed, the
-        // run still closes itself out, and it says it was cancelled.
-        let (tx, rx) = mpsc::channel();
-        let cancelled_flag = AtomicBool::new(true);
-        run_coverage(2, &inputs, config, &pool, &cancelled_flag, &tx, &wake);
-        drop(tx);
-        let msgs: Vec<Msg> = rx.into_iter().map(|(_, m)| m).collect();
-        assert!(
-            !msgs
-                .iter()
-                .any(|m| matches!(m, Msg::CoverageProgress { .. })),
-            "a cancelled run must not solve any more grid points"
-        );
-        assert!(matches!(
-            msgs.last(),
-            Some(Msg::CoverageDone { cancelled: true })
-        ));
     }
 
     #[test]

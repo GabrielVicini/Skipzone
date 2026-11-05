@@ -18,9 +18,13 @@
 //! day/night and season feed the noise floor) and is re-run per grid point.
 //! `cell_matches_a_full_point_to_point_solve` checks the equivalence.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use skipzone::magnetoionic::Mode;
 
+use crate::compute::ComputePool;
 use crate::noise::PathState;
+use crate::run::RunError;
 use crate::scenario::{self, EARTH_RADIUS_M, Inputs, Models};
 use crate::solve::{self, LayerMode, LayerStatus};
 
@@ -288,9 +292,157 @@ pub fn solve_cell(
     }
 }
 
+/// Progress from [`run_coverage`], delivered as it happens.
+#[derive(Clone, Copy)]
+pub enum CoverageEvent {
+    /// The grid is about to run: `total` points on `threads` pool threads.
+    Start { total: usize, threads: usize },
+    /// One finished grid point, delivered the moment it is computed so the map
+    /// can fill in progressively. Arrives in completion order.
+    Cell {
+        done: usize,
+        total: usize,
+        threads: usize,
+        cell: CoverageCell,
+    },
+}
+
+/// Area coverage: build the models once, then run [`solve_cell`] at every grid
+/// point across `pool`, reporting each finished cell through `on_event`.
+///
+/// `cancel` is checked before each grid point, so a cancel stops the remaining
+/// calculations rather than letting the whole grid drain. See the module
+/// documentation for why one `Models` is valid for every grid point.
+///
+/// # Errors
+/// [`RunError::Failed`] when the models cannot be built, and
+/// [`RunError::Cancelled`] when `cancel` was set by the end of the run. The
+/// cells already delivered stay valid either way.
+pub fn run_coverage(
+    inputs: &Inputs,
+    config: CoverageConfig,
+    pool: &ComputePool,
+    cancel: &(dyn Fn() -> bool + Sync),
+    on_event: &(dyn Fn(CoverageEvent) + Sync),
+) -> Result<(), RunError> {
+    let a = scenario::resolve(inputs);
+    let models = scenario::build_models(inputs, &a).map_err(RunError::Failed)?;
+
+    let step_deg = config.step_deg();
+    let points = config.grid(inputs.tx_lat, inputs.tx_lon);
+    let total = points.len();
+    let threads = pool.threads();
+    on_event(CoverageEvent::Start { total, threads });
+
+    let done = AtomicUsize::new(0);
+    let (_cells, timing) = pool.map_reporting(
+        &points,
+        |&(lat, lon)| (!cancel()).then(|| solve_cell(lat, lon, step_deg, inputs, &models)),
+        |_, cell: &Option<CoverageCell>| {
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(cell) = cell {
+                on_event(CoverageEvent::Cell {
+                    done: n,
+                    total,
+                    threads,
+                    cell: *cell,
+                });
+            }
+        },
+    );
+
+    let cancelled = cancel();
+    eprintln!(
+        "[coverage] {} of {total} grid point(s) on {threads} thread(s) in {:.3} s \
+         (serial work {:.3} s, {:.1}x, mean {:.0} ms/point){}",
+        timing.per_item.len(),
+        timing.total.as_secs_f64(),
+        timing.work().as_secs_f64(),
+        timing.speedup(),
+        timing.mean_item().as_secs_f64() * 1e3,
+        if cancelled { " [CANCELLED]" } else { "" },
+    );
+    if cancelled {
+        Err(RunError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The coverage run's three behavioural promises, checked without a window:
+    /// every grid point is reported as its own event (so the map fills in
+    /// progressively), the run reports the thread count it is using, and a
+    /// cancel stops the remaining calculations and says so.
+    #[test]
+    fn run_coverage_reports_each_point_and_cancel_stops_it() {
+        use crate::compute::{
+            available_cores, background_pool_config, build_pool, coverage_pool_config,
+            threads_from_env,
+        };
+        use std::sync::Mutex;
+
+        // A small grid: enough points to cancel part-way through.
+        let config = CoverageConfig {
+            half_span_deg: 12.0,
+            points_per_deg: 0.25, // 4 deg steps => 7 x 7 minus the centre
+        };
+        let inputs = Inputs::default();
+        let expected = config.grid(inputs.tx_lat, inputs.tx_lon).len();
+        assert!(expected > 8, "need a grid worth cancelling, got {expected}");
+
+        let pool = build_pool("coverage-test", coverage_pool_config());
+
+        // Run 1: to completion. One event per grid point, each carrying the
+        // pool's thread count.
+        let events = Mutex::new(Vec::new());
+        let record = |e: CoverageEvent| events.lock().unwrap().push(e);
+        let end = run_coverage(&inputs, config, &pool, &|| false, &record);
+        assert_eq!(end, Ok(()));
+        let events = events.into_inner().unwrap();
+        let mut streamed = 0usize;
+        let mut started = None;
+        for e in &events {
+            match e {
+                CoverageEvent::Start { total, threads } => started = Some((*total, *threads)),
+                CoverageEvent::Cell { threads, .. } => {
+                    streamed += 1;
+                    assert_eq!(*threads, pool.threads());
+                }
+            }
+        }
+        assert_eq!(started, Some((expected, pool.threads())));
+        assert_eq!(streamed, expected, "one event per computed grid point");
+
+        // The coverage pool must be the larger: background jobs hold cores back.
+        let background = build_pool("background-test", background_pool_config()).threads();
+        if available_cores() > 2 && threads_from_env().is_none() {
+            assert!(
+                pool.threads() > background,
+                "coverage ({}) should use more threads than background jobs ({background})",
+                pool.threads(),
+            );
+        }
+
+        // Run 2: cancelled before it starts. Nothing is computed and the run
+        // reports that it was cancelled.
+        let cells = Mutex::new(0usize);
+        let count = |e: CoverageEvent| {
+            if matches!(e, CoverageEvent::Cell { .. }) {
+                *cells.lock().unwrap() += 1;
+            }
+        };
+        let end = run_coverage(&inputs, config, &pool, &|| true, &count);
+        assert_eq!(end, Err(RunError::Cancelled));
+        assert_eq!(
+            cells.into_inner().unwrap(),
+            0,
+            "a cancelled run must not solve any more grid points"
+        );
+    }
 
     /// A coverage cell is the point-to-point answer: solving a grid position
     /// through `solve_cell` with the shared models must match, bit for bit, a
