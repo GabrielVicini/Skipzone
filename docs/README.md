@@ -1,6 +1,6 @@
 # Documentation
 
-Every document here either documents a crate or is a dated report. How the
+Every document here documents a crate, is a dated report, or is a dated planning note. How the
 project fits together, how to use the app and how to build it are in the
 [wiki](https://github.com/GabrielVicini/Skipzone/wiki). The API reference is
 `cargo doc --workspace --no-deps --open`.

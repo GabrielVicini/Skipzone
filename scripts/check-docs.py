@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that the documentation connects to the code.
 
-Every document under docs/ either documents a crate or is a dated report.
+Every document under docs/ documents a crate, is a dated report, or is a dated planning note.
 This script fails the build when that stops being true:
 
 1. Every derivation (docs/derivations/**/*.md) is cited by at least one .rs file.
