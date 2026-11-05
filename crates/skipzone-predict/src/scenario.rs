@@ -104,7 +104,7 @@ pub const D_REGION_NIGHT_FLOOR_FRACTION: f64 = 0.10;
 ///
 /// Kept at 1.0, the textbook layer. The value matching the measured exponent
 /// has not been fitted against the corpus, and one literature number is not
-/// enough to move a shape anchor. See `wiki/Ionosphere-Model.md`.
+/// enough to move a shape anchor. See "Not validated" in `wiki/Accuracy.md`.
 pub const D_REGION_RISE_FRACTION: f64 = 1.0;
 
 // Electron-neutral collision frequency.
