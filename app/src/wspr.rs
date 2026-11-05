@@ -81,7 +81,7 @@ impl WsprSpot {
     /// measurement and are not negotiable.
     ///
     /// The receiver's NOISE ENVIRONMENT is not in that category and is left to
-    /// `base`. It used to be pinned to [`NoiseEnvironment::Rural`] here, next to
+    /// `base`. It used to be pinned to [`crate::noise::NoiseEnvironment::Rural`] here, next to
     /// the bandwidth, which put an assumption about every receiver's local noise
     /// in the same place as a fact about the measurement and made it unreachable
     /// from any harness. It is worth roughly 10 dB between city and quiet rural,
@@ -226,7 +226,7 @@ pub struct SpotResult {
     pub noise_dbm: Option<f64>,
     /// Best modelled SNR of any kind, dB; `None` if the path did not close.
     pub modelled_snr_db: Option<f64>,
-    /// `modelled - measured` [dB]; `None` if the path did not close. Positive
+    /// `modelled - measured` (dB); `None` if the path did not close. Positive
     /// means the model is optimistic.
     pub error_db: Option<f64>,
     pub hops: u32,

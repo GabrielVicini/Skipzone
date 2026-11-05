@@ -73,19 +73,19 @@ pub fn fine_freqs(center: f64) -> Vec<f64> {
 pub struct SweepPoint {
     pub freq_mhz: f64,
     pub state: PathState,
-    /// Lowest total absorption [dB] among the modes found; `+inf` if none.
+    /// Lowest total absorption (dB) among the modes found; `+inf` if none.
     pub absorption_db: f64,
-    /// Total system loss [dB] of the picked mode; `+inf` if no path.
+    /// Total system loss (dB) of the picked mode; `+inf` if no path.
     pub system_loss_db: f64,
-    /// Received power [dBm] of the picked mode; `-inf` if no path.
+    /// Received power (dBm) of the picked mode; `-inf` if no path.
     pub rx_power_dbm: f64,
-    /// Noise floor [dBm] at this frequency. Defined even with no path.
+    /// Noise floor (dBm) at this frequency. Defined even with no path.
     pub noise_dbm: f64,
-    /// SNR [dB] of the picked mode; `-inf` if no path.
+    /// SNR (dB) of the picked mode; `-inf` if no path.
     pub snr_db: f64,
     /// `snr_db - threshold`; `-inf` if no path.
     pub margin_db: f64,
-    /// Smallest near-miss [km] when no path was found; 0 when one was.
+    /// Smallest near-miss (km) when no path was found; 0 when one was.
     pub miss_km: f64,
     pub hops: u32,
     pub mode: Option<Mode>,

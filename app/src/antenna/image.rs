@@ -24,7 +24,7 @@
 //!
 //! ```text
 //!   G(d, a) = 4 pi U(d, a) / P_rad,
-//!   P_rad   = int_0^{2pi} int_0^{pi/2} U_pec(d, a) cos d  d(d) d(a)     [W]
+//!   P_rad   = int_0^{2pi} int_0^{pi/2} U_pec(d, a) cos d  d(d) d(a)     (W)
 //! ```
 //!
 //! Note the `cos d` (not `sin d`): `d` is measured from the HORIZON, so the
@@ -309,14 +309,14 @@ fn normalised_curve(
 /// current maximum, plus its matching transformer).
 pub struct HorizontalWire {
     pub ground: Ground,
-    /// Frequency at which the wire is exactly a half-wave [Hz].
+    /// Frequency at which the wire is exactly a half-wave (Hz).
     ///
     /// `None` means "always resonant": a dipole cut for whatever band is in
     /// use, which is how a dipole is normally described. `Some(f0)` fixes a
     /// physical wire length, so at `f` the wire is `round(f / f0)` half-waves
     /// long - the harmonic operation an EFHW is bought for.
     pub design_hz: Option<f64>,
-    /// Flat loss subtracted at every angle [dB]: the EFHW's transformer.
+    /// Flat loss subtracted at every angle (dB): the EFHW's transformer.
     pub fixed_loss_db: f64,
     kind: &'static str,
 }

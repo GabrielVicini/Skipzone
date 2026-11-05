@@ -46,7 +46,7 @@ use skipzone::units::Hertz;
 use crate::chapman::{PeakDensitySource, PeakSample};
 use crate::solar::Season;
 
-/// foF2 [MHz] derived from sunspot number alone. The peak plasma density NmF2
+/// foF2 (MHz) derived from sunspot number alone. The peak plasma density NmF2
 /// (and hence foF2^2, since NmF2 is proportional to foF2^2) is taken linear in
 /// SSN - the standard first-order statement that peak ionisation scales with
 /// solar activity - calibrated to representative midlatitude anchors:
@@ -162,7 +162,7 @@ fn day_weight(lst_h: f64) -> f64 {
     0.5 * (1.0 + (2.0 * PI * (lst_h - 15.0) / 24.0).cos())
 }
 
-/// foF2 [MHz] from the bundled climatology, evaluated directly rather than
+/// foF2 (MHz) from the bundled climatology, evaluated directly rather than
 /// through the grid. This is the function `src/bin/gen_fof2_grid.rs` tabulates;
 /// see the module docs for exactly how much it is worth.
 ///
@@ -503,7 +503,7 @@ impl Fof2Plane {
         self.values[row * GRID_LST_COLS + col]
     }
 
-    /// foF2 [MHz] and its partials `(d/dlat [MHz/deg], d/dLST [MHz/h])` at a
+    /// foF2 (MHz) and its partials `(d/dlat [MHz/deg], d/dLST [MHz/h])` at a
     /// latitude and local solar time.
     ///
     /// Bicubic (tensor-product Catmull-Rom): periodic in local solar time,
@@ -575,7 +575,7 @@ impl GriddedF2Peak {
         Self { plane, utc_hours }
     }
 
-    /// foF2 [MHz] at a geographic position, for display and for the harness.
+    /// foF2 (MHz) at a geographic position, for display and for the harness.
     #[must_use]
     pub fn fof2_at(&self, lat_deg: f64, lon_deg: f64) -> f64 {
         let lst = (self.utc_hours + lon_deg / 15.0).rem_euclid(24.0);
@@ -646,7 +646,7 @@ pub const FOE_OVERHEAD_QUIET_MHZ: f64 = 2.99;
 /// double-count it.
 pub const FOE_SOLAR_COEFF: f64 = 0.009_4;
 
-/// Overhead-sun (chi = 0) foE [MHz] at a sunspot number.
+/// Overhead-sun (chi = 0) foE (MHz) at a sunspot number.
 ///
 /// `quiet_mhz` is the [`FOE_OVERHEAD_QUIET_MHZ`] anchor, passed in rather than
 /// read from the constant so a calibration run can move it. The solar scaling

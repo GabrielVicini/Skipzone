@@ -240,7 +240,7 @@ pub enum SlantFactor {
     ///
     /// With a constant peak source this reproduces the engine's
     /// `ChapmanLayer::new` exactly, which
-    /// [`tests::overhead_slant_is_bit_identical_to_engine_chapman`] pins.
+    /// `tests::overhead_slant_is_bit_identical_to_engine_chapman` pins.
     Overhead,
 }
 

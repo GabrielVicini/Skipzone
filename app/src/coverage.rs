@@ -186,10 +186,10 @@ pub struct CoverageCell {
     /// resolution control is moved afterwards.
     pub step_deg: f64,
     pub state: PathState,
-    /// SNR [dB] of the strongest mode of ANY kind; `-inf` when nothing arrives.
+    /// SNR (dB) of the strongest mode of ANY kind; `-inf` when nothing arrives.
     /// A continuous field: the threshold is applied only for display.
     pub snr_db: f64,
-    /// SNR [dB] of the strongest DETERMINISTIC (F2 or E) mode; `-inf` when
+    /// SNR (dB) of the strongest DETERMINISTIC (F2 or E) mode; `-inf` when
     /// there is none. Equal to `snr_db` unless a sporadic-E path wins.
     pub deterministic_snr_db: f64,
     /// Probability the mode behind `snr_db` is present at all: 1 for F2 and E,

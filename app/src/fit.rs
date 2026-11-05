@@ -22,7 +22,7 @@
 //! # What is done instead
 //!
 //! `tx_effect` and `rx_effect` are estimated EXPLICITLY, as nuisance parameters,
-//! jointly with the physics ([`StationEffects`]). The physics is then identified
+//! jointly with the physics ([`crate::fit::StationEffects`]). The physics is then identified
 //! from variation WITHIN a station rather than across stations:
 //!
 //! * one transmitter heard by many receivers in one cycle: the TX effect and the
@@ -72,7 +72,7 @@
 //!
 //! Together those mean the ray can be traced ONCE per spot and the link budget
 //! re-derived arithmetically for any absorption scale and any noise anchors. That
-//! is [`Cached`], and it makes the inner loop about four orders of magnitude
+//! is [`crate::fit::Cached`], and it makes the inner loop about four orders of magnitude
 //! cheaper than re-solving.
 //!
 //! The parameters that DO change which paths exist - E-region geometry, foE, foEs,
@@ -154,7 +154,7 @@ pub struct Alternative {
 }
 
 impl Cached {
-    /// Modelled SNR [dB] under an absorption scale and a set of noise anchors.
+    /// Modelled SNR (dB) under an absorption scale and a set of noise anchors.
     ///
     /// `absorption_scale` multiplies the baseline absorption; 1.0 reproduces the
     /// solve exactly. It stands for the product of the D-region electron density
@@ -189,7 +189,7 @@ impl Cached {
         self.alternative.is_some()
     }
 
-    /// Modelled SNR [dB] of the F2 path this spot's layer beat, under the same
+    /// Modelled SNR (dB) of the F2 path this spot's layer beat, under the same
     /// parameters and the same noise floor. `None` when there was no such path.
     #[must_use]
     pub fn alternative_modelled_db(

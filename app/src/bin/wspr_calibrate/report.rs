@@ -321,7 +321,7 @@ pub(crate) fn report_layer_races(set: &Solved) {
 /// # What this measures
 ///
 /// The noise floor is the only term in the link budget that switches
-/// DISCONTINUOUSLY at the terminator: [`crate::noise::atmospheric_noise_figure_db`]
+/// DISCONTINUOUSLY at the terminator: [`skipzone_app::noise::atmospheric_noise_figure_db`]
 /// selects one of two `(Fa, slope)` pairs on a boolean. Everything else - the D
 /// region above all - varies smoothly through it, because `Ch(X, chi)` is smooth.
 ///
@@ -1092,7 +1092,7 @@ pub(crate) fn report_local_minimum_check(
 /// The report warns, on every bound hit, that the data wanting to leave a
 /// physical range means the residual comes from somewhere else in the model.
 /// That is true of ONE of the two ways a parameter reaches a bound, and
-/// [`Bounded::at_bound`] cannot tell them apart, because it sees only where the
+/// [`skipzone_app::calib::Bounded::at_bound`] cannot tell them apart, because it sees only where the
 /// value landed:
 ///
 /// * the objective genuinely falls all the way to the edge, so the minimum is

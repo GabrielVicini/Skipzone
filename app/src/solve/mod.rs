@@ -10,9 +10,9 @@
 //! not spherically symmetric, so the terminal miss is a genuine diagnostic of
 //! the equal-hop assumption rather than something to hide.
 //!
-//! The work is split by concern across the submodules: [`types`] holds the
-//! result structs the UI renders, [`link_budget`] the free-space and ground
-//! reflection loss terms, and [`tracing`] the per-hop tracing/homing helpers.
+//! The work is split by concern across the submodules: `types` holds the
+//! result structs the UI renders, `link_budget` the free-space and ground
+//! reflection loss terms, and `tracing` the per-hop tracing/homing helpers.
 //! This module keeps only the top-level [`solve`] driver that stitches them
 //! together.
 

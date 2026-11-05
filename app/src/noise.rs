@@ -53,7 +53,7 @@ pub const REFERENCE_TEMP_K: f64 = 290.0;
 /// than pasted in:
 ///   `k t0 = 1.38e-23 * 290 = 4.002e-21 W/Hz`  ->  `10 log10 = -203.978 dBW`.
 /// The Recommendation rounds this to -204; we keep the exact figure so the
-/// unit chain is visible, and [`tests::kt0_matches_p372_minus_204`] pins it to
+/// unit chain is visible, and `tests::kt0_matches_p372_minus_204` pins it to
 /// the published constant.
 #[must_use]
 pub fn kt0_dbw() -> f64 {
@@ -62,7 +62,7 @@ pub fn kt0_dbw() -> f64 {
 
 /// Transmitter power, watts -> dBm.
 ///
-/// `P[dBm] = 10 log10(P[W] / 1 mW) = 10 log10(P[W] * 1000) = 30 + 10 log10 P[W]`.
+/// `P(dBm) = 10 log10(P(W) / 1 mW) = 10 log10(P(W) * 1000) = 30 + 10 log10 P(W)`.
 /// So 1 W = 30.00 dBm, 100 W = 50.00 dBm, 1500 W = 61.76 dBm.
 #[must_use]
 pub fn dbm_from_watts(power_w: f64) -> f64 {
@@ -72,8 +72,8 @@ pub fn dbm_from_watts(power_w: f64) -> f64 {
 /// Available noise power in dBm from an external noise figure and a bandwidth.
 ///
 /// P.372-9 eq. (6) is in dBW; this returns dBm, so the explicit chain is
-///   `Pn[dBW] = Fa + 10 log10(b) + 10 log10(k t0)`
-///   `Pn[dBm] = Pn[dBW] + 30`
+///   `Pn(dBW) = Fa + 10 log10(b) + 10 log10(k t0)`
+///   `Pn(dBm) = Pn(dBW) + 30`
 /// With `Fa = 0` and `b = 1 Hz` this is `-203.98 + 30 = -173.98 dBm`, the
 /// familiar `kT0 = -174 dBm/Hz` thermal floor - an independent cross-check
 /// that the constant and the unit conversion are both right.
@@ -161,13 +161,13 @@ pub fn galactic_noise_figure_db(f_mhz: f64) -> f64 {
 // latitude terms. The ANCHOR VALUES are order-of-magnitude choices, NOT read
 // off the maps and NOT traceable to any table. They are surfaced in the UI.
 
-/// Atmospheric `Fa` at 1 MHz, night, mid-latitude, equinox [dB]. Anchor.
+/// Atmospheric `Fa` at 1 MHz, night, mid-latitude, equinox (dB). Anchor.
 ///
 /// Retained as the DERIVATION of [`ATM_STEP_1MHZ_DB`], not as a parameter: the
 /// night curve is now expressed as the day curve plus a step. See
 /// [`atmospheric_noise_figure_db`] for why.
 pub const ATM_1MHZ_NIGHT_DB: f64 = 95.0;
-/// Atmospheric `Fa` at 1 MHz, day, mid-latitude, equinox [dB]. Anchor.
+/// Atmospheric `Fa` at 1 MHz, day, mid-latitude, equinox (dB). Anchor.
 pub const ATM_1MHZ_DAY_DB: f64 = 70.0;
 /// Night fall-off of atmospheric noise with frequency, dB per decade. Derivation
 /// of [`ATM_STEP_SLOPE_DB`]; see [`ATM_1MHZ_NIGHT_DB`].
@@ -183,7 +183,7 @@ pub const ATM_SLOPE_DAY_DB: f64 = 45.0;
 // the two-line version it replaces and the identity is visible instead of
 // asserted. `tests::the_step_form_reproduces_the_two_line_form` pins it.
 
-/// Day -> night step at 1 MHz [dB]: how much louder the model makes a band at
+/// Day -> night step at 1 MHz (dB): how much louder the model makes a band at
 /// night, before any frequency dependence.
 pub const ATM_STEP_1MHZ_DB: f64 = ATM_1MHZ_NIGHT_DB - ATM_1MHZ_DAY_DB;
 /// Linear frequency dependence of that step, dB per decade.
@@ -196,14 +196,14 @@ pub const ATM_STEP_SLOPE_DB: f64 = ATM_SLOPE_DAY_DB - ATM_SLOPE_NIGHT_DB;
 /// Curvature of the step in `log10(f)`, dB per decade squared. Zero by default,
 /// which is exactly the straight-line step the two-line form was locked into.
 pub const ATM_STEP_CURVE_DB: f64 = 0.0;
-/// Summer / winter offset about the equinox value [dB]. Anchor: thunderstorm
+/// Summer / winter offset about the equinox value (dB). Anchor: thunderstorm
 /// activity is the source, so the local summer hemisphere is noisier.
 pub const ATM_SEASON_SWING_DB: f64 = 8.0;
-/// Equatorial excess over the polar value [dB], applied as `boost * cos^3(lat)`
+/// Equatorial excess over the polar value (dB), applied as `boost * cos^3(lat)`
 /// so it concentrates in the tropics where lightning actually is. Anchor.
 pub const ATM_TROPICAL_BOOST_DB: f64 = 18.0;
 /// Polar offset subtracted everywhere, so `cos(lat) -> 0` lands below the
-/// mid-latitude value rather than at it [dB]. Anchor.
+/// mid-latitude value rather than at it (dB). Anchor.
 pub const ATM_POLAR_OFFSET_DB: f64 = 6.0;
 
 /// Atmospheric (lightning) noise figure [dB above kT0b].
@@ -275,7 +275,7 @@ pub fn atmospheric_noise_figure_db(
     }
 }
 
-/// The day -> night step of the atmospheric surrogate at one frequency [dB].
+/// The day -> night step of the atmospheric surrogate at one frequency (dB).
 ///
 /// Exposed on its own because it is the quantity the calibration identifies and
 /// the quantity the report has to be able to print: a step the model applies but
@@ -409,9 +409,9 @@ pub struct NoiseFloor {
     pub galactic_db: f64,
     /// Power-sum of the three [dB above kT0b].
     pub total_fa_db: f64,
-    /// Noise power in the receiver bandwidth [dBm], P.372-9 eq. (6) + 30.
+    /// Noise power in the receiver bandwidth (dBm), P.372-9 eq. (6) + 30.
     pub power_dbm: f64,
-    /// Bandwidth the floor was computed in [Hz].
+    /// Bandwidth the floor was computed in (Hz).
     pub bandwidth_hz: f64,
 }
 
@@ -475,7 +475,7 @@ impl OperatingMode {
         }
     }
 
-    /// `(noise bandwidth [Hz], required SNR in that bandwidth [dB])`.
+    /// `(noise bandwidth (Hz), required SNR in that bandwidth (dB))`.
     #[must_use]
     pub fn defaults(self) -> (f64, f64) {
         match self {
@@ -552,14 +552,14 @@ pub struct LinkSettings<'a> {
 #[derive(Clone, Copy)]
 pub struct LinkBudget {
     pub tx_power_dbm: f64,
-    /// `P_rx = P_tx - propagation loss + G_tx + G_rx` [dBm]. The two antenna
+    /// `P_rx = P_tx - propagation loss + G_tx + G_rx` (dBm). The two antenna
     /// gains are read from the patterns in [`crate::antenna`] at the launch and
     /// arrival elevations the tracer produced.
     pub rx_power_dbm: f64,
     pub noise: NoiseFloor,
-    /// `SNR = P_rx - P_noise` [dB].
+    /// `SNR = P_rx - P_noise` (dB).
     pub snr_db: f64,
-    /// Threshold this SNR was judged against [dB].
+    /// Threshold this SNR was judged against (dB).
     pub threshold_db: f64,
     /// Calibrated bias subtracted from `snr_db`, dB. Carried so the UI can say
     /// that a correction was applied rather than silently applying one.
@@ -571,10 +571,10 @@ impl LinkBudget {
     /// the noise floor.
     ///
     /// Unit chain, kept explicit:
-    ///   `P_tx[dBm] = 30 + 10 log10 P[W]`
-    ///   `P_rx[dBm] = P_tx[dBm] - L_total[dB]`
-    ///   `P_n[dBm]  = Fa[dB] + 10 log10 b[Hz] + 10 log10(k t0) + 30`
-    ///   `SNR[dB]   = P_rx[dBm] - P_n[dBm]`
+    ///   `P_tx(dBm) = 30 + 10 log10 P(W)`
+    ///   `P_rx(dBm) = P_tx(dBm) - L_total(dB)`
+    ///   `P_n(dBm)  = Fa(dB) + 10 log10 b(Hz) + 10 log10(k t0) + 30`
+    ///   `SNR(dB)   = P_rx(dBm) - P_n(dBm)`
     #[must_use]
     pub fn new(
         tx_power_w: f64,
@@ -610,7 +610,7 @@ impl LinkBudget {
         lb
     }
 
-    /// Margin above the threshold [dB]; negative means the path is too weak.
+    /// Margin above the threshold (dB); negative means the path is too weak.
     #[must_use]
     pub fn margin_db(self) -> f64 {
         self.snr_db - self.threshold_db

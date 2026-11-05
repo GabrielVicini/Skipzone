@@ -29,7 +29,7 @@ pub(crate) struct Args {
     /// reference, which is the calibration default.
     pub(crate) antenna_height_m: f64,
     /// Keep the spots the model could only reach through the sporadic-E fallback
-    /// in the fit. Off by default - see [`drop_es`] for why they are not physics.
+    /// in the fit. Off by default - see [`crate::solving::drop_es`] for why they are not physics.
     pub(crate) include_es: bool,
 }
 

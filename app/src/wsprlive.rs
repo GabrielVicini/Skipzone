@@ -18,8 +18,8 @@
 //! not a random subset of all spots (they skew towards well-connected,
 //! well-run, often better-equipped stations).
 //!
-//! So a window never runs up to the present. It ends [`INGEST_LAG_MINUTES`]
-//! before it, and [`Window::describe`] states the lag it applied so the report
+//! So a window never runs up to the present. It ends [`crate::wsprlive::INGEST_LAG_MINUTES`]
+//! before it, and [`crate::wsprlive::Window::describe`] states the lag it applied so the report
 //! can show it rather than the operator having to know. `--at` exists for the
 //! same reason from the other direction: scoring a specific past instant needs
 //! no lag allowance at all, because that data settled long ago.
@@ -726,7 +726,7 @@ pub fn cycle_census_tsv(utc_cycle: &str, band_mhz: f64) -> Result<String, NetErr
 /// The busiest stations at one end of a path over a window, most active first.
 ///
 /// This is how a corpus finds the stations whose fixed effects can actually be
-/// estimated; see [`CorpusQuery::restrict_tx`] for why that restriction is
+/// estimated; see [`CorpusQuery::busiest`] for why that restriction is
 /// necessary and what it costs in representativeness.
 ///
 /// # Errors

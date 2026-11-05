@@ -14,7 +14,7 @@
 //! [`ElevationPattern::curve`], for two reasons:
 //!
 //!   * the closed-form types normalise their pattern by numerically integrating
-//!     radiated power over the hemisphere (see [`image`]), which costs far more
+//!     radiated power over the hemisphere (see `image`), which costs far more
 //!     than one sample - doing it per angle would be wasteful;
 //!   * a gain-vs-elevation curve is also precisely what a LOOKUP-TABLE antenna
 //!     has. A future Yagi, log-periodic, trap dipole, random wire or loop
@@ -27,12 +27,12 @@
 //!
 //! # What the closed-form types assume
 //!
-//! Provenance and hand-checks live in [`image`]. In summary: image theory over
+//! Provenance and hand-checks live in `image`. In summary: image theory over
 //! a flat lossy half-space, with the antenna's own radiated power computed
 //! exactly (for the assumed sinusoidal current) over a perfect conductor. The
 //! model does NOT include conductor loss, ground-screen / radial I^2 R loss,
 //! near-field Sommerfeld ground loss, terrain, or nearby structures. Checked
-//! against NEC-4 it runs 0.3-0.6 dB optimistic; see [`image`] for the numbers.
+//! against NEC-4 it runs 0.3-0.6 dB optimistic; see `image` for the numbers.
 
 use rayon::prelude::*;
 
@@ -105,7 +105,7 @@ impl GainCurve {
         &self.label
     }
 
-    /// Gain [dBi] at `elevation_rad`, linearly interpolated. Angles outside
+    /// Gain (dBi) at `elevation_rad`, linearly interpolated. Angles outside
     /// 0..90 deg clamp to the ends: a ray cannot leave below the horizon, and
     /// 90 deg is straight up.
     #[must_use]
@@ -119,7 +119,7 @@ impl GainCurve {
         self.samples[i] * (1.0 - t) + self.samples[i + 1] * t
     }
 
-    /// `(peak gain [dBi], elevation of the peak [deg])`.
+    /// `(peak gain (dBi), elevation of the peak (deg))`.
     #[must_use]
     pub fn peak(&self) -> (f64, f64) {
         let mut best = (f64::NEG_INFINITY, 0.0);
@@ -133,7 +133,7 @@ impl GainCurve {
         best
     }
 
-    /// `(elevation [deg], gain [dBi])` for every sample - for plotting.
+    /// `(elevation (deg), gain (dBi))` for every sample - for plotting.
     pub fn points(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
         self.samples.iter().enumerate().map(|(i, &g)| {
             #[allow(clippy::cast_precision_loss)]
@@ -145,8 +145,8 @@ impl GainCurve {
 
 /// An antenna: something that can state its gain against elevation angle.
 ///
-/// Implementors are either closed-form (see [`image`]) or table-backed (see
-/// [`table`]). Nothing outside this module depends on which.
+/// Implementors are either closed-form (see `image`) or table-backed (see
+/// `table`). Nothing outside this module depends on which.
 pub trait ElevationPattern: Send + Sync {
     /// Human-readable name, including the parameters that shaped the pattern.
     fn label(&self, height_m: f64, freq_hz: f64) -> String;
@@ -255,10 +255,10 @@ impl AntennaKind {
 #[derive(Clone, Copy, PartialEq)]
 pub struct AntennaConfig {
     pub kind: AntennaKind,
-    /// Height above ground [m]. For the vertical this is the height of the
+    /// Height above ground (m). For the vertical this is the height of the
     /// BASE: 0 is a ground-mounted vertical, the usual case.
     pub height_m: f64,
-    /// EFHW design frequency [MHz]: the wire is a half-wave here, and `n`
+    /// EFHW design frequency (MHz): the wire is a half-wave here, and `n`
     /// half-waves at `n` times this. Ignored by the other types.
     pub efhw_design_mhz: f64,
 }

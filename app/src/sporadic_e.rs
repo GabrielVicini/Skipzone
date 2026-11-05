@@ -135,7 +135,7 @@ impl SporadicE {
     /// `foes_max_mhz` and `peak_probability` are the [`ES_FOES_MAX_MHZ`] and
     /// [`ES_PEAK_PROBABILITY`] anchors, passed in rather than read from the
     /// constants so a calibration run can move them. The SHAPE they scale -
-    /// [`es_shape`], the summer maximum, the twin diurnal peaks and the
+    /// `es_shape`, the summer maximum, the twin diurnal peaks and the
     /// temperate-latitude weighting - is the documented climatology and is not a
     /// calibration target.
     #[must_use]

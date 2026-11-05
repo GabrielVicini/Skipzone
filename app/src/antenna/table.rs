@@ -47,13 +47,13 @@ use super::{ElevationPattern, GainCurve};
 pub struct PatternBlock {
     pub freq_hz: f64,
     pub height_m: f64,
-    /// `(elevation [deg], gain [dBi])`, ascending in elevation. Need not be
+    /// `(elevation (deg), gain (dBi))`, ascending in elevation. Need not be
     /// evenly spaced; it is resampled onto the [`GainCurve`] grid.
     pub samples: Vec<(f64, f64)>,
 }
 
 impl PatternBlock {
-    /// Gain [dBi] at `elev_deg`, linearly interpolated between samples and
+    /// Gain (dBi) at `elev_deg`, linearly interpolated between samples and
     /// clamped to the ends of the tabulated range.
     #[must_use]
     pub fn gain_dbi(&self, elev_deg: f64) -> f64 {

@@ -94,7 +94,7 @@ impl LayerStatus {
 pub struct ModeReport {
     pub layer: LayerMode,
     pub status: LayerStatus,
-    /// Best SNR among this layer's solutions [dB]; `-inf` when it produced none.
+    /// Best SNR among this layer's solutions (dB); `-inf` when it produced none.
     pub best_snr_db: f64,
     /// Threshold in force, carried so a reader of this struct alone can apply it.
     pub threshold_db: f64,
@@ -144,7 +144,7 @@ pub struct HopDetail {
     pub phase_km: f64,
     pub arc_km: f64,
     pub absorption_db: f64,
-    /// Ground-reflection loss [dB] incurred where this hop lands, when another
+    /// Ground-reflection loss (dB) incurred where this hop lands, when another
     /// hop follows (0 for the final hop, which arrives at the receiver).
     pub ground_loss_db: f64,
     /// Surface used at that reflection, `None` when this hop does not reflect.
@@ -195,17 +195,17 @@ pub struct Solution {
     /// PROPAGATION only: deliberately excludes antenna gains (carried separately
     /// below) and any statistical excess-system-loss term.
     pub total_system_loss_db: f64,
-    /// Transmitting antenna gain [dBi] at this solution's launch elevation.
+    /// Transmitting antenna gain (dBi) at this solution's launch elevation.
     pub tx_gain_dbi: f64,
-    /// Receiving antenna gain [dBi] at this solution's arrival elevation.
+    /// Receiving antenna gain (dBi) at this solution's arrival elevation.
     pub rx_gain_dbi: f64,
-    /// Launch elevation of the first hop [deg] - the angle `tx_gain_dbi` was
+    /// Launch elevation of the first hop (deg) - the angle `tx_gain_dbi` was
     /// read at. Duplicated out of `hop_details` so the UI can show the pairing
     /// without digging.
     pub tx_elev_deg: f64,
-    /// Arrival elevation of the last hop [deg], where `rx_gain_dbi` was read.
+    /// Arrival elevation of the last hop (deg), where `rx_gain_dbi` was read.
     pub rx_elev_deg: f64,
-    /// `tx_gain_dbi + rx_gain_dbi` [dB]: what the antennas add back to (or take
+    /// `tx_gain_dbi + rx_gain_dbi` (dB): what the antennas add back to (or take
     /// off) the propagation loss.
     pub total_gain_db: f64,
     /// Received power, noise floor and SNR for this path: the judgment layer

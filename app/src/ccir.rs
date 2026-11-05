@@ -47,7 +47,7 @@
 //!
 //! Geography enters as a product of `sin(modip)^k` with `cos(lat)^m cos(m lon)`
 //! and `cos(lat)^m sin(m lon)`, the term counts per longitude order given by
-//! [`F2_GEO_DEGREE`]. Order 0 has no longitude factor and contributes 12 terms;
+//! [`crate::ccir::F2_GEO_DEGREE`]. Order 0 has no longitude factor and contributes 12 terms;
 //! orders 1 to 8 contribute a cosine and a sine each, `12 + 2*32 = 76` in total,
 //! which is where the 76 comes from.
 //!
@@ -165,7 +165,7 @@ impl ModipGrid {
         }
     }
 
-    /// Modified dip latitude [deg] at a geographic point, by the four-by-four
+    /// Modified dip latitude (deg) at a geographic point, by the four-by-four
     /// third-order interpolation the maps were built to be read with.
     #[must_use]
     pub fn at(&self, lat_deg: f64, lon_deg: f64) -> f64 {
@@ -206,7 +206,7 @@ impl ModipGrid {
         lagrange4(along_lat, y)
     }
 
-    /// Modip [deg] and its partials `(d/dlat, d/dlon)` in degrees per degree,
+    /// Modip (deg) and its partials `(d/dlat, d/dlon)` in degrees per degree,
     /// through a C1 interpolant.
     ///
     /// [`Self::at`] is the reference reading of the table and is what every
@@ -287,7 +287,7 @@ fn lagrange4(z: [f64; 4], x: f64) -> f64 {
     (a0 + delta * (a1 + delta * (a2 + delta * a3))) / 16.0
 }
 
-/// Modified dip latitude [deg] from the bundled grid.
+/// Modified dip latitude (deg) from the bundled grid.
 ///
 /// # Errors
 /// The grid's parse error, if the bundled asset is unusable.
@@ -632,7 +632,7 @@ impl GradBasis {
 }
 
 impl CcirPlane {
-    /// foF2 [MHz] at a geographic point, given that point's modip.
+    /// foF2 (MHz) at a geographic point, given that point's modip.
     ///
     /// Returned raw. The map is a truncated expansion and can undershoot in the
     /// deep polar night; a consumer that needs a physical layer applies its own
@@ -653,7 +653,7 @@ impl CcirPlane {
         Basis::new(modip_deg, lat_deg, lon_deg).contract(&self.cm3, &M3000_GEO_DEGREE)
     }
 
-    /// foF2 [MHz] at a geographic point, taking modip from the bundled grid.
+    /// foF2 (MHz) at a geographic point, taking modip from the bundled grid.
     ///
     /// # Errors
     /// The modip grid's parse error, if the bundled asset is unusable.
@@ -663,7 +663,7 @@ impl CcirPlane {
 }
 
 impl CcirPlane {
-    /// foF2 [MHz] and its partials `(d/dlat, d/dlon)` in MHz per degree, for the
+    /// foF2 (MHz) and its partials `(d/dlat, d/dlon)` in MHz per degree, for the
     /// ray tracer. Uses the C1 modip interpolant - see [`ModipGrid::sample_c1`].
     #[must_use]
     pub fn fof2_with_gradient(
@@ -701,7 +701,7 @@ pub fn map_r12_from_ssn_v2(ssn_v2: f64) -> f64 {
     ssn_v2.max(0.0) / SSN_V2_OVER_V1
 }
 
-/// Numerical guard on foF2 [MHz] from the maps.
+/// Numerical guard on foF2 (MHz) from the maps.
 ///
 /// This is NOT a model of the night F region - [`crate::fof2::FOF2_FLOOR_MHZ`]
 /// is that, for the synthetic climatology, and applying a floor of that size
@@ -734,7 +734,7 @@ impl CcirF2Peak {
         })
     }
 
-    /// foF2 [MHz] at a geographic position, floored, for display and for the
+    /// foF2 (MHz) at a geographic position, floored, for display and for the
     /// harnesses.
     #[must_use]
     pub fn fof2_at(&self, lat_deg: f64, lon_deg: f64) -> f64 {
@@ -774,7 +774,7 @@ impl crate::chapman::PeakDensitySource for CcirF2Peak {
     }
 }
 
-/// foF2 [MHz] from the CCIR maps, for callers that want one value and do not
+/// foF2 (MHz) from the CCIR maps, for callers that want one value and do not
 /// hold a plane.
 ///
 /// `month` is 1 to 12, `utc_hours` is universal time, `r12` is the twelve-month

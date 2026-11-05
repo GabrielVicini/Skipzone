@@ -23,13 +23,13 @@
 //! * W did not spot A.
 //!
 //! That is a path that was attempted and failed, which is exactly the
-//! observation the archive lacks. [`Negative`] records one.
+//! observation the archive lacks. [`crate::corpus::Negative`] records one.
 //!
 //! It is not a clean experiment, and the caveats are structural rather than
 //! incidental:
 //!
 //! * **W may have been listening on another band.** Guarded against by requiring
-//!   W to have spotted [`MIN_RX_SPOTS_FOR_HEALTHY`] stations on A's OWN band in
+//!   W to have spotted [`crate::corpus::MIN_RX_SPOTS_FOR_HEALTHY`] stations on A's OWN band in
 //!   that cycle, not merely to have been active somewhere.
 //! * **A's transmission may have collided** with another signal in the same
 //!   200 Hz window at W. Unknowable from the archive; it inflates the negative

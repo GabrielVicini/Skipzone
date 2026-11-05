@@ -1,4 +1,4 @@
-//! Dialog windows. Each is one file and one entry point; [`chrome::dialog`]
+//! Dialog windows. Each is one file and one entry point; `chrome::dialog`
 //! gives them all the same draggable, resizable window with a scrolling body.
 //! They are not modal - the map, the menus and the overlays stay live behind
 //! them. The trace readout is not here: it is a docked side panel

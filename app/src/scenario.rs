@@ -330,7 +330,7 @@ pub struct Inputs {
     pub bandwidth_hz: f64,
     /// SNR in `bandwidth_hz` required to call the path usable, dB.
     pub snr_threshold_db: f64,
-    /// Calibrated model bias [dB], subtracted from every predicted SNR.
+    /// Calibrated model bias (dB), subtracted from every predicted SNR.
     ///
     /// A calibration against measured spots reports a global offset it cannot
     /// attribute to any individual station - see the `wspr_calibrate` report.
