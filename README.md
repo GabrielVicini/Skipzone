@@ -149,7 +149,7 @@ rebuild from an older base.
 
 There is no browser build. A WebAssembly proof of concept existed and was
 removed: it carried its own code paths for having no threads, and keeping them
-correct cost more than the target was worth. (Last commit to have WebASM was b07cb7a)
+correct cost more than the target was worth. (Last commit to have WebASM was ebfbdea)
 
 `rust-version = "1.85"` is a promise about the engine crate, and CI enforces it
 there. The app tracks whatever `eframe` requires, which moves.

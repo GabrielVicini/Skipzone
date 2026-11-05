@@ -1,7 +1,7 @@
 # Skipzone Verification Report
 
 **Report date:** 2026-08-10
-**Configuration under test:** commit `01b411c`, `skipzone` 0.1.0 / `skipzone-app` 0.1.0, rustc 1.97.1, Windows 11 x86-64
+**Configuration under test:** commit `d92bf9f`, `skipzone` 0.1.0 / `skipzone-app` 0.1.0, rustc 1.97.1, Windows 11 x86-64
 **Status of the subject:** pre-alpha. Not a production propagation forecast.
 **Prepared** from the repository's own test suite and the
 measurement logs in `corpus/`. Every number below is quoted from a run that is
