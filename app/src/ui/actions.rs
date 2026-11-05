@@ -15,7 +15,7 @@
 use skipzone_iono::clock::CivilDate;
 use skipzone_predict::noise::OperatingMode;
 
-use crate::state::{AppInputs, Station};
+use crate::state::{AppInputs, Modal, Station};
 
 /// Let `edit` change a copy of `value`, and return the copy if it changed.
 pub fn edited<T: Copy + PartialEq>(value: T, edit: impl FnOnce(&mut T)) -> Option<T> {
@@ -94,8 +94,7 @@ pub enum Action {
     CancelCoverage,
     /// Clear the coverage tiles off the map.
     ResetCoverage,
-    ShowCoverage,
-    ShowSettings,
-    ShowAntennas,
-    ShowAbout,
+    OpenModal(Modal),
+    /// A dialog's close button.
+    CloseModal(Modal),
 }

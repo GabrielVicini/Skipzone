@@ -9,7 +9,7 @@
 
 use egui::{Button, Color32, Context, RichText, Ui, vec2};
 
-use crate::state::AppState;
+use crate::state::{AppState, Modal};
 use crate::ui::actions::{Action, InputChange};
 use crate::ui::theme::{self, ACCENT, MUTED};
 use crate::ui::widgets::chart::{Chart, Series};
@@ -34,13 +34,14 @@ pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
 
     super::chrome::dialog(
         ctx,
-        "best_freq_dialog",
+        Modal::BestFreq,
+        state.ui.modals.best_freq,
         "Best frequency",
-        &mut state.ui.modals.best_freq,
         // Roomy by default: three stacked charts plus the readout only tell
         // their story when they are wide enough to separate the samples.
         vec2(1000.0, 820.0),
-        |ui| {
+        out,
+        |ui, out| {
             body(
                 ui,
                 &points,

@@ -7,7 +7,7 @@
 
 use egui::{Button, Color32, Context, ProgressBar, RichText, Ui, vec2};
 
-use crate::state::{AppState, Busy};
+use crate::state::{AppState, Busy, Modal};
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, ACCENT, MUTED, WARN};
 use crate::ui::widgets::{card, data_grid, hint, kv, section};
@@ -20,16 +20,16 @@ use skipzone_predict::solve::mode_label;
 const LARGE_GRID: usize = 600;
 
 pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
-    let mut open = state.ui.modals.coverage;
+    let open = state.ui.modals.coverage;
     super::chrome::dialog(
         ctx,
-        "coverage_dialog",
+        Modal::Coverage,
+        open,
         "Area coverage",
-        &mut open,
         vec2(460.0, 620.0),
-        |ui| body(ui, state, out),
+        out,
+        |ui, out| body(ui, state, out),
     );
-    state.ui.modals.coverage = open;
 }
 
 fn body(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {

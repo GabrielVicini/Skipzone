@@ -6,7 +6,8 @@
 
 use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 
-use crate::state::AppState;
+use crate::state::{AppState, Modal};
+use crate::ui::actions::Action;
 use crate::ui::widgets::{card, hint, labelled_drag, section};
 use skipzone_iono::fof2::Fof2Backend;
 use skipzone_predict::noise::{
@@ -14,22 +15,19 @@ use skipzone_predict::noise::{
 };
 use skipzone_predict::scenario::{GroundType, Inputs, fof2_from_ssn};
 
-pub fn show(ctx: &Context, state: &mut AppState) {
+pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+    let open = state.ui.modals.settings;
     let inputs = &mut state.inputs.scenario;
-    // The open flag and the overlay toggle live in the same struct, so the
-    // dialog's `&mut open` is taken as a copy and written back; only the field
-    // the body edits is lent to it.
-    let mut open = state.ui.modals.settings;
     let show_coastlines = &mut state.inputs.display.show_coastlines;
     super::chrome::dialog(
         ctx,
-        "settings_dialog",
+        Modal::Settings,
+        open,
         "Settings",
-        &mut open,
         vec2(520.0, 560.0),
-        |ui| body(ui, inputs, show_coastlines),
+        out,
+        |ui, _| body(ui, inputs, show_coastlines),
     );
-    state.ui.modals.settings = open;
 }
 
 fn body(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {

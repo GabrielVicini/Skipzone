@@ -6,7 +6,7 @@
 
 use egui::{ComboBox, DragValue, RichText, Ui};
 
-use crate::state::AppState;
+use crate::state::{AppState, Modal};
 use crate::ui::actions::{Action, InputChange, edited};
 use crate::ui::theme::{self, MUTED};
 use skipzone_predict::noise::{OperatingMode, dbm_from_watts};
@@ -39,14 +39,14 @@ pub fn overlay(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) {
                 .add_sized([ui.available_width(), 24.0], egui::Button::new("Antennas"))
                 .clicked()
             {
-                out.push(Action::ShowAntennas);
+                out.push(Action::OpenModal(Modal::Antennas));
             }
             ui.add_space(4.0);
             if ui
                 .add_sized([ui.available_width(), 24.0], egui::Button::new("Settings"))
                 .clicked()
             {
-                out.push(Action::ShowSettings);
+                out.push(Action::OpenModal(Modal::Settings));
             }
         });
     });

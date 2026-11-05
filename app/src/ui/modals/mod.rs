@@ -20,7 +20,7 @@ use crate::ui::actions::Action;
 pub fn draw(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
     best_freq::show(ctx, state, out);
     coverage::show(ctx, state, out);
-    settings::show(ctx, state);
-    antennas::show(ctx, state);
-    about::show(ctx, state);
+    settings::show(ctx, state, out);
+    antennas::show(ctx, state, out);
+    about::show(ctx, state, out);
 }

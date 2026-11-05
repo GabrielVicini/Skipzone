@@ -44,10 +44,8 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
         }
         Action::CancelCoverage => cancel_coverage(state, jobs),
         Action::ResetCoverage => state.results.coverage.clear(),
-        Action::ShowCoverage => state.ui.modals.coverage = true,
-        Action::ShowSettings => state.ui.modals.settings = true,
-        Action::ShowAntennas => state.ui.modals.antennas = true,
-        Action::ShowAbout => state.ui.modals.about = true,
+        Action::OpenModal(modal) => state.ui.modals.set(modal, true),
+        Action::CloseModal(modal) => state.ui.modals.set(modal, false),
     }
 }
 
@@ -197,7 +195,7 @@ mod tests {
     use skipzone_predict::scenario::Inputs;
 
     use super::*;
-    use crate::state::Station;
+    use crate::state::{Modal, Station};
 
     /// A scenario that solves quickly: one hop, no sporadic E.
     fn cheap_scenario() -> Inputs {
@@ -270,9 +268,9 @@ mod tests {
             &mut s,
             &jobs,
             [
-                Action::ShowSettings,
+                Action::OpenModal(Modal::Settings),
                 Action::SetInput(InputChange::Freq(7.1)),
-                Action::ShowAbout,
+                Action::OpenModal(Modal::About),
                 Action::SetInput(InputChange::Freq(10.1)),
             ],
         );
@@ -351,5 +349,23 @@ mod tests {
         assert!((s.inputs.scenario.utc_hours - 6.5).abs() < 1e-12);
         assert_eq!(s.inputs.date(), date);
         assert!(!s.inputs.display.show_terminator);
+    }
+
+    /// Opening and closing dialogs touches only the dialog named.
+    #[test]
+    fn dialogs_open_and_close_one_at_a_time() {
+        let (mut s, jobs) = setup();
+        apply(
+            &mut s,
+            &jobs,
+            [
+                Action::OpenModal(Modal::Antennas),
+                Action::OpenModal(Modal::Coverage),
+                Action::CloseModal(Modal::Antennas),
+            ],
+        );
+        assert!(!s.ui.modals.is_open(Modal::Antennas));
+        assert!(s.ui.modals.is_open(Modal::Coverage));
+        assert!(!s.ui.modals.is_open(Modal::Settings));
     }
 }
