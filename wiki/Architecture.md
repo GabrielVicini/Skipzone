@@ -1,141 +1,120 @@
 # Architecture
 
-## Two crates, one workspace
+Skipzone is a Cargo workspace of five crates stacked in layers. The ray tracer
+sits at the bottom, with the ionosphere and the prediction library above it.
+The desktop app and the validation lab sit side by side at the top. For API
+detail, build the rustdoc:
 
-```
-skipzone            (crates/skipzone/)          the engine
-skipzone-app        (app/Cargo.toml, app/src/)  everything else
+```bash
+cargo doc --workspace --no-deps --open
 ```
 
-The root `Cargo.toml` is a virtual workspace with
-`members = ["crates/skipzone", "app"]` and
+## The crates
+
+```mermaid
+graph TD
+    app["skipzone-app<br/>app/"]
+    lab["skipzone-lab<br/>crates/skipzone-lab/"]
+    predict["skipzone-predict<br/>crates/skipzone-predict/"]
+    iono["skipzone-iono<br/>crates/skipzone-iono/"]
+    engine["skipzone (engine)<br/>crates/skipzone/"]
+
+    app --> predict
+    app --> iono
+    lab --> predict
+    lab --> iono
+    lab --> engine
+    predict --> iono
+    predict --> engine
+    iono --> engine
+```
+
+An arrow means "depends on". The root `Cargo.toml` is a virtual workspace with
 `default-members = ["app"]`, so a bare `cargo run` builds and launches the
-desktop application while `cargo build -p skipzone --lib` builds the engine
-alone.
+desktop app.
 
-The split exists for exactly one reason, stated in the root manifest: the app's
-`eframe`/`winit`/HTTP dependency tree must never enter the engine crate. The
-engine has to stay buildable with nothing but `std` and two crates, on any
-target, with no system libraries. A workspace build alone would not prove that,
-because Cargo would happily let an engine module reach for something the app
-pulled in. CI therefore has a dedicated step that builds the engine on its own,
-outside the default members.
+| Crate | Path | What it holds | MSRV |
+|---|---|---|---|
+| `skipzone` | `crates/skipzone/` | The engine: IGRF and dipole field models, the Appleton-Hartree dispersion relation, the Haselgrove ray equations, the adaptive integrator and the homing search | 1.85 |
+| `skipzone-iono` | `crates/skipzone-iono/` | The ionosphere: Chapman layers, the CCIR foF2 and M(3000)F2 maps, the bundled foF2 grid, sporadic E, solar geometry, time and Maidenhead conversions | 1.88 |
+| `skipzone-predict` | `crates/skipzone-predict/` | Headless link prediction: scenarios, the solve, link budget, noise, antennas, ground reflection, the frequency sweep, area coverage, the calibration anchors and the `hfpredict` CLI | 1.88 |
+| `skipzone-lab` | `crates/skipzone-lab/` | Validation and calibration against WSPR spots, ionosonde data and solar indices, plus every harness binary | 1.92 (follows eframe) |
+| `skipzone-app` | `app/` | The egui desktop front end | 1.92 (follows eframe) |
 
-## Size, and what that means
+The engine knows nothing about the ionosphere. It traces through any type that
+implements its `ElectronDensity` trait. `skipzone-iono` provides
+`chapman::SolarChapmanLayer`, which is the model the predictions use.
 
-| | Lines | What is in it |
+## The dependency rule
+
+A crate may depend only on crates in lower layers. The order is engine, then
+iono, then predict, then lab and app on the same level. Lab and app never
+depend on each other.
+
+On top of that ordering, each crate has a list of things it may not pull in,
+directly or through any dependency:
+
+| Crate | May use | Banned |
 |---|---|---|
-| `crates/skipzone/src/` | ~4,200 | Ray tracer, magnetic field, dispersion relation, integrator, homing |
-| `app/src/` | ~30,000 | Ionosphere, noise, antennas, link budget, solver, GUI, harnesses |
-| `crates/skipzone/tests/` | ~1,300 | Analytic and invariant suites against the engine |
+| `skipzone` | `num-complex` and `thiserror` only, as normal dependencies | GUI crates, the network crate, `rayon` |
+| `skipzone-iono` | the engine | GUI crates, the network crate, `rayon` |
+| `skipzone-predict` | the engine, iono, `rayon`, `num-complex`, `shapefile` | GUI crates, the network crate |
+| `skipzone-lab` | everything below it, `ureq` for HTTPS | GUI crates |
+| `skipzone-app` | iono, predict, `eframe`, `egui` | the network crate |
 
-The engine is 12 percent of the codebase, and it is easy to read the naming and
-assume otherwise. Be explicit about it: `crates/skipzone/` is a ray tracer, not a
-propagation predictor. It has no ionosphere. Everything that makes Skipzone
-answer "will this path work at 14 MHz at 0300Z" lives in `app/`.
+"GUI crates" means `egui`, `eframe` and `winit`. "The network crate" means
+`ureq`. Dev-dependencies are exempt, which is how the engine uses `criterion`
+for its benchmarks.
 
-This is a deliberate boundary, not an accident of growth. Coupling electron
-production to solar geometry and to a climatology map is a scenario concern, not
-a reusable engine primitive. An embedder who wants a different ionosphere gets
-the tracer without having to tear one out.
+[`scripts/check-boundaries.py`](https://github.com/GabrielVicini/Skipzone/blob/master/scripts/check-boundaries.py)
+enforces all of this in CI. It reads `cargo metadata` and compiles nothing, so
+you can run it locally in a second:
 
-## The app's internal layers
+```bash
+python3 scripts/check-boundaries.py
+```
 
-`app/src/lib.rs` declares a five-layer stack. Each layer may depend only on the
-ones above it.
+A new workspace crate fails the check until you add it to `LAYERS` in that
+script.
 
-| Layer | Modules | May know about |
-|---|---|---|
-| conversion | `clock`, `grid`, `solar`, `coastline` | nothing else |
-| model | `chapman`, `fof2`, `sporadic_e`, `scenario`, `noise` | the engine |
-| computation | `compute`, `solve`, `sweep`, `coverage` | the model |
-| state | `state` | the computation |
-| view | `ui`, `app` | the state |
+## Why I split it this way
 
-Two invariants hold and are worth checking whenever this area is touched:
+I keep the engine small so it stays portable and embeddable. It builds with
+`std` and two crates, needs no system libraries, and forbids `unsafe`. Someone
+who wants a different ionosphere can take the tracer without tearing one out.
 
-1. **Nothing in `ui` computes a physical quantity.** There is no `use skipzone::`
-   anywhere under `app/src/ui/` or `app/src/state/`. The handful of float
-   operations in the UI are chart scaling and map projection.
-2. **Nothing below `state` mentions egui.** The computation layer is the
-   interesting case, because the background solver genuinely needs to tell the
-   window to redraw. It does that through a `sweep::Wake` callback
-   (`Arc<dyn Fn() + Send + Sync>`), not an `egui::Context`. The view layer
-   supplies one that calls `request_repaint`; a headless caller supplies
-   `sweep::no_wake()`.
+I keep prediction headless so the lab harnesses run the same solver code as
+the GUI. A calibration result then describes the program people run.
 
-That second point is why the harnesses in `crates/skipzone-lab/src/bin/` can drive exactly the
-same solver and model code the GUI does, rather than a parallel copy of it. It
-is also why `app/src/main.rs` is thin: the app is a library with a binary on
-top, not a binary with some helpers.
+Network access lives in the lab and the GUI lives in the app. So the desktop
+app makes no network calls, and lab downloads can't reach a prediction.
+
+<!-- OWNER: the personal motivation for the five-crate split, if you want to add one (what prompted it, what you plan to do with the engine on its own). -->
 
 ## Threading
 
-The engine is single-threaded and has no thread-pool dependency. All parallelism
-lives in `crates/skipzone-predict/src/compute.rs`, which owns a reusable `ComputePool` built on a
-private `rayon` pool, isolated from rayon's global pool so it never fights other
-users of it.
+The engine and the ionosphere are single-threaded. All parallelism lives in
+`skipzone-predict`, which runs whole independent solves on a private `rayon`
+pool. Parallel and sequential runs give bit-identical results, and a test
+checks that.
 
-The parallelism seam is always *outside* the ODE loop. A batch is a set of
-whole independent solves, never individual integrator steps. Two properties fall
-out of that and both are load bearing:
+Two environment variables control the pool at runtime, with no rebuild:
 
-- Results are **bit-identical** between sequential and parallel execution, which
-  is what makes the substitution safe and what the equivalence test in `sweep`
-  checks.
-- Every map returns a `Timing` with per-item and total wall clock, so a claimed
-  speedup can be measured rather than assumed.
-
-The two job kinds are sized differently on purpose. The frequency sweep holds
-two cores back, because it runs while the operator is still panning the map and
-the interface has to stay responsive. The coverage grid takes every core, because it is a
-deliberate one-off run and the operator is doing nothing but waiting for it.
-Both are overridable without a rebuild:
-
-```
-SKIPZONE_COMPUTE=sequential     switch the parallel layer off entirely
+```text
+SKIPZONE_COMPUTE=sequential     run everything on the calling thread
 SKIPZONE_COMPUTE_THREADS=N      cap worker threads at N
 ```
 
-## Data flow of one prediction
+If a result changes when you set `SKIPZONE_COMPUTE=sequential`, the bug is in
+the parallel code.
 
-```
-UI inputs (Inputs)
-      |
-      v
-scenario::resolve      -> Assumptions   (every assumed value, recorded for display)
-scenario::build_models -> Models        (Chapman/foF2/sporadic-E layers, IGRF, collisions)
-      |
-      v
-solve::solve
-      |-- enumerate (hop count, elevation bracket) candidates
-      |-- ComputePool: home and trace each candidate            <- engine
-      |-- link_budget: free-space + Fresnel ground reflection
-      |-- noise: noise floor, received power, SNR, margin
-      v
-SolveOutcome  ->  state::Session  ->  ui panels
-```
+## One prediction, end to end
 
-Nothing in that chain implements physics twice. `solve` calls the engine's
-public API only; `scenario` builds model objects and records what it assumed;
-the UI renders what it is handed.
+The app turns its inputs into a scenario in `skipzone-predict`. That crate
+builds the ionosphere and field models from `skipzone-iono` and the engine. It
+then homes and traces rays through the engine and prices each path with the
+link budget and noise model. The app's UI only draws the result. The function
+names are in the rustdoc.
 
-## The removed web target
-
-A WebAssembly proof of concept existed until it was removed. It is documented
-here so the decision is not relitigated from scratch.
-
-It worked, but it carried its own code paths throughout the computation layer,
-all of them consequences of `wasm32-unknown-unknown` having no threads: the
-solver service ran jobs inline on the browser main thread instead of on a
-worker, the compute pool was forced sequential, `Instant` and `SystemTime` came
-from a shim crate rather than `std`, and the crate emitted a `cdylib` nothing
-native used. On top of that, a 12.7 MB build artifact and its generated JS glue
-were committed to the repository, went stale the moment `app/src/` changed, and
-nothing regenerated or verified them.
-
-The cost was a permanent second execution model in the layer where correctness
-is hardest to reason about, in exchange for a target that was explicitly not the
-focus. It was removed rather than maintained. If a browser build is ever wanted
-again, the honest version starts from cross-origin isolation and real worker
-threads, not from cfg-gating the sequential path back in.
+The physics behind each step is indexed in
+[`docs/README.md`](https://github.com/GabrielVicini/Skipzone/blob/master/docs/README.md).

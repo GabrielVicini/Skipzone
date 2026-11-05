@@ -1,59 +1,36 @@
-# Skipzone Wiki
+# Skipzone
 
-3D ionospheric HF ray tracing: Haselgrove ray equations solved through a real
-IGRF geomagnetic field with the full complex Appleton-Hartree refractive index,
-plus a desktop application that turns that into point-to-point and area
-propagation predictions.
+Skipzone predicts whether an HF radio signal will get from one station to another.
+It traces rays in 3D through a modelled ionosphere and the Earth's magnetic field.
+Then it estimates the signal-to-noise ratio at the receiver.
+You use it through a desktop map app.
 
-This wiki is the source of record for how the project is put together. It lives
-in `wiki/` in the repository, so it is versioned with the code it describes and
-a change that invalidates a page can be caught in the same commit.
+<!-- SCREENSHOT: the main window with a TX and RX placed, the traced ray drawn on the map, and the trace panel open on the right showing a USABLE verdict -->
 
-**Status: pre-alpha.** The physics is derived and tested. The inputs feeding it
-are still being calibrated. Nothing here is a production propagation forecast.
+## Who it's for
 
-## Start here
+- Radio amateurs planning a path: which band, roughly when, and whether a path is plausible.
+- HF researchers who want a ray tracer whose physics is derived and tested in the open.
 
-| If you want to | Read |
-|---|---|
-| Understand the shape of the project | [Architecture](Architecture) |
-| Embed or extend the ray tracer | [Engine Crate](Engine-Crate) |
-| Work on the application | [App Crate](App-Crate) |
-| Know where the ionosphere comes from | [Ionosphere Model](Ionosphere-Model) |
-| Know how a path is decided | [Solver and Link Budget](Solver-and-Link-Budget) |
-| Work on the interface | [User Interface](User-Interface) |
-| Run something from a terminal | [Command Line Tools](Command-Line-Tools) |
-| Check the model against reality | [Validation Harnesses](Validation-Harnesses) |
-| Understand the fitted numbers | [Calibration](Calibration) |
-| Know what data ships and under what licence | [Data and Assets](Data-and-Assets) |
-| Read the physics | [Physics Derivations](Physics-Derivations) |
-| Build, test or change CI | [Building and CI](Building-and-CI) |
-| Contribute | [Conventions](Conventions) and [Contributing](Contributing) |
+<!-- OWNER: why you built Skipzone, in your own words -->
 
-## The one-paragraph version
+## Getting it
 
-`crates/skipzone/` is the engine: a magnetic field model, a cold-plasma dispersion relation,
-the Haselgrove ray equations, an adaptive integrator, and a homing search. It
-has two dependencies, forbids `unsafe`, is single-threaded, and knows nothing
-about the ionosphere beyond a trait you hand it. `app/` is everything else: the
-ionosphere model itself, the noise floor, the antenna patterns, the link budget,
-the multi-hop solver, the parallel compute layer, the map interface, and ten
-command line harnesses that exist to check the model against measurements.
+There are no binary releases yet. When there are, they'll be on
+[GitHub Releases](https://github.com/GabrielVicini/Skipzone/releases).
+Until then you build from source with Rust 1.92 or newer:
 
-## What this project refuses to do
+```bash
+git clone https://github.com/GabrielVicini/Skipzone.git
+cd Skipzone
+cargo run --release
+```
 
-These are not omissions, they are positions, and each one is defended in the
-page that owns it.
+## Status
 
-- **No approximations in the dispersion relation.** No quasi-longitudinal, no
-  quasi-transverse. The full complex Appleton-Hartree, with analytic
-  derivatives. See [Physics Derivations](Physics-Derivations).
-- **No physics without a derivation first.** Every equation in the engine is
-  derived from scratch in `docs/derivations/` and the code cites the section.
-- **No `unsafe`.** Forbidden at the crate level in the engine.
-- **No fitting to a number the data cannot identify.** The calibration explicitly
-  enumerates what WSPR can and cannot see, and refuses to move the rest. See
-  [Calibration](Calibration).
-- **No silent fallbacks.** A guessed value that gets used says so on stderr.
-- **No browser build.** A WebAssembly proof of concept existed and was removed.
-  See [Architecture](Architecture#the-removed-web-target).
+Pre-alpha, version 0.1.0. Predicted signal levels are indicative only.
+[Accuracy](Accuracy) says what has been checked and how well.
+
+<!-- OWNER: write the current status in your own words -->
+
+New here? Start with [Getting Started](Getting-Started). To work on the code, see [Contributing](Contributing).
