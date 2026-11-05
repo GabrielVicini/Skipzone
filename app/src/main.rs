@@ -9,6 +9,8 @@ fn main() -> eframe::Result {
         // The window opens at its default size each run. Only the settings in
         // `persist` are saved.
         persist_window: false,
+        // A fixed name, so the saved settings survive a change to the title.
+        persistence_path: eframe::storage_dir("skipzone").map(|dir| dir.join("app.ron")),
         ..Default::default()
     };
     eframe::run_native(
