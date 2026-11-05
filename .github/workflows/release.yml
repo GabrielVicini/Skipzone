@@ -26,7 +26,7 @@ jobs:
           # macos-14 is arm64; x86_64 is cross-compiled on the same runner.
           - { os: macos-14, target: x86_64-apple-darwin }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
