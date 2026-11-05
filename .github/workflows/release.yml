@@ -8,6 +8,8 @@ permissions:
   contents: read
 
 env:
+  # Pinned so a new stable release cannot add lints without a change here.
+  RUST_TOOLCHAIN: "1.97"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -25,8 +27,9 @@ jobs:
           - { os: macos-14, target: x86_64-apple-darwin }
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
