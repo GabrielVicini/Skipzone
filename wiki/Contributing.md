@@ -9,8 +9,8 @@ see [Architecture](Architecture).
 
 ## Building
 
-You need a stable Rust toolchain, edition 2024. The app needs Rust 1.92 or
-newer, because that is eframe 0.35's minimum. CI pins 1.97.
+You need a stable Rust toolchain, edition 2024. The app needs Rust 1.95 or
+newer, because that is eframe 0.36's minimum. CI pins 1.97.
 
 On Linux, eframe and winit need the X11 and Wayland development headers. CI
 installs these on Ubuntu 24.04:
@@ -204,7 +204,7 @@ builds release archives from version tags, described [below](#building-a-release
 
 Dependabot opens update pull requests monthly for Cargo dependencies and for
 GitHub Actions. The advisory ignores in `deny.toml` are GUI-stack crates with
-no fixed release reachable from eframe 0.35. Revisit them when Dependabot
+no fixed release reachable from eframe 0.36. Revisit them when Dependabot
 offers a newer eframe.
 
 ## Bumping the pinned toolchain

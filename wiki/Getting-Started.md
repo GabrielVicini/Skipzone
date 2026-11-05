@@ -7,7 +7,7 @@ You build the app, place two stations, run **Calculate**, and read the verdict.
 There are no binary releases yet, so you build from source.
 When there are releases, they'll be on [GitHub Releases](https://github.com/GabrielVicini/Skipzone/releases).
 
-You need [Rust](https://www.rust-lang.org/tools/install) 1.92 or newer.
+You need [Rust](https://www.rust-lang.org/tools/install) 1.95 or newer.
 On Debian or Ubuntu, install the X11 and Wayland headers first:
 
 ```bash
