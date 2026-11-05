@@ -14,7 +14,7 @@
 //! # Provenance
 //!
 //! Everything below is an order-of-magnitude anchor, not a fitted model or a
-//! citable table, like the D-region anchors in [`crate::scenario`]. The shape
+//! citable table, like the D-region anchors in `scenario`. The shape
 //! follows the documented midlatitude Es climatology (a strong summer maximum,
 //! mid-morning and early-evening diurnal peaks, a temperate-latitude maximum),
 //! and the magnitudes sit in the published ranges (summer daytime occurrence of

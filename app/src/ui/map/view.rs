@@ -13,8 +13,8 @@
 
 use egui::{CentralPanel, Color32, Frame, Mesh, Rect, Sense, TextureHandle, Ui, pos2};
 
-use crate::solar;
 use crate::state::{Session, UiState};
+use skipzone_iono::solar;
 
 use super::basemap;
 use super::layers;

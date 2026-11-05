@@ -74,7 +74,7 @@ use std::collections::BTreeMap;
 
 use crate::calib::{Anchors, AtmosphericAnchors, Bounded};
 use crate::noise::{NoiseEnvironment, NoiseFloor};
-use crate::solar::Season;
+use skipzone_iono::solar::Season;
 
 /// Everything about one solved spot that lets its SNR be re-derived without
 /// tracing the ray again.

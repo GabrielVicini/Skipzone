@@ -233,7 +233,7 @@ counting decorators, so nothing in the engine is modified to be measurable.
 
 ### `gen_fof2_grid`
 
-Regenerates `app/src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
+Regenerates `crates/skipzone-iono/src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
 
 ```bash
 cargo run -p skipzone-app --bin gen_fof2_grid

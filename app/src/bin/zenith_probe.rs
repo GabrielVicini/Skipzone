@@ -26,8 +26,8 @@ use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
 use skipzone::density::ElectronDensity;
 use skipzone::geo::SphericalPoint;
 use skipzone::units::{Meters, PerSecond, Radians};
-use skipzone_app::chapman::SolarChapmanLayer;
 use skipzone_app::scenario;
+use skipzone_iono::chapman::SolarChapmanLayer;
 
 /// Column integration limits and step, km. 40-140 km covers the D region and
 /// the bottom of E; 25 m is far finer than the 6 km scale height.

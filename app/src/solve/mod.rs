@@ -54,7 +54,7 @@ pub fn best_es(out: &SolveOutcome) -> Option<&Solution> {
 /// less spreading loss and a shorter slant through the absorbing D region, so
 /// on raw SNR it always wins where it is geometrically possible. Ranking both
 /// lists by SNR would just prefer the lower layer and ignore that Es is present
-/// only [`SporadicE::probability`](crate::sporadic_e::SporadicE) of the time.
+/// only [`SporadicE::probability`](skipzone_iono::sporadic_e::SporadicE) of the time.
 /// Folding that probability into a dB figure would mix a likelihood with a
 /// power. So the rule is ordinal: a path that is always there outranks one
 /// that might be, and Es is used only when nothing deterministic closed (for
@@ -670,7 +670,7 @@ fn build_mode_reports(
                     "sporadic E not solved: occurrence {:.0} % is below the {:.0} % worth a \
                      second pass, or Es is switched off",
                     100.0 * probability,
-                    100.0 * crate::sporadic_e::ES_NEGLIGIBLE_PROBABILITY,
+                    100.0 * skipzone_iono::sporadic_e::ES_NEGLIGIBLE_PROBABILITY,
                 ),
                 (LayerStatus::NoBracket, _) => format!(
                     "no {} path: rays reflect, but no launch elevation lands one at this range \

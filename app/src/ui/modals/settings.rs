@@ -6,13 +6,13 @@
 
 use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 
-use crate::fof2::Fof2Backend;
 use crate::noise::{
     MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
 };
 use crate::scenario::{GroundType, Inputs, fof2_from_ssn};
 use crate::state::{Session, UiState};
 use crate::ui::widgets::{card, hint, labelled_drag, section};
+use skipzone_iono::fof2::Fof2Backend;
 
 pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) {
     let inputs = &mut session.inputs;
@@ -108,7 +108,7 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
                      scale the maps were fitted on). Measured against 70219 GIRO ionosonde \
                      soundings: RMS error 1.10 MHz, against 1.70 for the bundled grid. hmF2 and \
                      scale H remain yours directly.",
-                    crate::ccir::map_r12_from_ssn_v2(inputs.ssn),
+                    skipzone_iono::ccir::map_r12_from_ssn_v2(inputs.ssn),
                     inputs.ssn
                 ),
             },

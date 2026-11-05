@@ -1,4 +1,4 @@
-//! Regenerates `src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
+//! Regenerates `crates/skipzone-iono/src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
 //!
 //! The table is checked in, so nothing is computed or fetched at runtime. This
 //! generator records its provenance as a program: running it reproduces the
@@ -6,7 +6,7 @@
 //! the two drift apart.
 //!
 //! The values are not CCIR, URSI or IRI coefficients. See the provenance
-//! section of `crate::fof2`'s module documentation before using the numbers for
+//! section of `skipzone_iono::fof2`'s module documentation before using the numbers for
 //! anything.
 //!
 //! ```text
@@ -15,11 +15,11 @@
 
 use std::fmt::Write as _;
 
-use skipzone_app::fof2::{
+use skipzone_iono::fof2::{
     GRID_LAT_MIN_DEG, GRID_LAT_ROWS, GRID_LAT_STEP_DEG, GRID_LST_COLS, GRID_LST_STEP_H,
     GRID_SSN_LEVELS, climatology_fof2,
 };
-use skipzone_app::solar::Season;
+use skipzone_iono::solar::Season;
 
 fn main() -> std::io::Result<()> {
     let mut out = String::new();
@@ -66,7 +66,10 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/assets/fof2_grid.tsv");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/skipzone-iono/src/assets/fof2_grid.tsv"
+    );
     std::fs::write(path, &out)?;
     println!("wrote {path} ({} bytes)", out.len());
     Ok(())

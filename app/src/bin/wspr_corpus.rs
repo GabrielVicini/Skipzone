@@ -28,13 +28,14 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative, Rejections};
+use skipzone_app::scenario;
 use skipzone_app::spaceweather::{self, Ssn, SsnSource};
 use skipzone_app::wspr::{WsprSpot, parse_spots};
 use skipzone_app::wsprlive::{
     self as wsprlive, BusiestFilter, CorpusQuery, HygieneCensus, StationEnd, Window,
     cycle_census_tsv,
 };
-use skipzone_app::{grid, scenario};
+use skipzone_iono::grid;
 
 /// UTC hours the negatives schedule walks. Es occurrence and D-region
 /// absorption vary strongly through the day, so negatives from one hour would
@@ -640,7 +641,7 @@ fn distinct(spots: &[CorpusSpot], key: impl Fn(&CorpusSpot) -> &String) -> usize
 /// The consecutive UTC days a span covers.
 ///
 /// Calendar arithmetic done here rather than pulled in as a dependency: the app
-/// already has [`skipzone_app::clock`] for the reverse direction, and a span of
+/// already has [`skipzone_iono::clock`] for the reverse direction, and a span of
 /// consecutive days needs only month lengths.
 fn day_span(from: &str, days: u32) -> Result<Vec<(i32, u32, u32)>, String> {
     let p: Vec<&str> = from.split('-').collect();

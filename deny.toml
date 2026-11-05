@@ -45,7 +45,7 @@ confidence-threshold = 0.9
 exceptions = [
     # Bundled egui fonts (Hack and Ubuntu), distributed unmodified.
     { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
-    # NeQuick reference data compiled in from data/nequick/.
+    # NeQuick reference data compiled in from crates/skipzone-iono/data/nequick/.
     { crate = "skipzone-iono", allow = ["EUPL-1.2"] },
 ]
 

@@ -2,7 +2,7 @@
 //!
 //! The WSPR calibrator sits on top of the ionosphere model, so the model's
 //! foF2 and foE should be checked against measurement first. The bundled
-//! `app/src/assets/fof2_grid.tsv` comes from [`fof2::climatology_fof2`], an
+//! `crates/skipzone-iono/src/assets/fof2_grid.tsv` comes from [`fof2::climatology_fof2`], an
 //! order-of-magnitude climatology calibrated only to [`fof2::fof2_from_ssn`],
 //! not CCIR, URSI or IRI data.
 //!
@@ -31,10 +31,10 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use skipzone_app::calib::Anchors;
-use skipzone_app::ccir::CcirMonth;
-use skipzone_app::chapman::chapman_grazing;
-use skipzone_app::fof2::{self, DiurnalShape, Fof2Grid};
-use skipzone_app::solar::{self, Season};
+use skipzone_iono::ccir::CcirMonth;
+use skipzone_iono::chapman::chapman_grazing;
+use skipzone_iono::fof2::{self, DiurnalShape, Fof2Grid};
+use skipzone_iono::solar::{self, Season};
 
 /// Reject autoscaled points below this confidence score. GIRO uses 0-100, with
 /// 999 for a hand-scaled trace and -1 for unknown. Autoscaling failures produce

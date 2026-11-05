@@ -96,7 +96,7 @@ of authority.
 
 ## `chapman-grazing.md`
 
-Implements `app/src/chapman.rs`. The only derivation for code outside the engine
+Implements `crates/skipzone-iono/src/chapman.rs`. The only derivation for code outside the engine
 crate, because the grazing-incidence layer is the one place the application
 carries physics of its own.
 

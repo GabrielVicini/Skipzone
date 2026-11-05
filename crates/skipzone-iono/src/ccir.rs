@@ -70,7 +70,7 @@ pub const MODIP_LAT_STEP_DEG: f64 = 5.0;
 /// Longitude step of the modip grid, degrees.
 pub const MODIP_LON_STEP_DEG: f64 = 10.0;
 
-const MODIP_TEXT: &str = include_str!("../../data/nequick/modipNeQG_wrapped.txt");
+const MODIP_TEXT: &str = include_str!("../data/nequick/modipNeQG_wrapped.txt");
 
 /// The modified-dip-latitude grid, in degrees.
 ///
@@ -304,18 +304,18 @@ pub const R12_LEVELS: [f64; 2] = [0.0, 100.0];
 pub const VALUES_PER_MONTH: usize = 2 * F2_TERMS * F2_UT_TERMS + 2 * M3000_TERMS * M3000_UT_TERMS;
 
 const CCIR_TEXT: [&str; 12] = [
-    include_str!("../../data/nequick/ccir11.txt"),
-    include_str!("../../data/nequick/ccir12.txt"),
-    include_str!("../../data/nequick/ccir13.txt"),
-    include_str!("../../data/nequick/ccir14.txt"),
-    include_str!("../../data/nequick/ccir15.txt"),
-    include_str!("../../data/nequick/ccir16.txt"),
-    include_str!("../../data/nequick/ccir17.txt"),
-    include_str!("../../data/nequick/ccir18.txt"),
-    include_str!("../../data/nequick/ccir19.txt"),
-    include_str!("../../data/nequick/ccir20.txt"),
-    include_str!("../../data/nequick/ccir21.txt"),
-    include_str!("../../data/nequick/ccir22.txt"),
+    include_str!("../data/nequick/ccir11.txt"),
+    include_str!("../data/nequick/ccir12.txt"),
+    include_str!("../data/nequick/ccir13.txt"),
+    include_str!("../data/nequick/ccir14.txt"),
+    include_str!("../data/nequick/ccir15.txt"),
+    include_str!("../data/nequick/ccir16.txt"),
+    include_str!("../data/nequick/ccir17.txt"),
+    include_str!("../data/nequick/ccir18.txt"),
+    include_str!("../data/nequick/ccir19.txt"),
+    include_str!("../data/nequick/ccir20.txt"),
+    include_str!("../data/nequick/ccir21.txt"),
+    include_str!("../data/nequick/ccir22.txt"),
 ];
 
 /// One month's CCIR coefficients, both solar-activity levels.

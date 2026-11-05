@@ -164,10 +164,10 @@ there. The app tracks whatever `eframe` requires, which moves.
 
 ## License
 
-MIT, except `data/nequick/` (EUPL-1.2). See [LICENSE](LICENSE).
+MIT, except `crates/skipzone-iono/data/nequick/` (EUPL-1.2). See [LICENSE](LICENSE).
 
-The bundled NeQuick reference data under `data/nequick/` is EUPL v1.2 and
-carries its own notice; see [data/nequick/README.md](data/nequick/README.md).
+The bundled NeQuick reference data under `crates/skipzone-iono/data/nequick/` is EUPL v1.2 and
+carries its own notice; see [crates/skipzone-iono/data/nequick/README.md](crates/skipzone-iono/data/nequick/README.md).
 The other bundled data keeps its upstream terms: the IGRF-14 coefficients in
 `crates/skipzone/data/igrf14coeffs.txt` are published by IAGA and freely available, and the Natural
 Earth shapefiles in `app/src/assets/` are public domain.

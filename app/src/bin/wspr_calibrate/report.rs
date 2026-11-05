@@ -817,7 +817,7 @@ pub(crate) fn report_hop_geometry(set: &Solved) {
     // sits at or below the peak, so the true ceiling is lower.
     let height_km = |layer: &str| match layer {
         "E" => Anchors::default().ionosphere.e_peak_alt_km.value,
-        "Es" => skipzone_app::sporadic_e::ES_HEIGHT_KM,
+        "Es" => skipzone_iono::sporadic_e::ES_HEIGHT_KM,
         _ => Inputs::default().hmf2_km,
     };
     let ceiling = |h: f64| 2.0 * r * (r / (r + h)).acos();

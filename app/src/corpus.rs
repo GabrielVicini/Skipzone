@@ -41,8 +41,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use crate::grid;
 use crate::wspr::{WsprSpot, parse_spots};
+use skipzone_iono::grid;
 
 /// How many different transmitters a receiver must have decoded, in the same
 /// cycle and on the same band, before its silence about one more counts.

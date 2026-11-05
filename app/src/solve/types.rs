@@ -182,7 +182,7 @@ pub struct Solution {
     /// Summed loss at the sporadic-E reflections, dB: the fraction of each
     /// bounce that tunnels through the sheet rather than reflecting from it.
     /// Always 0 for a deterministic path, which has no sheet to bounce off; see
-    /// [`SporadicE::tunnelling_fraction`](crate::sporadic_e::SporadicE::tunnelling_fraction)
+    /// [`SporadicE::tunnelling_fraction`](skipzone_iono::sporadic_e::SporadicE::tunnelling_fraction)
     /// for why it is usually 0 for an Es path too.
     pub es_reflection_loss_db: f64,
     /// Number of intermediate ground reflections (hops - 1 for a landed path).

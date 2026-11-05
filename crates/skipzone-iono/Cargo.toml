@@ -1,0 +1,13 @@
+[package]
+name = "skipzone-iono"
+license = "MIT AND EUPL-1.2"
+version = "0.1.0"
+edition = "2024"
+description = "Ionosphere model for the Skipzone engine: Chapman layers, CCIR foF2/M(3000)F2 maps, sporadic E"
+publish = false
+
+[lib]
+name = "skipzone_iono"
+
+[dependencies]
+skipzone = { path = "../skipzone" }

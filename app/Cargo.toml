@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 skipzone = { path = "../crates/skipzone" }
+skipzone-iono = { path = "../crates/skipzone-iono" }
 eframe = "0.35"
 egui = "0.35"
 # Complex Fresnel reflection coefficients for the ground-reflection loss term.

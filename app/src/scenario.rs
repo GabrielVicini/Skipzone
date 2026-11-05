@@ -1,6 +1,6 @@
 //! Turns UI inputs into the engine's model objects, and records every assumed
 //! value so the UI can display it. No physics here: the layers come from
-//! [`crate::chapman`], [`crate::fof2`] and [`crate::sporadic_e`], and
+//! [`skipzone_iono::chapman`], [`skipzone_iono::fof2`] and [`skipzone_iono::sporadic_e`], and
 //! `QuasiParabolicLayer`, `IgrfModel` and `ExponentialCollisions` are engine
 //! types used through their public constructors.
 //!
@@ -29,15 +29,15 @@ use skipzone::units::{Hertz, Meters, PerCubicMeter, PerSecond, Radians};
 
 use crate::antenna::{AntennaConfig, Ground};
 use crate::calib::Anchors;
-use crate::ccir::{self, CcirF2Peak, CcirMonth};
-use crate::chapman::{ConstantPeak, SlantFactor, SolarChapmanLayer};
-use crate::fof2::{self, Fof2Backend, Fof2Grid, GriddedF2Peak};
 use crate::noise::{NoiseEnvironment, NoiseFloor, OperatingMode};
-use crate::solar::{self, SolarGeometry};
-use crate::sporadic_e::SporadicE;
+use skipzone_iono::ccir::{self, CcirF2Peak, CcirMonth};
+use skipzone_iono::chapman::{ConstantPeak, SlantFactor, SolarChapmanLayer};
+use skipzone_iono::fof2::{self, Fof2Backend, Fof2Grid, GriddedF2Peak};
+use skipzone_iono::solar::{self, SolarGeometry};
+use skipzone_iono::sporadic_e::SporadicE;
 
-pub use crate::fof2::fof2_from_ssn;
-pub use crate::solar::{Season, season_at};
+pub use skipzone_iono::fof2::fof2_from_ssn;
+pub use skipzone_iono::solar::{Season, season_at};
 
 /// Spherical Earth radius, matching the engine's validation suites.
 pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -129,7 +129,7 @@ pub const NU_SCALE_HEIGHT_KM: f64 = 6.7;
 // alpha-Chapman profile driven by the solar zenith angle: the realised peak is
 // Nm Ch^{-1/2}, i.e. foE proportional to (cos chi)^{1/4} in the plane-parallel
 // regime, the standard foE law. The overhead-sun anchor and the solar-activity
-// scaling live in `crate::fof2`.
+// scaling live in `skipzone_iono::fof2`.
 //
 // The geometry below is a textbook order-of-magnitude anchor: the E peak sits
 // near 105-110 km with a scale height of order 10 km.
@@ -246,12 +246,12 @@ pub struct Inputs {
     pub freq_mhz: f64,
     pub utc_hours: f64,
     /// Calendar year, so the UI can show and edit a real date. The solar
-    /// geometry ignores it (see [`crate::solar`]): Cooper's declination takes
+    /// geometry ignores it (see [`skipzone_iono::solar`]): Cooper's declination takes
     /// only the day of year, and leap years shift that by under 0.4 deg.
     pub year: i32,
     pub month: u32,
     /// Sunspot number, the solar-activity input. It drives foF2 (see
-    /// [`crate::fof2`]) and foE.
+    /// [`skipzone_iono::fof2`]) and foE.
     pub ssn: f64,
     /// Which foF2 model builds the F2 layer. Defaults to the gridded
     /// climatology; the SSN-only scalar remains selectable, and is the
@@ -859,7 +859,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     // climatology; a zenith-angle law on top would count it twice. The engine's
     // `ChapmanLayer::with_zenith_angle` would also refuse past 85 deg and put a
     // cliff on F2 at every terminator (docs/derivations/chapman-grazing.md).
-    let f2_source: Box<dyn crate::chapman::PeakDensitySource> = match a.fof2_backend {
+    let f2_source: Box<dyn skipzone_iono::chapman::PeakDensitySource> = match a.fof2_backend {
         Fof2Backend::Ccir => Box::new(
             ccir_peak(inputs).map_err(|e| format!("bundled CCIR maps failed to load: {e}"))?,
         ),
@@ -919,7 +919,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
             .sporadic_e
             .layer(EARTH_RADIUS_M)
             .map_err(|e| format!("sporadic-E layer rejected: {e}"))?;
-        let f2_source_2: Box<dyn crate::chapman::PeakDensitySource> = match a.fof2_backend {
+        let f2_source_2: Box<dyn skipzone_iono::chapman::PeakDensitySource> = match a.fof2_backend {
             Fof2Backend::Ccir => Box::new(
                 ccir_peak(inputs).map_err(|e| format!("bundled CCIR maps failed to load: {e}"))?,
             ),

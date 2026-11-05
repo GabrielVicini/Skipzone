@@ -18,7 +18,7 @@ documentation, in the UI, and here.
 | Es | ~100 km | Quasi-parabolic, thin | none | probabilistic foEs |
 | F2 | ~300 km | Chapman | overhead (none) | **CCIR numerical maps** |
 
-`app/src/chapman.rs` provides one reusable layer type, `SolarChapmanLayer`, that
+`crates/skipzone-iono/src/chapman.rs` provides one reusable layer type, `SolarChapmanLayer`, that
 D, E and F2 are all built from, plus the grazing-incidence function itself.
 
 ## Two horizontal knobs, deliberately separate
@@ -174,7 +174,7 @@ horizontal structure from the map.
 
 ## foF2: three backends, all surfaced
 
-`app/src/fof2.rs` and `app/src/ccir.rs`.
+`crates/skipzone-iono/src/fof2.rs` and `crates/skipzone-iono/src/ccir.rs`.
 
 - `Fof2Backend::Ccir` — **the default.** The CCIR numerical maps, real measured
   coefficients. See the next section.
@@ -191,8 +191,8 @@ when the bundled data failed to load and the constant took over.
 
 ## The CCIR maps: what replaced the guess, and by how much
 
-`app/src/ccir.rs`, reading `data/nequick/ccir11.txt` .. `ccir22.txt` and
-`data/nequick/modipNeQG_wrapped.txt`.
+`crates/skipzone-iono/src/ccir.rs`, reading `crates/skipzone-iono/data/nequick/ccir11.txt` .. `ccir22.txt` and
+`crates/skipzone-iono/data/nequick/modipNeQG_wrapped.txt`.
 
 This wiki used to say that the bundled grid's layout followed the operational
 maps and that "dropping a real IRI or CCIR table into the same file layout is a
@@ -306,7 +306,7 @@ IGRF got cheaper.
 below still applies to it, and it remains selectable.
 
 
-`app/src/assets/fof2_grid.tsv` is laid out the way the operational maps are: a
+`crates/skipzone-iono/src/assets/fof2_grid.tsv` is laid out the way the operational maps are: a
 latitude by local-solar-time table per season, tabulated at two solar-activity
 levels and interpolated in NmF2 between them, which is the CCIR/URSI idiom.
 
@@ -324,7 +324,7 @@ with latitude, local time and season, so the terminator, the equatorial anomaly
 and the day/night asymmetry exist at all. Dropping a real IRI or CCIR table into
 the same file layout is a file replacement, not a code change.
 
-Do not confuse this grid with `data/nequick/`, which is real CCIR data, vendored
+Do not confuse this grid with `crates/skipzone-iono/data/nequick/`, which is real CCIR data, vendored
 and licensed but **not read by any code**. See
 [Data and Assets](Data-and-Assets).
 
@@ -345,7 +345,7 @@ confounds the seasonal term with the solar-cycle position.
 
 ## Sporadic E
 
-`app/src/sporadic_e.rs`. Es is the reason a 17 m signal is heard at 400 km when
+`crates/skipzone-iono/src/sporadic_e.rs`. Es is the reason a 17 m signal is heard at 400 km when
 F2 has no solution at that geometry at all. It differs from every other layer in
 two ways that shape the whole module.
 

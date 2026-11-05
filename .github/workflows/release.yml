@@ -44,7 +44,7 @@ jobs:
             libx11-dev libgl1-mesa-dev
       - name: Build
         run: cargo build --release --locked -p skipzone-app --bin skipzone-app-bin --target ${{ matrix.target }}
-      # The binary embeds data/nequick/ (EUPL-1.2), so its licence notice ships too.
+      # The binary embeds crates/skipzone-iono/data/nequick/ (EUPL-1.2), so its licence notice ships too.
       - name: Package
         shell: bash
         run: |
@@ -53,7 +53,7 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then exe="$exe.exe"; fi
           mkdir -p "release/$name"
           cp "target/${{ matrix.target }}/release/$exe" LICENSE README.md "release/$name/"
-          cp data/nequick/_SOURCE_AND_LICENSE.txt "release/$name/NEQUICK-DATA-LICENSE.txt"
+          cp crates/skipzone-iono/data/nequick/_SOURCE_AND_LICENSE.txt "release/$name/NEQUICK-DATA-LICENSE.txt"
           cd release
           if [ "$RUNNER_OS" = Windows ]; then
             7z a -tzip "$name.zip" "$name" > /dev/null

@@ -22,11 +22,12 @@ use std::process::ExitCode;
 use skipzone_app::compute::{ComputePool, PoolConfig};
 use skipzone_app::noise::NoiseEnvironment;
 use skipzone_app::scenario::{self, Inputs};
+use skipzone_app::solve;
 use skipzone_app::spaceweather::{self, Ssn, SsnSource};
 use skipzone_app::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
 use skipzone_app::wspr_report::{self, Breakdown};
 use skipzone_app::wsprlive::{Query, Window};
-use skipzone_app::{grid, solve};
+use skipzone_iono::grid;
 
 struct Args {
     file: Option<String>,

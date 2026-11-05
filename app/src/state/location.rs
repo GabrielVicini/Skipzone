@@ -7,7 +7,7 @@
 //! Half-typed text stays in the buffer without disturbing the scenario, and a
 //! map click can rewrite the buffers at any time.
 
-use crate::grid;
+use skipzone_iono::grid;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LocationMode {

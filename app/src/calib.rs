@@ -3,7 +3,7 @@
 //!
 //! Each value is a module constant documented where it is used: the D-region
 //! and collision anchors in [`crate::scenario`], the foE anchor in
-//! [`crate::fof2`], the sporadic-E climatology in [`crate::sporadic_e`], and
+//! [`skipzone_iono::fof2`], the sporadic-E climatology in [`skipzone_iono::sporadic_e`], and
 //! the atmospheric-noise surrogate in [`crate::noise`]. This module makes them
 //! adjustable and gives each a plausible range.
 //!
@@ -105,11 +105,11 @@ pub struct IonosphereAnchors {
     /// D-region Chapman scale height, km.
     pub d_scale_height_km: Bounded,
     /// Residual night-time D-region density, as a fraction of the overhead-sun
-    /// peak. See [`crate::chapman::SolarChapmanLayer::with_night_floor`] for why
+    /// peak. See [`skipzone_iono::chapman::SolarChapmanLayer::with_night_floor`] for why
     /// an alpha-Chapman layer needs it as an input.
     pub d_night_floor_fraction: Bounded,
     /// How much of the photochemical peak rise the D-region profile takes,
-    /// 0..1. See [`crate::chapman::SolarChapmanLayer::with_rise_fraction`].
+    /// 0..1. See [`skipzone_iono::chapman::SolarChapmanLayer::with_rise_fraction`].
     ///
     /// The only anchor that changes the model's shape rather than a level. The
     /// layer imposes `A ~ cos^n chi` with `n = 1/2 + f H_D/H_nu`; at the
@@ -132,7 +132,7 @@ pub struct IonosphereAnchors {
     pub e_scale_height_km: Bounded,
     /// Overhead quiet-sun foE, MHz.
     pub foe_overhead_quiet_mhz: Bounded,
-    /// foEs at the occurrence maximum, MHz. See [`crate::sporadic_e`]: this is
+    /// foEs at the occurrence maximum, MHz. See [`skipzone_iono::sporadic_e`]: this is
     /// the top of the modelled foEs range, and the model currently treats it as
     /// the value Es takes whenever Es is present.
     pub es_foes_max_mhz: Bounded,
@@ -157,9 +157,17 @@ impl Default for IonosphereAnchors {
             // Lower bound below the textbook 3.0 because the measured value is
             // 2.99 (`fof2::FOE_OVERHEAD_QUIET_MHZ`, from 28 952 ionosonde
             // soundings over four seasons).
-            foe_overhead_quiet_mhz: Bounded::new(crate::fof2::FOE_OVERHEAD_QUIET_MHZ, 2.6, 3.8),
-            es_foes_max_mhz: Bounded::new(crate::sporadic_e::ES_FOES_MAX_MHZ, 5.0, 12.0),
-            es_peak_probability: Bounded::new(crate::sporadic_e::ES_PEAK_PROBABILITY, 0.10, 0.70),
+            foe_overhead_quiet_mhz: Bounded::new(
+                skipzone_iono::fof2::FOE_OVERHEAD_QUIET_MHZ,
+                2.6,
+                3.8,
+            ),
+            es_foes_max_mhz: Bounded::new(skipzone_iono::sporadic_e::ES_FOES_MAX_MHZ, 5.0, 12.0),
+            es_peak_probability: Bounded::new(
+                skipzone_iono::sporadic_e::ES_PEAK_PROBABILITY,
+                0.10,
+                0.70,
+            ),
         }
     }
 }
@@ -410,6 +418,15 @@ impl Anchors {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use skipzone::density::ElectronDensity;
+    use skipzone::geo::SphericalPoint;
+    use skipzone::units::{Meters, Radians};
+    use skipzone_iono::chapman::SolarChapmanLayer;
+    use std::f64::consts::PI;
+
+    fn point(r: f64, colat: f64, lon: f64) -> SphericalPoint {
+        SphericalPoint::new(Meters::new(r), Radians::new(colat), Radians::new(lon))
+    }
 
     /// The default anchors must equal the module constants, or the GUI stops
     /// matching the values its assumptions panel prints.
@@ -436,11 +453,15 @@ mod tests {
             (i.e_scale_height_km.value - crate::scenario::E_REGION_SCALE_HEIGHT_KM).abs() < 1e-12
         );
         assert!(
-            (i.foe_overhead_quiet_mhz.value - crate::fof2::FOE_OVERHEAD_QUIET_MHZ).abs() < 1e-12
+            (i.foe_overhead_quiet_mhz.value - skipzone_iono::fof2::FOE_OVERHEAD_QUIET_MHZ).abs()
+                < 1e-12
         );
-        assert!((i.es_foes_max_mhz.value - crate::sporadic_e::ES_FOES_MAX_MHZ).abs() < 1e-12);
         assert!(
-            (i.es_peak_probability.value - crate::sporadic_e::ES_PEAK_PROBABILITY).abs() < 1e-12
+            (i.es_foes_max_mhz.value - skipzone_iono::sporadic_e::ES_FOES_MAX_MHZ).abs() < 1e-12
+        );
+        assert!(
+            (i.es_peak_probability.value - skipzone_iono::sporadic_e::ES_PEAK_PROBABILITY).abs()
+                < 1e-12
         );
 
         let n = a.atmospheric;
@@ -535,5 +556,143 @@ mod tests {
         assert!((b.at_unit_position(b.unit_position()).value - 6.0).abs() < 1e-12);
         assert!((b.at_unit_position(0.0).value - 4.0).abs() < 1e-12);
         assert!((b.at_unit_position(1.0).value - 10.0).abs() < 1e-12);
+    }
+
+    /// The solar-zenith law this layer imposes on absorption is derived:
+    /// `A ~ cos^n chi` with `n = 1/2 + H_layer/H_nu`, from two contributions:
+    ///
+    ///   * the realised peak is `Nm Ch^{-1/2}`, worth exactly 1/2;
+    ///   * the profile translates upward by `H ln Ch` while the collision
+    ///     frequency falls on `H_nu`, losing a further `Ch^{-H/H_nu}` of the
+    ///     `Ne nu` product.
+    ///
+    /// This bounds what a D-region calibration can reach. `bin/mode_audit`
+    /// measures 1.3-1.5 through a traced ray at the shipping anchors, and
+    /// `bin/zenith_probe` measures 1.386 on a vertical column where this formula
+    /// predicts 1.396. If this test fails, conclusions from both tools need
+    /// re-deriving.
+    #[test]
+    fn the_zenith_exponent_is_one_half_plus_the_scale_height_ratio() {
+        use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
+        use skipzone::units::PerSecond;
+
+        const R0: f64 = 6_371_000.0;
+        let omega = 2.0 * PI * 7.04e6;
+
+        // Vertical integral of the non-deviative absorption kernel, Ne nu/omega^2,
+        // in arbitrary units - constants independent of chi cancel in the ratio.
+        let column = |h_layer_km: f64, h_nu_km: f64, rise: f64, chi_deg: f64| -> f64 {
+            let layer = SolarChapmanLayer::d_region(
+                1.0e9,
+                R0 + 85e3,
+                h_layer_km * 1e3,
+                0.0,  // declination
+                12.0, // UTC: subsolar at colat 90 deg, lon 0
+                0.0,  // no night floor: a chi-independent term would flatten
+                      // the law being measured
+            )
+            .with_rise_fraction(rise);
+            let coll = ExponentialCollisions::new(
+                PerSecond::new(5.0e6),
+                Meters::new(R0 + 70e3),
+                Meters::new(h_nu_km * 1e3),
+            )
+            .expect("valid collision profile");
+            // Along lon = 0 with decl = 0, cos chi = sin(colat), so colat = 90 - chi.
+            let colat = (90.0 - chi_deg).to_radians();
+            let (lo, hi, step) = (40e3, 140e3, 25.0);
+            let n = ((hi - lo) / step) as usize;
+            (0..=n)
+                .map(|i| {
+                    let p = point(R0 + lo + step * i as f64, colat, 0.0);
+                    let nu = coll.sample(&p).nu;
+                    let w = if i == 0 || i == n { 0.5 } else { 1.0 };
+                    w * layer.sample(&p).ne * nu / (omega * omega + nu * nu) * step
+                })
+                .sum()
+        };
+
+        // Least-squares slope of log A on log cos chi, fitted below 70 deg where
+        // Ch still tracks sec chi (past that it is the grazing correction being
+        // measured, not the law).
+        let exponent = |h_layer_km: f64, h_nu_km: f64, rise: f64| -> f64 {
+            let pts: Vec<(f64, f64)> = [0.0_f64, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0]
+                .iter()
+                .map(|&c| {
+                    (
+                        c.to_radians().cos().ln(),
+                        column(h_layer_km, h_nu_km, rise, c).ln(),
+                    )
+                })
+                .collect();
+            let n = pts.len() as f64;
+            let mx = pts.iter().map(|p| p.0).sum::<f64>() / n;
+            let my = pts.iter().map(|p| p.1).sum::<f64>() / n;
+            let num: f64 = pts.iter().map(|p| (p.0 - mx) * (p.1 - my)).sum();
+            let den: f64 = pts.iter().map(|p| (p.0 - mx).powi(2)).sum();
+            num / den
+        };
+
+        // Across the whole box `calib.rs` allows both scale heights to move in.
+        for h_layer in [4.0_f64, 6.0, 8.0] {
+            for h_nu in [5.0_f64, 6.7, 9.0] {
+                let got = exponent(h_layer, h_nu, 1.0);
+                let want = 0.5 + h_layer / h_nu;
+                assert!(
+                    (got - want).abs() < 0.03,
+                    "H={h_layer} H_nu={h_nu}: measured n={got:.4}, derived {want:.4}"
+                );
+            }
+        }
+
+        // Across the rise fraction, of which the above is the f = 1 slice. It is
+        // the one anchor that reaches the exponent.
+        for h_layer in [4.0_f64, 6.0] {
+            for h_nu in [5.0_f64, 6.7] {
+                for rise in [0.0_f64, 0.25, 0.5, 0.75, 1.0] {
+                    let got = exponent(h_layer, h_nu, rise);
+                    let want = 0.5 + rise * h_layer / h_nu;
+                    assert!(
+                        (got - want).abs() < 0.03,
+                        "H={h_layer} H_nu={h_nu} f={rise}: measured n={got:.4}, \
+                         derived {want:.4}"
+                    );
+                }
+            }
+        }
+
+        // The f = 0 endpoint is the floor of the functional form: Ch^{-1/2}
+        // thinning alone, with no rise term.
+        let floor = exponent(6.0, 6.7, 0.0);
+        assert!(
+            (floor - 0.5).abs() < 0.02,
+            "the f = 0 limit must be exactly the Ch^-1/2 law, n = 1/2, got {floor:.4}"
+        );
+
+        // With the shipping anchors the law is far steeper than the ~0.75 that
+        // riometer and A1 absorption measurements report, and no allowed
+        // setting of the two scale heights reaches it (the box floors at
+        // 1/2 + 4/9).
+        let shipping = exponent(
+            crate::scenario::D_REGION_SCALE_HEIGHT_KM,
+            crate::scenario::NU_SCALE_HEIGHT_KM,
+            crate::scenario::D_REGION_RISE_FRACTION,
+        );
+        assert!(
+            shipping > 1.3 && shipping < 1.45,
+            "shipping anchors should give n ~ 1.39, got {shipping:.4}"
+        );
+        // Read from `calib.rs` rather than literals so that widening a bound
+        // trips this. The smallest reachable exponent is
+        // 1/2 + H_D(min)/H_nu(max); if it drops to ~0.75, the conclusion in the
+        // wiki and `bin/zenith_probe` no longer holds.
+        let ion = crate::calib::Anchors::default().ionosphere;
+        let n_min = 0.5 + ion.d_scale_height_km.min / ion.nu_scale_height_km.max;
+        assert!(
+            n_min > 0.75,
+            "the scale-height bounds now admit n = {n_min:.3} <= 0.75, so the \
+             calibration CAN reach the measured zenith law by scale heights \
+             alone - Ionosphere-Model.md and Calibration.md need rewriting"
+        );
     }
 }

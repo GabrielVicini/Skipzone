@@ -22,9 +22,9 @@
 //!
 //! So the harness measures bias and spread, not skill.
 
-use crate::grid;
 use crate::noise::OperatingMode;
 use crate::scenario::Inputs;
+use skipzone_iono::grid;
 
 /// Reference bandwidth WSPR SNRs are quoted in, Hz.
 pub const WSPR_REFERENCE_BANDWIDTH_HZ: f64 = 2500.0;

@@ -3162,7 +3162,15 @@ dependencies = [
  "rayon",
  "shapefile",
  "skipzone",
+ "skipzone-iono",
  "ureq",
+]
+
+[[package]]
+name = "skipzone-iono"
+version = "0.1.0"
+dependencies = [
+ "skipzone",
 ]
 
 [[package]]

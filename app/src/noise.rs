@@ -339,16 +339,16 @@ pub fn decode_probability(margin_db: f64, sigma_db: f64) -> f64 {
 
 /// Standard normal CDF, `Phi(z)`.
 ///
-/// Built from the existing, tested [`crate::chapman::erfcx`]:
+/// Built from the existing, tested [`skipzone_iono::chapman::erfcx`]:
 /// `Phi(z) = erfc(-z / sqrt 2) / 2`, and `erfc(t) = e^{-t^2} erfcx(t)` for
 /// `t >= 0` with `erfc(-t) = 2 - erfc(t)`.
 #[must_use]
 pub fn normal_cdf(z: f64) -> f64 {
     let t = -z / std::f64::consts::SQRT_2;
     let half_erfc = if t >= 0.0 {
-        0.5 * (-t * t).exp() * crate::chapman::erfcx(t)
+        0.5 * (-t * t).exp() * skipzone_iono::chapman::erfcx(t)
     } else {
-        1.0 - 0.5 * (-t * t).exp() * crate::chapman::erfcx(-t)
+        1.0 - 0.5 * (-t * t).exp() * skipzone_iono::chapman::erfcx(-t)
     };
     half_erfc.clamp(0.0, 1.0)
 }

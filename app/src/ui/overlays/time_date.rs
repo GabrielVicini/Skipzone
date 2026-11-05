@@ -6,10 +6,10 @@
 
 use egui::{Popup, RectAlign, RichText, Slider, Ui};
 
-use crate::clock;
 use crate::state::{Session, UiState};
 use crate::ui::theme::{self, MUTED};
 use crate::ui::widgets::{calendar, fields};
+use skipzone_iono::clock;
 
 pub fn overlay(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) {
     ui.vertical(|ui| {

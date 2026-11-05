@@ -1,6 +1,6 @@
 # Chapman grazing-incidence function and the twilight D region
 
-Derived here for `app/src/chapman.rs`. Unlike everything else in
+Derived here for `crates/skipzone-iono/src/chapman.rs`. Unlike everything else in
 docs/derivations/, this supports the *scenario-level* app, not the engine
 crate: it is the day/night-aware D-region absorbing layer the app feeds to the
 (unchanged) engine tracer. Notation and sign conventions follow conventions.md

@@ -1,12 +1,12 @@
 //! Month-grid date picker, shown from the calendar button beside the date
-//! field. Built on [`crate::clock`]'s civil-date arithmetic, so the month
+//! field. Built on [`skipzone_iono::clock`]'s civil-date arithmetic, so the month
 //! lengths, leap years and weekday alignment all come from one place.
 
 use egui::{Align, Button, Color32, Grid, Layout, RichText, Ui};
 
-use crate::clock::{self, CivilDate, MONTH_NAMES, WEEKDAY_INITIALS};
 use crate::state::CalendarState;
 use crate::ui::theme::{ACCENT, MUTED};
+use skipzone_iono::clock::{self, CivilDate, MONTH_NAMES, WEEKDAY_INITIALS};
 
 /// Draw the picker. Returns the date if one was clicked.
 pub fn picker(ui: &mut Ui, cal: &mut CalendarState, selected: CivilDate) -> Option<CivilDate> {
