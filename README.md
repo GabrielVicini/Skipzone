@@ -60,5 +60,3 @@ carries its own notice; see [crates/skipzone-iono/data/nequick/README.md](crates
 The other bundled data keeps its upstream terms: the IGRF-14 coefficients in
 `crates/skipzone/data/igrf14coeffs.txt` are published by IAGA and freely available, and the Natural
 Earth shapefiles in `crates/skipzone-predict/src/assets/` are public domain.
-
-For any licensing concerns or questions, email `hello@vicini.io`.

@@ -64,8 +64,8 @@ $$
 X = \frac{\omega_p^2}{\omega^2},\quad Z = \frac{\nu}{\omega},\quad U = 1 + iZ.
 $$
 
-For $Z > 0$ the imaginary part is $\operatorname{Im}\varepsilon = XZ/(1+Z^2) > 0$.
-Then $\operatorname{Im} n > 0$ and $e^{i\mathbf{k}\cdot\mathbf{x}}$ decays along
+For $Z > 0$ the imaginary part is $\mathrm{Im}\,\varepsilon = XZ/(1+Z^2) > 0$.
+Then $\mathrm{Im}\, n > 0$ and $e^{i\mathbf{k}\cdot\mathbf{x}}$ decays along
 the direction of propagation. **Losses correspond to positive imaginary
 parts.**
 
@@ -76,7 +76,7 @@ conjugated first, and the use site says so.
 The amplitude attenuation along a path, in nepers, is
 
 $$
-A = \frac{\omega}{c}\int \operatorname{Im} n \, ds,
+A = \frac{\omega}{c}\int \mathrm{Im}\, n \, ds,
 $$
 
 and the power loss in decibels is $(20/\ln 10)\,A \approx 8.6859\,A$.
@@ -152,7 +152,7 @@ constant, $\Delta$ the central angle and $r_t$ the turning-point radius.
 
 $\chi$ is the solar zenith angle, $H$ the neutral scale height,
 $z = (r - r_m)/H$ the reduced height, $x = r_m/H$ the Chapman-function argument
-(code `big_x`), $\operatorname{Ch}(x, \chi)$ the grazing-incidence function,
+(code `big_x`), $\mathrm{Ch}(x, \chi)$ the grazing-incidence function,
 $\delta$ the solar declination and $\eta$ the hour angle. The literature writes
 the Chapman argument as $X$. This repository keeps $X$ for
 $\omega_p^2/\omega^2$.

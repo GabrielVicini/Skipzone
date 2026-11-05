@@ -120,8 +120,8 @@ holds automatically, because $F(r_b) = r_b^2 - C^2 > 0$ and $\mathsf{A} > 0$
 make $F$ negative only between its roots.
 
 **Antiderivatives.** A reflecting ray has $\mathrm{disc} > 0$, real roots,
-which selects the $\operatorname{arccosh}$ branch of
-$\int dr/\sqrt{\text{quadratic}}$. The $\operatorname{arcsinh}$ form belongs to
+which selects the $\mathrm{arccosh}$ branch of
+$\int dr/\sqrt{\text{quadratic}}$. The $\mathrm{arcsinh}$ form belongs to
 $\mathrm{disc} < 0$, and using it here is a sign error that the quadrature
 cross-check (`qp_closed_form_cross_checked_by_quadrature`) catches. On the
 propagating side $r \le r_t$, below the smaller root,
@@ -129,9 +129,9 @@ $2\mathsf{A}r + \mathsf{B} \le -\sqrt{\mathrm{disc}} < 0$, and
 
 $$
 \begin{aligned}
-I_1(r) &= \int\frac{dr}{\sqrt{F}} = -\frac{1}{\sqrt{\mathsf{A}}}\operatorname{arccosh}\left(-\frac{2\mathsf{A}r + \mathsf{B}}{\sqrt{\mathrm{disc}}}\right), \\
+I_1(r) &= \int\frac{dr}{\sqrt{F}} = -\frac{1}{\sqrt{\mathsf{A}}}\mathrm{arccosh}\left(-\frac{2\mathsf{A}r + \mathsf{B}}{\sqrt{\mathrm{disc}}}\right), \\
 I_2(r) &= \int\frac{r\,dr}{\sqrt{F}} = \frac{\sqrt{F}}{\mathsf{A}} - \frac{\mathsf{B}}{2\mathsf{A}}I_1(r), \\
-I_3(r) &= \int\frac{dr}{r\sqrt{F}} = -\frac{1}{\sqrt{\mathsf{C}_0}}\operatorname{arccosh}\left(\frac{2\mathsf{C}_0/r + \mathsf{B}}{\sqrt{\mathrm{disc}}}\right), \\
+I_3(r) &= \int\frac{dr}{r\sqrt{F}} = -\frac{1}{\sqrt{\mathsf{C}_0}}\mathrm{arccosh}\left(\frac{2\mathsf{C}_0/r + \mathsf{B}}{\sqrt{\mathrm{disc}}}\right), \\
 I_4(r) &= \int\frac{\sqrt{F}}{r}\,dr = \sqrt{F} + \frac{\mathsf{B}}{2}I_1(r) + \mathsf{C}_0 I_3(r).
 \end{aligned}
 $$
@@ -143,7 +143,7 @@ $u \ge 1$ for $r \le r_t$. Then $u' = -2\mathsf{A}/\sqrt{\mathrm{disc}}$ and
 $u^2 - 1 = \left((2\mathsf{A}r + \mathsf{B})^2 - \mathrm{disc}\right)/\mathrm{disc} = 4\mathsf{A}F/\mathrm{disc}$, so
 
 $$
-\frac{d}{dr}\left[-\frac{\operatorname{arccosh}u}{\sqrt{\mathsf{A}}}\right]
+\frac{d}{dr}\left[-\frac{\mathrm{arccosh}\,u}{\sqrt{\mathsf{A}}}\right]
 = -\frac{u'}{\sqrt{\mathsf{A}}\sqrt{u^2 - 1}}
 = \frac{2\sqrt{\mathsf{A}}}{\sqrt{\mathrm{disc}}}\cdot\frac{\sqrt{\mathrm{disc}}}{2\sqrt{\mathsf{A}F}} = \frac{1}{\sqrt{F}} .
 $$
@@ -153,7 +153,7 @@ root of $G(w) = \mathsf{C}_0w^2 + \mathsf{B}w + \mathsf{A}$, which has the same
 discriminant. There $2\mathsf{C}_0w + \mathsf{B} \ge +\sqrt{\mathrm{disc}}$, so
 $v = (2\mathsf{C}_0w + \mathsf{B})/\sqrt{\mathrm{disc}} \ge 1$, and
 $v^2 - 1 = 4\mathsf{C}_0G/\mathrm{disc}$ gives
-$\tfrac{d}{dw}\left[\operatorname{arccosh}(v)/\sqrt{\mathsf{C}_0}\right] = 1/\sqrt{G}$.
+$\tfrac{d}{dw}\left[\mathrm{arccosh}(v)/\sqrt{\mathsf{C}_0}\right] = 1/\sqrt{G}$.
 Since $\int dr/(r\sqrt{F}) = -\int dw/\sqrt{G}$, the minus sign follows.
 
 **$I_2$ and $I_4$.** $\tfrac{d}{dr}\sqrt{F} = (2\mathsf{A}r + \mathsf{B})/(2\sqrt{F})$.
@@ -163,7 +163,7 @@ gives $F/(r\sqrt{F}) = \sqrt{F}/r$. $I_2$ follows in the same way.
 </details>
 
 **Conditioning at the apex.** All four antiderivatives vanish exactly at
-$r_t$, where $\operatorname{arccosh}(1) = 0$ and $\sqrt{F(r_t)} = 0$. The code
+$r_t$, where $\mathrm{arccosh}(1) = 0$ and $\sqrt{F(r_t)} = 0$. The code
 takes the apex terms as these exact zeros, and it has to. Evaluated at the
 floating-point $r_t$, the arccosh argument sits at $1 + O(10^{-14})$ from
 cancellation in $2\mathsf{A}r + \mathsf{B}$. The square root turns that into
