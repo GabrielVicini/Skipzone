@@ -1,0 +1,7 @@
+# corpus: beacon-fixture-v1
+# synthetic: yes
+# beacons_off: 4S7B
+file	kind	sha256	rows	fetched_utc	source	licence	attribution
+beacons.tsv	beacon	e0f91c35a947aea9377c79c2d684159e946105c8a4a8cf9aa893f00fb63a0d3c	14	-	synthetic fixture	none (invented data)	none
+stations.tsv	stations	e65eb3d5bb1cf0f664270f8cfd6296266ddac141a818a7f18dd28fdf19bbeb57	10	-	synthetic fixture	none (invented data)	none
+ssn.tsv	ssn-daily	54b58df66d3ec185ea80925f5b1aa2d4d3ebd68142a22e28b5ce396d49f829e1	2	-	synthetic fixture	none (invented data)	none

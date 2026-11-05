@@ -45,6 +45,15 @@ Step 0 has two parts.
    hour and produces the numbers the benchmark is checked against.
 2. Build `skipzone-lab --bin benchmark`, described below.
 
+**Status (2026-11-05):** the `benchmark` binary exists, at
+`crates/skipzone-lab/src/bin/benchmark.rs`, with its logic in
+`crates/skipzone-lab/src/benchmark/` so that it can be tested. It has been run
+only on the synthetic fixtures in `crates/skipzone-lab/tests/fixtures/benchmark/`
+and has produced no numbers about the model. What remains: fetching and
+freezing the real corpora (no fetcher exists yet), the first real run, and the
+ITURHFProp run on the input files `benchmark p533-inputs` writes, on a machine
+that has the corpora and a built ITURHFProp.
+
 ### 2.1 What the benchmark is
 
 A new binary at `crates/skipzone-lab/src/bin/benchmark/`, laid out like

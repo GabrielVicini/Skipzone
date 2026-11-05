@@ -1,0 +1,7 @@
+# SYNTHETIC FIXTURE: invented values for the benchmark tests. Not measurements.
+# NO MEASURED SNR: each row is a path that was attempted and did not decode.
+# columns: timestamp  tx_call  MHz  tx_grid  dBm  rx_call  rx_grid  rx_heard  SSN
+2026-01-10 12:00	ZZ1AB	7.040100	JN58	30	ZZ2RB	JO62	3	120.0
+2026-01-10 18:00	ZZ3AB	7.040100	EM12	30	ZZ4RB	EN52	3	120.0
+2026-07-14 12:00	ZZ1AB	7.040100	JN58	30	ZZ2RB	JO62	3	110.0
+2026-07-14 18:00	ZZ3AB	7.040100	EM12	30	ZZ4RB	EN52	3	110.0

@@ -1,0 +1,7 @@
+# corpus: rbn-fixture-v1
+# synthetic: yes
+# rbn_window_minutes: 10
+file	kind	sha256	rows	fetched_utc	source	licence	attribution
+rbn.csv	rbn	02aa559f9b9293dbdc2a330635d11b50bd41732f9dac56006331b9a0fff32834	12	-	synthetic fixture	none (invented data)	none
+stations.tsv	stations	e89856c39b4285be19baad38c1937b2b0376da420b1cdf3f5ecc873fdfcec2b6	6	-	synthetic fixture	none (invented data)	none
+ssn.tsv	ssn-daily	1931c513ece48322dd5821ed9ed1239bd1375588eee69b9a9afb80fcc726bfd4	4	-	synthetic fixture	none (invented data)	none

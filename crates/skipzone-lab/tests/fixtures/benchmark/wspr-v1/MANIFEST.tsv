@@ -1,0 +1,6 @@
+# corpus: wspr-fixture-v1
+# synthetic: yes
+file	kind	sha256	rows	fetched_utc	source	licence	attribution
+spots.tsv	wspr	abf514461dcf7f02bbe61ef14945dc4588fdce84a86e1b03803b4f679ab0b53a	28	-	synthetic fixture	none (invented data)	none
+negatives.tsv	wspr-negatives	ad11ab3b765b7a6e126af76de0274431fcfd99cc0cb7fa5b5555c8b30a30d8f0	4	-	synthetic fixture	none (invented data)	none
+r12.tsv	r12	cc994e602cbb28e29b5e8cc90e4be1e9cb7962ace67712bbe55e51ef7cbeef82	1	-	synthetic fixture	none (invented data)	none
