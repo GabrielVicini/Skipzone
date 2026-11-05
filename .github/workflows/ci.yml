@@ -141,9 +141,6 @@ jobs:
         checks:
           - advisories
           - bans licenses sources
-    # New advisories appear without any change here, so they are reported
-    # but do not block a PR. Licences, bans and sources do block.
-    continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
