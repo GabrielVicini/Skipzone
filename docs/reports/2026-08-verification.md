@@ -1,5 +1,11 @@
 # Skipzone Verification Report
 
+> **Snapshot of commit `d92bf9f` (2026-08-10). Not maintained: numbers may not
+> match current code.** Most of the evidence below comes from GIRO ionosonde
+> data and a WSPR corpus fetched into the git-ignored `corpus/` directory, so
+> it cannot be regenerated from the repository alone. `HANDOFF.md`, cited in
+> section 10, has since been deleted from the repository.
+
 **Report date:** 2026-08-10
 **Configuration under test:** commit `d92bf9f`, `skipzone` 0.1.0 / `skipzone-app` 0.1.0, rustc 1.97.1, Windows 11 x86-64
 **Status of the subject:** pre-alpha. Not a production propagation forecast.

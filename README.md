@@ -143,7 +143,7 @@ cargo run --release -p skipzone-lab --bin wspr_validate -- --help
 
 ## Accuracy Report
 
-[docs/verification-report.md](docs/verification-report.md) is the current one.
+[docs/reports/2026-08-verification.md](docs/reports/2026-08-verification.md) is the latest, a dated snapshot.
 It separates three tiers of evidence that are usually conflated: whether the
 engine solves the equations correctly, whether the modelled ionosphere matches
 measurement, and whether an end-to-end prediction matches observed propagation.
