@@ -8,11 +8,11 @@
 //! cargo run --release -p skipzone-app --bin wspr_live_check -- --file spots.tsv --ssn 119
 //! ```
 //!
-//! Every spot is solved through exactly the chain the GUI's RUN TRACE uses, at
-//! the spot's own time, frequency, power and endpoints. Nothing about the
-//! comparison is tuned: read the module docs of `skipzone_app::wspr` before
-//! drawing a conclusion, in particular that only successful decodes are ever
-//! published, so the hit rate cannot see false positives.
+//! Every spot is solved through the same chain as the GUI's RUN TRACE, at the
+//! spot's own time, frequency, power and endpoints, with nothing tuned. Read
+//! the module docs of `skipzone_app::wspr` before drawing conclusions: only
+//! successful decodes are published, so the hit rate cannot see false
+//! positives.
 //!
 //! Exit status is 0 whenever the run completed, 1 if it could not run at all.
 //! This reports a measurement; it is not a pass/fail gate.
@@ -125,7 +125,7 @@ fn main() -> ExitCode {
 fn run(args: &Args) -> Result<(), String> {
     println!("=== SKIPZONE MODEL VALIDATION AGAINST MEASURED WSPR SPOTS ===\n");
 
-    // ---------------------------------------------------------------- spots
+    // Spots
     let (tsv, provenance) = match &args.file {
         Some(path) => {
             let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
@@ -152,13 +152,8 @@ fn run(args: &Args) -> Result<(), String> {
             println!("SOURCE   wspr.live (the WSPRnet archive)");
             println!("WINDOW   {}", window.describe());
             println!("FILTER   {}", q.describe_filter());
-            // Say how much the frequency ceiling declined to score. A scope
-            // decision that hides its own size is just a silent filter.
-            //
-            // Only when the ceiling is what is doing the excluding: with an
-            // explicit --band the band itself is the filter, and printing a
-            // note about 6 m being out of scope while scoring 6 m on request
-            // would contradict itself.
+            // Report how much the frequency ceiling excluded, but only when the
+            // ceiling is the filter: with an explicit --band the band is.
             match if args.band_mhz.is_some() {
                 Ok((0, 0))
             } else {
@@ -187,8 +182,7 @@ fn run(args: &Args) -> Result<(), String> {
                 Ok(_) => {}
                 Err(e) => println!("SCOPE    could not count what the ceiling excluded: {e}"),
             }
-            // Measure the assumption rather than trusting it: how full was the
-            // window that was actually sampled?
+            // How full was the sampled window?
             match q.completeness() {
                 Ok(c) => match c.fraction() {
                     Some(f) if c.is_settled() => {
@@ -234,7 +228,7 @@ fn run(args: &Args) -> Result<(), String> {
         return Err(format!("no spots came back from {provenance}"));
     }
 
-    // What actually came back, as opposed to what was asked for.
+    // What came back, as opposed to what was asked for.
     let (first, last) = time_span(&spots);
     println!("\nRETURNED {} spot(s), {first} to {last} UTC", spots.len());
     println!(
@@ -243,7 +237,7 @@ fn run(args: &Args) -> Result<(), String> {
         distinct(&spots, |s| &s.rx_call)
     );
 
-    // ---------------------------------------------------------------- SSN
+    // SSN
     let ssn = resolve_ssn(args, &spots);
     println!("\nSOLAR    {ssn}");
     if let SsnSource::Operator = ssn.source {
@@ -253,7 +247,7 @@ fn run(args: &Args) -> Result<(), String> {
         );
     }
 
-    // ---------------------------------------------------------------- solve
+    // Solve
     let base = Inputs {
         ssn: ssn.value,
         ..Inputs::default()
@@ -268,7 +262,7 @@ fn run(args: &Args) -> Result<(), String> {
         pool.threads()
     );
 
-    // ---------------------------------------------------------------- report
+    // Report
     let summary = Summary::of(&results);
     println!("\n--- OVERALL -------------------------------------------------");
     println!("  spots scored                {}", summary.spots);
@@ -326,7 +320,7 @@ fn run(args: &Args) -> Result<(), String> {
         }
     }
 
-    // ------------------------------------------------------- bias attribution
+    // Bias attribution
     if summary.closed > 0 {
         let alternatives: Vec<(&'static str, Vec<f64>)> = [
             ("City", NoiseEnvironment::City),
@@ -383,7 +377,7 @@ fn run(args: &Args) -> Result<(), String> {
         println!("  Whatever survives all of that is the model's own optimism.");
     }
 
-    // ---------------------------------------------------------------- misses
+    // Misses
     let misses = wspr_report::worst_misses(&results, args.show);
     println!("\n--- WHERE IT FALLS BEHIND ----------------------------------");
     if misses.is_empty() {
@@ -510,7 +504,7 @@ fn score(spot: &WsprSpot, base: &Inputs) -> SpotResult {
     }
 }
 
-/// The noise floor each spot WOULD have been scored against under a different
+/// The noise floor each spot would have been scored against under a different
 /// receiver environment. Nothing is re-solved: the environment moves the floor
 /// and nothing else, so the shift can be computed directly.
 fn noise_floors_under(spots: &[WsprSpot], base: &Inputs, env: NoiseEnvironment) -> Vec<f64> {
@@ -528,8 +522,8 @@ fn noise_floors_under(spots: &[WsprSpot], base: &Inputs, env: NoiseEnvironment) 
 }
 
 /// The sunspot number to run with: the operator's if given, otherwise the
-/// observed value for the date the spots actually came from - not for today,
-/// which is a different day once `--at` is used.
+/// observed value for the date of the spots, which differs from today once
+/// `--at` is used.
 fn resolve_ssn(args: &Args, spots: &[WsprSpot]) -> Ssn {
     if let Some(v) = args.ssn {
         return Ssn {

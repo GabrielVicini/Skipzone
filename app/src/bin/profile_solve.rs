@@ -1,6 +1,6 @@
 //! Profiling harness for one point-to-point solve.
 //!
-//! Counts, for a chosen scenario, where the time in `solve()` actually goes:
+//! Counts, for a chosen scenario, where the time in `solve()` goes:
 //! traces, integrator steps, density/field/collision evaluations, and the raw
 //! cost of one evaluation of each model. Instrumentation is entirely app-side:
 //! the engine models are wrapped in counting decorators, so nothing in the
@@ -210,7 +210,7 @@ fn main() {
         config,
     );
 
-    // ---------------------------------------------------------------- one trace
+    // One trace
     println!("\n== ONE TRACE (default scenario, elev 20 deg) ==");
     let before = counts();
     let t = Instant::now();
@@ -241,7 +241,7 @@ fn main() {
         );
     }
 
-    // ---------------------------------------------------------------- raw model cost
+    // Raw model cost
     println!("\n== RAW MODEL EVALUATION COST ==");
     let p = SphericalPoint::new(
         Meters::new(EARTH_RADIUS_M + 250e3),
@@ -285,7 +285,7 @@ fn main() {
         100.0 * t_d.as_secs_f64() / (t_d + t_f + t_c).as_secs_f64(),
     );
 
-    // ---------------------------------------------------------------- scan phase
+    // Scan phase
     println!("\n== HOMING: SCAN PHASE, replicated (4..=80 deg, 1 deg step) ==");
     let before = counts();
     let t = Instant::now();
@@ -318,7 +318,7 @@ fn main() {
         );
     }
 
-    // ---------------------------------------------------------------- home_scan per hop count
+    // Home_scan per hop count
     println!("\n== HOMING: home_scan PER HOP COUNT (one mode, deterministic stack) ==");
     let homing = Homing {
         tracer: &tracer,

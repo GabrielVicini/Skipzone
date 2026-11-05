@@ -17,24 +17,17 @@ use skipzone_app::fit::{
 use skipzone_app::noise::NoiseFloor;
 use skipzone_app::scenario::{self, Inputs};
 use skipzone_app::wspr_report::band_label;
-/// How far the fitted atmospheric anchors actually moved the noise floor, band by
-/// band, over this corpus's own day/night and latitude mix.
+/// How far the fitted atmospheric anchors moved the noise floor, band by band,
+/// over this corpus's day/night and latitude mix.
 ///
-/// # Why a bound hit on these anchors needs this table beside it
+/// # Why a bound hit needs this table
 ///
-/// The atmospheric term is one of THREE figures summed in power - the other two
-/// are the man-made and galactic curves of P.372-9 Table 1, which are not
-/// calibration targets and do not move. Above roughly 10 MHz those two floor the
-/// total and the atmospheric term sits 10 dB or more underneath, so the anchors
-/// can be driven anywhere at all without changing the composed floor by more than
-/// a fraction of a dB.
-///
-/// That makes a bound hit ambiguous unless this is printed next to it. An anchor
-/// on its bound may be chasing a residual it can reach, or it may be chasing one
-/// it cannot reach at any value - and only the second is evidence that the error
-/// is elsewhere in the model. The column below distinguishes them: a band where
-/// the floor barely moved is a band the noise model could not have fixed however
-/// the fit set these numbers.
+/// The atmospheric term is summed in power with the fixed man-made and galactic
+/// curves of P.372-9 Table 1. Above roughly 10 MHz those dominate and the
+/// atmospheric term sits 10 dB or more below, so its anchors can move freely
+/// with almost no effect on the floor. A band where the floor barely moved is
+/// one the noise model could not fix at any setting, so an anchor on its bound
+/// there points to an error elsewhere.
 pub(crate) fn report_noise_leverage(
     set: &Solved,
     prior: AtmosphericAnchors,
@@ -128,9 +121,8 @@ pub(crate) fn print_cuts(
 /// how much was suppressed.
 ///
 /// A two-way cut multiplies out into many cells, most of them holding a handful
-/// of spots whose median is that handful's own noise. Printing them all would
-/// bury the cells that carry the corpus; dropping them silently would hide how
-/// much of it went. So the thin cells are pooled into one reported total.
+/// of spots whose median is noise. The thin cells are pooled into one reported
+/// total.
 pub(crate) fn print_cuts_min(
     set: &Solved,
     after: &Scored,
@@ -194,29 +186,20 @@ pub(crate) fn print_cuts_min(
     println!("  * slope with station effects removed; below ~8 spots a cut is not a trend");
 }
 
-/// For every spot a layer BELOW F2 was reported on: was an F2 path also
-/// available, by how much did the lower layer beat it, and what would the
-/// residual have been had F2 been reported instead?
+/// For every spot reported on a layer below F2: was an F2 path also available,
+/// by how much did the lower layer beat it, and what would the residual have
+/// been with F2?
 ///
-/// # The question this settles
+/// A lower layer reading optimistic has two causes needing opposite fixes. If
+/// an F2 path was available and lost, the layer was chosen by comparison, and
+/// a reflection at 105 km has a shorter ray than one at 300 km, so it tends to
+/// win on raw SNR. If the F2 alternative's residual is near zero while the
+/// winner's is large, only the selection rule is wrong. If no F2 path was
+/// available, the question is why the lower layer closed; those spots are
+/// counted separately.
 ///
-/// A lower layer reading optimistic has two quite different causes, and they
-/// need opposite fixes.
-///
-/// If an F2 path was available and lost, the layer was decided by a COMPARISON.
-/// A reflection at 105 km has a shorter ray than one at 300 km, so on raw SNR the
-/// lower layer can win by construction wherever it closes at all - not because
-/// the ionosphere favoured it. That is a selection rule to change, and the last
-/// column says so outright: if the F2 alternative's residual is near zero while
-/// the winner's is large, the physics was right and only the choice was wrong.
-///
-/// If no F2 path was available, the lower layer was the only answer there was,
-/// and the question is instead why it closed - the layer's ionisation, not the
-/// ranking. Those spots are counted separately for exactly that reason.
-///
-/// Scored at the BASELINE parameters throughout. The point is what the model does
-/// before anything is fitted to it; a fitted scale would let the level absorb part
-/// of the very gap being measured.
+/// Scored at the baseline parameters, since a fitted scale would absorb part of
+/// the gap being measured.
 pub(crate) fn report_layer_races(set: &Solved) {
     println!("\n--- WHEN A LAYER BELOW F2 WAS REPORTED ---------------------");
     println!("  For each such spot: did an F2 path also close, by how much was it out-scored,");
@@ -256,7 +239,7 @@ pub(crate) fn report_layer_races(set: &Solved) {
                 })
                 .collect(),
         );
-        // The residual as reported, over the SAME raced spots, so the two
+        // The residual as reported, over the same raced spots, so the two
         // residual columns are computed on one population and are comparable.
         let resid = median_of(
             raced
@@ -287,47 +270,18 @@ pub(crate) fn report_layer_races(set: &Solved) {
     println!("  right and the SELECTION was wrong - the two need entirely different fixes.");
 }
 
-/// How much absorption the model actually produces, against the two shapes it is
-/// asked to serve at once: solar zenith angle and frequency.
-///
-/// # What this exists to decide
-///
-/// Absorption is the ONLY diurnal term in the link budget, and it is also the
-/// dominant frequency-shaped one. It is moved by a single multiplicative scale.
-/// So when the residual carries a diurnal structure and a frequency structure
-/// that want the scale moved in opposite directions, the scale can satisfy
-/// neither, and no amount of fitting it will help.
-///
-/// Before adding any parameter to relieve that, the model's existing dynamic
-/// range has to be measured, because there are two quite different failures and
-/// the columns below tell them apart:
-///
-/// * absorption barely varies across zenith angle - then the diurnal signal is
-///   missing from the model rather than mis-scaled, and the fix is in the
-///   absorption PROFILE. The D region is the layer that appears and disappears
-///   with the sun, so a D region carrying little of the integral produces exactly
-///   this;
-/// * absorption varies, but by far less than the residual does - then the shape
-///   is present and too weak, which is the classic alpha-Chapman `cos^0.5 chi`
-///   against the observed `cos^0.75 chi`, and the fix is in that law.
-///
-/// Restricted to F2, deliberately. It is the layer whose residual is otherwise
-/// unbiased, so its diurnal structure is not contaminated by a layer-selection
-/// question. Scored at the BASELINE scale of 1.0: the point is what the model
-/// produces before anything is fitted to it.
-/// Does the model's day/night step in the NOISE FLOOR match the step the
-/// residual actually takes across the receiver's terminator?
+/// Does the model's day/night step in the noise floor match the step the
+/// residual takes across the receiver's terminator?
 ///
 /// # What this measures
 ///
-/// The noise floor is the only term in the link budget that switches
-/// DISCONTINUOUSLY at the terminator: [`skipzone_app::noise::atmospheric_noise_figure_db`]
-/// selects one of two `(Fa, slope)` pairs on a boolean. Everything else - the D
-/// region above all - varies smoothly through it, because `Ch(X, chi)` is smooth.
+/// The noise floor is the only link-budget term that switches discontinuously
+/// at the terminator: [`skipzone_app::noise::atmospheric_noise_figure_db`]
+/// takes a boolean day flag. Everything else, the D region above all, varies
+/// smoothly because `Ch(X, chi)` is smooth.
 ///
-/// So if the residual also steps discontinuously there, the noise model is
-/// implicated. But the SIZE of that jump is not the noise model's error on its
-/// own, and an earlier version of this function said it was. The identity is:
+/// A residual step there implicates the noise model, but its size is not the
+/// noise model's error alone. The identity is:
 ///
 /// ```text
 /// resid = modelled - measured - station effects
@@ -338,18 +292,17 @@ pub(crate) fn report_layer_races(set: &Solved) {
 ///          =  model step          -  d_absorb              -  d_measured
 /// ```
 ///
-/// so `model step - observed` is `d_absorb + d_measured`, NOT reality's noise
-/// step. Absorption is also a day/night term - that is the whole point of it -
-/// and it does not drop out. All four quantities are printed instead, so the
-/// decomposition is visible and the identity can be checked by eye.
+/// so `model step - observed` is `d_absorb + d_measured`, not the real noise
+/// step, because absorption is also a day/night term. All four quantities are
+/// printed so the identity can be checked by eye.
 ///
-/// `d_measured` is the only column with no model in it at all: it is what the
-/// receivers actually reported, day minus night, corrected for which stations
-/// were in each cell. The model gets the day/night structure of a band right
-/// when `model step - d_absorb` equals `d_measured`.
+/// `d_measured` has no model in it: it is what the receivers reported, day
+/// minus night, corrected for which stations were in each cell. The model gets
+/// a band's day/night structure right when `model step - d_absorb` equals
+/// `d_measured`.
 ///
-/// Split at the RECEIVER's terminator, not the midpoint's, because that is what
-/// the noise floor is keyed on and where it is heard.
+/// Split at the receiver's terminator, which is what the noise floor is keyed
+/// on.
 pub(crate) fn report_terminator_step(
     set: &Solved,
     effects: &StationEffects,
@@ -397,7 +350,7 @@ pub(crate) fn report_terminator_step(
         if day.len() < MIN_QUOTABLE || night.len() < MIN_QUOTABLE {
             continue;
         }
-        // The model's own step, evaluated per spot at ITS frequency, latitude and
+        // The model's own step, evaluated per spot at its frequency, latitude and
         // season and then taken as a median, so the comparison uses the same
         // population as the residual either side of it.
         let model_step = median(
@@ -457,10 +410,8 @@ pub(crate) fn report_terminator_step(
     println!("  cells hold different stations. Four separate measurements, not an identity.");
     println!("  A surrogate that has the day/night structure right prints observed ~ 0.");
 
-    // Same table under the fitted anchors. The point of the day/night step being
-    // a fitted parameter rather than the difference of two absolute levels is
-    // that the fit can now aim at THIS column directly, so it is worth showing
-    // whether it managed to.
+    // Same table under the fitted anchors. The day/night step is a fitted
+    // parameter, so this shows whether the fit matched this column.
     let Some((fit_effects, fit_atm, scale)) = fitted else {
         return;
     };
@@ -531,24 +482,17 @@ pub(crate) fn report_terminator_step(
 /// The census under every cut the daytime residual gets read from, and what
 /// each cell is confounded with.
 ///
-/// # Why this exists
+/// A table of medians hides two problems:
 ///
-/// Two separate failures were reached by quoting medians that could not carry
-/// them, and both are invisible in a table that prints only the median:
+///   * a cell too thin for a median: the zenith block's `< 30 deg` cell holds
+///     17 F2 spots;
+///   * a cell that is not balanced: this corpus works the high bands by day and
+///     the low bands at night, so a "day" cell at a median 14 MHz against a
+///     "night" cell at 5 MHz is a frequency contrast.
 ///
-///   * a cell too THIN to have a median at all - the zenith block's `< 30 deg`
-///     cell holds 17 F2 spots, and the claim that the residual is worst where
-///     absorption is weakest rests on it;
-///   * a cell big enough but not BALANCED - this corpus works the high bands by
-///     day and the low bands at night, so a "day" cell whose median frequency is
-///     14 MHz against a "night" cell at 5 MHz is a frequency contrast wearing a
-///     diurnal label.
-///
-/// So this prints the count, the median frequency, the median path length and
-/// the median midpoint zenith of every cell, and REFUSES to print a residual for
-/// any cell under [`MIN_QUOTABLE`] spots. A refusal is the finding: it says the
-/// corpus cannot answer that question, which is worth more than a number that
-/// looks like it can.
+/// So this prints the count, median frequency, median path length and median
+/// midpoint zenith of every cell, and prints no residual for a cell under
+/// [`MIN_QUOTABLE`] spots, meaning the corpus cannot answer that question.
 pub(crate) const MIN_QUOTABLE: usize = 30;
 
 pub(crate) fn report_confound_census(set: &Solved, effects: &StationEffects) {
@@ -605,7 +549,7 @@ pub(crate) fn report_confound_census(set: &Solved, effects: &StationEffects) {
                 median(g.iter().map(|c| c.range_km).collect()),
                 median(g.iter().map(|c| c.midpoint_zenith_deg).collect()),
                 median(g.iter().map(|c| f64::from(c.hops)).collect()),
-                // Absorption the model APPLIED in this cell, at the baseline
+                // Absorption the model applied in this cell, at the baseline
                 // scale. A multiplicative fix can only move a cell by
                 // (s-1) x this, so it is the number that decides whether one
                 // scale can carry the day-night gap on two different bands.
@@ -638,11 +582,9 @@ pub(crate) fn report_confound_census(set: &Solved, effects: &StationEffects) {
         format!("{:<3} {}", c.layer, day(c))
     });
 
-    // A propagation loss belongs to the MIDPOINT; a noise floor belongs to the
-    // RECEIVER, which is where it is heard. On a path long enough to straddle the
-    // terminator those two disagree, and only there do the two hypotheses predict
-    // different things. Under uniform thinning these cells hold 10-15 spots and
-    // the question cannot be asked at all.
+    // A propagation loss belongs to the midpoint and a noise floor to the
+    // receiver. Only on paths straddling the terminator do the two hypotheses
+    // differ; under uniform thinning these cells hold only 10-15 spots.
     println!("\n  Receiver terminator vs midpoint terminator. A loss belongs to the midpoint, a");
     println!("  noise floor to the receiver; only the cells where they DISAGREE tell them apart.");
     table("midpoint / rx", &all, &|c| {
@@ -653,11 +595,10 @@ pub(crate) fn report_confound_census(set: &Solved, effects: &StationEffects) {
         )
     });
 
-    // THE cut. Every band-by-day cell in the F2-only block is under 30, because
-    // the E layer carries most of the daytime corpus and is filtered out of it.
-    // Pooling the layers back together is what makes a band legal on both sides
-    // of the terminator - and a band that is legal on both sides holds FREQUENCY
-    // FIXED, which is the only way this corpus can ask a diurnal question at all.
+    // Every band-by-day cell in the F2-only block is under 30 spots, because the
+    // E layer carries most of the daytime corpus. Pooling the layers makes a band
+    // quotable on both sides of the terminator, which holds frequency fixed for
+    // the diurnal question.
     println!("\n  Band x midpoint over ALL layers, not F2 alone. The F2-only version of this");
     println!("  table has no legal daytime cell on any band: the E layer carries the daytime");
     println!("  corpus and filtering it out empties the day side. A band legal on BOTH sides");
@@ -666,19 +607,16 @@ pub(crate) fn report_confound_census(set: &Solved, effects: &StationEffects) {
         format!("{:<6} {}", band_label(c.freq_mhz), day(c))
     });
 
-    // THE cut this corpus has never been able to pose. Holding the band fixed
-    // answers the diurnal question; holding the LAYER fixed too is what separates
-    // the two candidate objects inside it:
+    // Holding the band fixed answers the diurnal question; holding the layer
+    // fixed too separates two explanations:
     //
     //   * if E-day and F2-day on one band are both elevated, the missing loss is
-    //     charged to a region both modes cross - the D region - and it is
-    //     absorption, whatever the mode selection does;
-    //   * if F2-day on that band is unbiased while E-day carries the excess, the
-    //     model is REPORTING a mode reality did not use, and no absorption term
-    //     will fix it.
+    //     in a region both modes cross (the D region), i.e. absorption;
+    //   * if F2-day is unbiased while E-day carries the excess, the model is
+    //     reporting a mode reality did not use, which no absorption term fixes.
     //
-    // Those need entirely different repairs and are worth the whole low-band
-    // daytime deficit, so nothing else in this report matters as much.
+    // They need different repairs and account for the whole low-band daytime
+    // deficit.
     println!("\n  Band x layer x midpoint. Frequency AND layer held fixed - the only cut that");
     println!("  separates 'the D region is under-charged' from 'the wrong mode was reported'.");
     table("band x layer x mid", &all, &|c| {
@@ -714,6 +652,23 @@ pub(crate) fn report_confound_census(set: &Solved, effects: &StationEffects) {
     });
 }
 
+/// How much absorption the model produces against solar zenith angle and
+/// frequency.
+///
+/// Absorption is the only diurnal term in the link budget and the dominant
+/// frequency-shaped one, moved by a single scale. If the residual's diurnal
+/// and frequency structures pull that scale in opposite directions, fitting it
+/// cannot help. The columns separate two failures:
+///
+/// * absorption barely varies with zenith angle: the diurnal signal is missing
+///   and the fix is in the absorption profile (a D region carrying little of
+///   the integral does this);
+/// * absorption varies, but less than the residual: the shape is present but
+///   too weak, as with alpha-Chapman `cos^0.5 chi` against the observed
+///   `cos^0.75 chi`, and the fix is in that law.
+///
+/// Restricted to F2, whose residual is otherwise unbiased, so layer selection
+/// does not contaminate it. Scored at the baseline scale of 1.0.
 pub(crate) fn report_absorption_range(set: &Solved) {
     println!("\n--- ABSORPTION'S DYNAMIC RANGE -----------------------------");
     println!("  Absorption is the only diurnal term in the link budget AND the dominant");
@@ -789,10 +744,9 @@ pub(crate) fn report_absorption_range(set: &Solved) {
     }
 
     // The corpus works low bands at night and high bands by day, so neither the
-    // zenith block nor the band block alone can say which of the two the residual
-    // belongs to. Crossing them is the only cut that separates them: a band
-    // present on both sides of the terminator answers it within itself, with
-    // frequency held fixed.
+    // zenith block nor the band block alone can say which the residual belongs
+    // to. Crossing them separates the two: a band present on both sides of the
+    // terminator answers it with frequency held fixed.
     println!(
         "\n  {:<18} {:>6} {:>22} {:>20}",
         "band x midpoint", "spots", "median absorption [dB]", "median residual [dB]"
@@ -838,28 +792,20 @@ pub(crate) fn report_absorption_range(set: &Solved) {
 ///
 /// A ray leaving at zero elevation and turning at height `h` lands at a ground
 /// range of `2 R acos(R / (R + h))` - the horizon limit for that reflection
-/// height. Every real path launches above zero and therefore falls SHORT of it,
-/// so the figure is a hard ceiling per hop and not a target.
+/// height. Real paths launch above zero and fall short of it, so it is a hard
+/// ceiling per hop.
 ///
 /// At the E layer's 105 km that ceiling is about 2300 km; at an F2 height of
-/// 300 km it is about 3800 km. So a single-hop E path over 2500 km is not a
-/// marginal case, it is impossible, and a solver reporting one has bridged the
-/// Earth's curvature.
+/// 300 km it is about 3800 km. A single-hop E path over 2500 km is impossible.
 ///
-/// # Why it would produce exactly the residual being chased
+/// # Why it matters
 ///
-/// The daytime residual is a near-constant 10-18 dB that is NOT proportional to
-/// the absorption applied - the correction needed is largest where the model
-/// absorbs least, which no scale and no `cos^n chi` law can produce. A missing
-/// HOP does produce it: each one omitted skips a ground reflection (3-6 dB over
-/// land) and two further transits of the D region, and it skips them as a lump
-/// rather than in proportion to anything.
-///
-/// And it is diurnal by construction, which is the part that matters here.
-/// Daytime paths reflect from E at ~105 km and night paths from F2 at ~300 km,
-/// so for the same ground range the day path needs roughly three times the hops.
-/// A solver that under-counts hops therefore under-charges daytime paths
-/// specifically, while leaving the night alone.
+/// The daytime residual is a near-constant 10-18 dB, not proportional to the
+/// absorption applied, which no scale or `cos^n chi` law can produce. A missing
+/// hop can: it skips a ground reflection (3-6 dB over land) and two D-region
+/// transits as a lump. It is also diurnal, because daytime paths reflect from
+/// E at ~105 km and night paths from F2 at ~300 km, so the day path needs about
+/// three times the hops for the same range.
 pub(crate) fn report_hop_geometry(set: &Solved) {
     println!("\n--- IS EVERY HOP GEOMETRICALLY POSSIBLE? -------------------");
     println!("  A ray turning at height h cannot exceed 2 R acos(R/(R+h)) of ground range in");
@@ -867,9 +813,8 @@ pub(crate) fn report_hop_geometry(set: &Solved) {
     println!("  reported path covers PER HOP, against that ceiling for its own layer.\n");
     let r = scenario::EARTH_RADIUS_M / 1000.0;
     // Nominal reflection heights. The apex is not carried on the cache, so these
-    // are the layers' own anchors - which is conservative for this test, because
-    // a real apex sits at or below the peak and the true ceiling is therefore
-    // LOWER than the one used here.
+    // are the layers' own anchors. That is conservative, because a real apex
+    // sits at or below the peak, so the true ceiling is lower.
     let height_km = |layer: &str| match layer {
         "E" => Anchors::default().ionosphere.e_peak_alt_km.value,
         "Es" => skipzone_app::sporadic_e::ES_HEIGHT_KM,
@@ -977,14 +922,12 @@ pub(crate) fn report_hop_geometry(set: &Solved) {
     }
 }
 
-/// Settle the station effects, the absorption scale and the global offset at ONE
-/// fixed set of noise anchors, exactly as the fit's alternation does, and return
+/// Settle the station effects, the absorption scale and the global offset at
+/// one fixed set of noise anchors, as the fit's alternation does, and return
 /// the objective there.
 ///
-/// No coordinate descent: the noise anchors are held where the caller put them.
-/// That is the point - it lets two candidate noise settings be compared on equal
-/// terms, each with its own best absorption scale and its own best effects, which
-/// is the only fair way to ask which one the data actually prefers.
+/// The noise anchors stay where the caller put them, so two candidate settings
+/// can be compared on equal terms, each with its own best scale and effects.
 pub(crate) fn settle_at(
     spots: &[Cached],
     atm: AtmosphericAnchors,
@@ -1014,23 +957,15 @@ pub(crate) fn settle_at(
     (scale, objective, effects)
 }
 
-/// Is the fit's answer actually better than leaving the noise model alone?
+/// Is the fit's answer better than leaving the noise model alone?
 ///
-/// # Why this has to be asked separately
+/// The bound-hit warnings and profiles describe the point the search stopped
+/// at. A coordinate profile only sees the local shape, so it cannot rule out a
+/// better minimum along a diagonal, where coordinate descent can be trapped.
 ///
-/// Every bound-hit warning, and the profile table beside it, describes the point
-/// the search STOPPED at. A coordinate profile varies one parameter with the
-/// others held at that point, so it can only see the local shape: it establishes
-/// that the search sits in a genuine minimum, and says nothing whatever about
-/// whether a better minimum exists in a diagonal direction. Coordinate descent
-/// with a pattern move is good at valleys aligned near the axes and can still be
-/// trapped by one that is not.
-///
-/// That distinction decides what the bound hits mean. If the prior noise anchors,
-/// each given their own best absorption scale and their own best station effects,
-/// score BETTER than the fitted ones, then the fit walked away from a good answer
-/// and the rails are a property of the search rather than of the physics. If they
-/// score worse, the pressure is real and the missing term is in the model.
+/// If the prior noise anchors, each with their own best scale and effects,
+/// score better than the fitted ones, the bound hits come from the search; if
+/// worse, the pressure is real and the missing term is in the model.
 ///
 /// The comparison is also run without the one-sided term, because the negatives
 /// pull hardest on paths carrying almost no absorption and can therefore move the
@@ -1085,29 +1020,21 @@ pub(crate) fn report_local_minimum_check(
     }
 }
 
-/// Whether each bound hit is a FINDING or an artefact of a flat objective.
+/// Whether each bound hit is a finding or an artefact of a flat objective.
 ///
-/// # Why a bound hit cannot be read from the fitted value alone
+/// A parameter reaches a bound in one of two ways, which
+/// [`skipzone_app::calib::Bounded::at_bound`] cannot tell apart:
 ///
-/// The report warns, on every bound hit, that the data wanting to leave a
-/// physical range means the residual comes from somewhere else in the model.
-/// That is true of ONE of the two ways a parameter reaches a bound, and
-/// [`skipzone_app::calib::Bounded::at_bound`] cannot tell them apart, because it sees only where the
-/// value landed:
+/// * the objective falls all the way to the edge, so the minimum lies outside
+///   the range, which is what the bound-hit warning describes;
+/// * the objective goes flat partway across the range and the descent keeps
+///   taking the last improving step, so the value on the bound means nothing.
 ///
-/// * the objective genuinely falls all the way to the edge, so the minimum is
-///   outside the range. That is the finding the warning describes;
-/// * the objective goes FLAT partway across the range, and a coordinate descent
-///   keeps taking the last improving step until it runs out of room. The value
-///   on the bound then carries no information at all, and the warning is
-///   describing evidence that does not exist.
+/// The second happens here: both night anchors set how far the atmospheric
+/// term sits under the P.372 man-made floor, and once it is buried they no
+/// longer change the composed noise.
 ///
-/// The second is not hypothetical here. Both night anchors act on the same
-/// quantity - how far the atmospheric term sits under the P.372 man-made floor -
-/// and once it is buried, moving them further changes the composed noise by
-/// nothing. Past that point the objective cannot distinguish any two values.
-///
-/// So the curve is what gets printed, not the endpoint. `flat %` is the fraction
+/// So the curve is printed, not just the endpoint. `flat %` is the fraction
 /// of the parameter's own range over which the objective stays within
 /// [`FLAT_TOLERANCE_DB`] of its best: a parameter flat over most of its range is
 /// unidentified there, and its landing on an edge is arithmetic, not evidence.
@@ -1163,7 +1090,7 @@ pub(crate) fn report_bound_profiles(
                 .min_by(|a, b| (a.0 - target).abs().total_cmp(&(b.0 - target).abs()))
                 .map_or(f64::NAN, |(_, o)| *o)
         };
-        // A parameter is only reported as a finding if it BOTH ends on a bound
+        // A parameter is reported as a finding only if it both ends on a bound
         // and has a real gradient there to have been pushed by.
         let verdict = if !b.at_bound() {
             "interior optimum"
@@ -1227,27 +1154,19 @@ pub(crate) fn report_bound_profiles(
 
 /// Can the model tell a path that decoded from one that did not?
 ///
-/// # Why this is the score the rest of the report cannot give
+/// RMS, slope and R2 are measured over decodes only, and a hit rate over
+/// decodes is one-sided. The false-positive rate is read at one threshold, so
+/// it mixes separation with where the threshold sits.
 ///
-/// Every headline here - RMS, slope, R2 - is measured over DECODES only, and a
-/// hit rate over decodes is one-sided by construction: a model that predicted
-/// every path would score perfectly. The false-positive rate fixes half of that
-/// but is read at one threshold, so it confounds the model's ability to SEPARATE
-/// the two populations with where the threshold happens to sit inside them.
+/// The area under the ROC curve is the probability that a random decode is
+/// predicted stronger than a random non-decode, over every threshold at once.
+/// It is invariant to any monotone shift of the predictions, including the
+/// global offset; 0.5 is chance and 1.0 perfect ordering. Poor separation means
+/// no level-like parameter can give a good false-positive rate, and the
+/// residual spread limits the model.
 ///
-/// The area under the ROC curve separates those. It is the probability that a
-/// randomly chosen decode is predicted stronger than a randomly chosen
-/// non-decode, taken over every threshold at once, so it is invariant to any
-/// monotone shift of the predictions - including the whole unattributable global
-/// offset. 0.5 is a coin toss; 1.0 is perfect ordering.
-///
-/// That invariance is the point. If the separation is poor, then no setting of a
-/// level-like parameter can produce a good false-positive rate, and the residual
-/// spread rather than the residual bias is what limits the model.
-///
-/// Both populations are restricted to the same station table, and the station
-/// effects are removed from both, so the comparison is of PHYSICS and not of
-/// which stations happened to appear on which side.
+/// Both populations use the same station table with station effects removed,
+/// so the comparison is of physics rather than of which stations appeared.
 pub(crate) fn report_skill(
     positives: &[Cached],
     negatives: &[Cached],

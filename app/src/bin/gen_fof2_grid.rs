@@ -1,12 +1,11 @@
 //! Regenerates `src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
 //!
-//! The table is data, bundled and checked in, so nothing is computed or fetched
-//! at runtime. This generator exists so that the data's provenance is a
-//! checked-in program rather than a pasted blob: run it and the file is
-//! reproduced exactly, and `fof2::tests::bundled_grid_matches_its_generator`
-//! fails if the two ever drift apart.
+//! The table is checked in, so nothing is computed or fetched at runtime. This
+//! generator records its provenance as a program: running it reproduces the
+//! file exactly, and `fof2::tests::bundled_grid_matches_its_generator` fails if
+//! the two drift apart.
 //!
-//! **The values are NOT CCIR, URSI or IRI coefficients.** See the provenance
+//! The values are not CCIR, URSI or IRI coefficients. See the provenance
 //! section of `crate::fof2`'s module documentation before using the numbers for
 //! anything.
 //!

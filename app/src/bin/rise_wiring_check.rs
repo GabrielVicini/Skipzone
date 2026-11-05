@@ -1,12 +1,11 @@
-//! Does `d_rise_fraction` actually reach a SOLVE?
+//! Does `d_rise_fraction` reach a solve?
 //!
-//! `bin/zenith_probe` proves the layer responds to the anchor. That is not the
-//! same as proving the anchor survives `Inputs -> resolve -> build_models ->
-//! solve`, and a calibration scan that reports no change is exactly what a
-//! silently-dropped anchor would also produce. So this solves one high-sun
-//! daytime path at several rise fractions and prints the absorption the solver
-//! actually charged. If those numbers move, the null result in the scan is a
-//! statement about the corpus; if they do not, it is a bug.
+//! `bin/zenith_probe` shows the layer responds to the anchor, but not that the
+//! anchor survives `Inputs -> resolve -> build_models -> solve`; a dropped
+//! anchor would also explain a calibration scan reporting no change. This
+//! solves one high-sun daytime path at several rise fractions and prints the
+//! absorption charged. If it moves, the scan's null result is about the
+//! corpus; if not, it is a bug.
 
 use skipzone_app::calib::Anchors;
 use skipzone_app::scenario::{self, Inputs};
@@ -75,21 +74,17 @@ fn main() {
     corpus_leverage(path, max);
 }
 
-/// How much LEVERAGE does the corpus have on the zenith law?
+/// How much leverage does the corpus have on the zenith law?
 ///
-/// The calibration scan reported no change at all across `f`, which has two
-/// very different explanations, and they must be told apart:
+/// The calibration scan reported no change across `f`. Either the corpus
+/// cannot see the law, or the 305-spot scan subsample contains almost none of
+/// the daytime low-band spots where it matters.
 ///
-///  * the corpus genuinely cannot see the law, or
-///  * the 305-spot scan subsample happens to contain almost none of the
-///    daytime low-band spots where the law has any effect.
-///
-/// The decisive quantity is not the mean shift in absorption - a fit refits the
-/// absorption scale and an offset, so anything common to every spot is absorbed
-/// exactly. It is the SPREAD of the per-spot shift. If changing `f` moves every
-/// spot by nearly the same number of dB, no fit can ever identify it. If the
-/// shift varies by several dB across the corpus, the law IS identifiable and a
-/// null result is an artefact of how few spots were looked at.
+/// The mean shift in absorption does not decide this, since a fit refits the
+/// absorption scale and an offset. The spread of the per-spot shift does: if
+/// every spot moves by nearly the same dB, no fit can identify `f`; if the
+/// shift varies by several dB, the law is identifiable and the null result
+/// comes from looking at too few spots.
 fn corpus_leverage(path: &str, max_spots: usize) {
     use skipzone_app::compute::{ComputePool, PoolConfig};
     use skipzone_app::corpus;
@@ -135,8 +130,8 @@ fn corpus_leverage(path: &str, max_spots: usize) {
     let none = solve_at(0.0);
 
     let mut deltas = Vec::new();
-    // The same delta split by band, which is the diagnostic that says what a
-    // corpus would have to CONTAIN for the law to be identifiable at all.
+    // The same delta split by band, showing what a corpus would need to contain
+    // for the law to be identifiable.
     let mut by_band: std::collections::BTreeMap<&'static str, Vec<f64>> = Default::default();
     for ((a, b), cs) in full.iter().zip(none.iter()).zip(spots.iter()) {
         if let (Some((abs1, _)), Some((abs0, _))) = (a, b) {

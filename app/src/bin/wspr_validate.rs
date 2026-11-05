@@ -5,7 +5,7 @@
 //! ```
 //!
 //! Reads a tab-separated spot list (timestamp, TX call, MHz, SNR, TX grid, dBm,
-//! RX call, RX grid, km), solves each spot through exactly the same chain the
+//! RX call, RX grid, km), solves each spot through the same chain the
 //! GUI's RUN TRACE uses, and reports modelled minus measured SNR per spot plus
 //! the median error, the spread and the hit rate over the paths that closed.
 //!
@@ -14,9 +14,8 @@
 //! the antennas at both ends are assumed rather than known, and the database
 //! records only successes - so the hit rate cannot see false positives.
 //!
-//! Exit status is 0 whenever the run completed. This reports a measurement; it
-//! is not a pass/fail gate, and inventing a threshold for it here would just be
-//! a number nobody chose.
+//! Exit status is 0 whenever the run completed. This reports a measurement and
+//! has no pass/fail threshold.
 
 use std::process::ExitCode;
 

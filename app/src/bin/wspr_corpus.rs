@@ -5,22 +5,20 @@
 //!     --from 2026-07-02 --days 7 --out corpus/fit.tsv --neg corpus/fit_neg.tsv
 //! ```
 //!
-//! Fetching is separated from fitting on purpose. The scoring query in
-//! `wsprlive::Query` samples with `ORDER BY rand()`, so fitting against a live
-//! query optimises against a moving target - a parameter change and a resample
-//! are indistinguishable in the result. This writes a file; the fit reads it.
+//! Fetching is separate from fitting because the scoring query in
+//! `wsprlive::Query` samples with `ORDER BY rand()`, so a parameter change and
+//! a resample would look the same. This writes a file; the fit reads it.
 //!
 //! What the run does, in order:
 //!
 //! 1. Walks a schedule of (day, hour, band) windows, so the corpus spans the
-//!    diurnal cycle - which is what identifies the D region's zenith-angle
-//!    dependence - and spans 1.8 to 28 MHz, which is what identifies the
-//!    frequency dependence of absorption.
+//!    diurnal cycle (identifying the D region's zenith-angle dependence) and
+//!    1.8 to 28 MHz (identifying the frequency dependence of absorption).
 //! 2. Counts what the hygiene filters removed, per window, and reports it.
-//! 3. Fetches the observed sunspot number PER DAY, not once for the whole span.
-//! 4. De-duplicates, cross-checks each spot's distance against the great circle
-//!    the solver itself computes, and drops stations too rare to carry a fixed
-//!    effect - reporting the size of each cut.
+//! 3. Fetches the observed sunspot number per day.
+//! 4. De-duplicates, cross-checks each spot's distance against the solver's
+//!    great circle, and drops stations too rare to carry a fixed effect,
+//!    reporting the size of each cut.
 //! 5. Builds a negatives set from full cycle censuses: paths that were attempted
 //!    and did not decode. See `corpus`'s module docs for what that can mean.
 //!
@@ -38,20 +36,19 @@ use skipzone_app::wsprlive::{
 };
 use skipzone_app::{grid, scenario};
 
-/// UTC hours the NEGATIVES schedule walks. Es occurrence and D-region absorption
-/// both vary strongly through the day, so a negatives set drawn from one hour
-/// would measure the false-positive rate of one ionosphere.
+/// UTC hours the negatives schedule walks. Es occurrence and D-region
+/// absorption vary strongly through the day, so negatives from one hour would
+/// measure the false-positive rate of one ionosphere.
 ///
-/// The POSITIVES no longer need this: each query covers a whole UTC day, and the
-/// deterministic hash ordering samples uniformly across it, so all 24 hours are
-/// represented without asking for them one at a time.
+/// The positives do not need this: each query covers a whole UTC day and the
+/// hash ordering samples uniformly across it.
 const SCHEDULE_HOURS: [u32; 8] = [0, 3, 6, 9, 12, 15, 18, 21];
 
 /// Band centres to target explicitly, MHz - the WSPR dial frequencies.
 ///
 /// A whole-archive sample follows real activity and returns almost nothing on
-/// 160 m or 10 m. The absorption model's frequency dependence is exactly what a
-/// two-band corpus cannot test, so the quiet bands are asked for by name.
+/// 160 m or 10 m, and a two-band corpus cannot test the frequency dependence of
+/// absorption, so the quiet bands are asked for by name.
 const BANDS_MHZ: [f64; 10] = [
     1.836, 3.568, 5.364, 7.038, 10.138, 14.095, 18.104, 21.094, 24.924, 28.124,
 ];
@@ -170,12 +167,11 @@ fn num(s: &str) -> Result<f64, String> {
         .map_err(|e| format!("bad number {s:?}: {e}"))
 }
 
-/// The great-circle range the SOLVER computes for a spot, km.
+/// The great-circle range the solver computes for a spot, km.
 ///
-/// Used for the archive-distance cross-check and for the negatives' range
-/// window. Deliberately the solver's own function rather than an independent
-/// great circle: the point is to confirm the archive agrees with the geometry the
-/// model will actually trace, not to test two implementations against each other.
+/// Used for the archive-distance cross-check and the negatives' range window.
+/// It uses the solver's own function so the check confirms the archive agrees
+/// with the geometry the model traces.
 fn solved_km(spot: &WsprSpot) -> f64 {
     let tx = scenario::ground_point(spot.tx_lat, spot.tx_lon);
     let rx = scenario::ground_point(spot.rx_lat, spot.rx_lon);
@@ -193,10 +189,9 @@ fn run(args: &Args) -> Result<(), String> {
         days.len(),
     );
 
-    // ---------------------------------------------------------------- SSN
-    // Per DAY, not one value for the span: a week spans real changes in solar
-    // activity, and scoring all of it against one number charges the model for
-    // an input error it did not make.
+    // SSN
+    // Per day: a week spans real changes in solar activity, and one number would
+    // charge the model for an input error.
     let mut ssn_for_day: BTreeMap<(i32, u32, u32), Ssn> = BTreeMap::new();
     for &d in &days {
         let ssn = match args.ssn_override {
@@ -213,15 +208,13 @@ fn run(args: &Args) -> Result<(), String> {
         ssn_for_day.insert(d, ssn);
     }
 
-    // ------------------------------------------------- who to draw spots from
+    // Who to draw spots from
     //
-    // A uniform sample of the whole archive cannot support a fixed-effects
-    // model: measured on one day, 224 uniformly-drawn spots spanned 173
-    // stations, and requiring MIN_SPOTS_PER_STATION removed every one of them.
-    // So the corpus is drawn from the busiest stations, which is the only way
-    // the station effects are identified at all - and which biases the corpus
-    // towards the better-equipped end of the network. That cost is reported here
-    // and again with the station-effect distribution, never absorbed silently.
+    // A uniform sample cannot support a fixed-effects model: on one day, 224
+    // uniformly-drawn spots spanned 173 stations, and requiring
+    // MIN_SPOTS_PER_STATION removed all of them. So the corpus is drawn from the
+    // busiest stations, which biases it towards the better-equipped end of the
+    // network; that is reported here and with the station-effect distribution.
     let census_date = fmt_day(days[days.len() / 2]);
     let busiest = BusiestFilter {
         census_date: census_date.clone(),
@@ -233,10 +226,9 @@ fn run(args: &Args) -> Result<(), String> {
     };
     println!("\nRanking stations over {} ...", census_day.describe());
     // The ranking is applied inside the data query as a subquery (500 callsigns
-    // in an IN clause makes a URL the endpoint rejects with HTTP 414). It is ALSO
-    // fetched as a list here, purely so the run can report how many stations it
-    // found and show the top of each end - a restriction that cannot be seen is
-    // a restriction that gets forgotten.
+    // in an IN clause makes a URL the endpoint rejects with HTTP 414). It is
+    // also fetched as a list here so the run can report how many stations it
+    // found and show the top of each end.
     let top_tx = wsprlive::busiest_stations(
         &census_day,
         args.min_km,
@@ -282,23 +274,17 @@ fn run(args: &Args) -> Result<(), String> {
     println!("  in the network. Every station effect below therefore describes the ACTIVE");
     println!("  CORE of WSPR, not its median member.");
 
-    // ---------------------------------------------------------------- fetch
+    // Fetch
     let mut raw: Vec<CorpusSpot> = Vec::new();
     let mut census = HygieneCensus::default();
     let mut parse_problems = 0usize;
     let mut queries = 0usize;
     println!("\nFetching...");
 
-    // ONE query per (day, band) over the WHOLE day, rather than one per
-    // (day, hour, band).
-    //
-    // Two measured reasons. First, the station-ranking subquery costs about 7
-    // seconds per query against this endpoint, so 88 queries a day took ten
-    // minutes; ten queries a day take one. Second, and more important, the
-    // deterministic `cityHash64` ordering samples uniformly across whatever window
-    // it is given, so a whole-day window already spreads the sample over all 24
-    // hours - the diurnal coverage the D-region zenith law needs comes free, and
-    // asking for each hour separately bought nothing but queries.
+    // One query per (day, band) over the whole day rather than per hour. The
+    // station-ranking subquery costs about 7 seconds per query, and the
+    // `cityHash64` ordering samples uniformly across the window, so a whole-day
+    // query already covers all 24 hours.
     for &d in &days {
         let ssn = &ssn_for_day[&d];
         let window = Window::Day {
@@ -351,7 +337,7 @@ fn run(args: &Args) -> Result<(), String> {
         println!("  {parse_problems} unreadable row(s), reported not skipped");
     }
 
-    // ------------------------------------------------------- what was excluded
+    // What was excluded
     println!("\n--- WHAT THE HYGIENE FILTERS REMOVED -----------------------");
     println!("  (counted over the unrestricted draws only; the tests overlap, so");
     println!("   these explain the cut rather than partitioning it)\n");
@@ -392,7 +378,7 @@ fn run(args: &Args) -> Result<(), String> {
         pct(census.kept)
     );
 
-    // ---------------------------------------------------------------- clean
+    // Clean
     let before = raw.len();
     let (cleaned, mut rej) = corpus::clean(raw, solved_km);
     let spots = corpus::require_identifiable_stations(cleaned, &mut rej);
@@ -404,7 +390,7 @@ fn run(args: &Args) -> Result<(), String> {
 
     describe_corpus(&spots);
 
-    // ---------------------------------------------------------------- write
+    // Write
     let provenance = format!(
         "Skipzone WSPR calibration corpus\n\
          span {} to {} UTC, one whole-day deterministic sample per band\n\
@@ -444,7 +430,7 @@ fn run(args: &Args) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", args.out))?;
     println!("\nWROTE    {} ({} spots)", args.out, spots.len());
 
-    // ---------------------------------------------------------------- negatives
+    // Negatives
     if let Some(path) = &args.neg {
         let negatives = build_negatives(args, &days, &ssn_for_day)?;
         if negatives.is_empty() {
@@ -564,7 +550,7 @@ fn report_rejections(before: usize, after: usize, rej: &Rejections) {
     }
 }
 
-/// What the corpus actually contains, as opposed to what was asked for.
+/// What the corpus contains, as opposed to what was asked for.
 fn describe_corpus(spots: &[CorpusSpot]) {
     println!("\n--- WHAT THE CORPUS CONTAINS -------------------------------");
     println!(

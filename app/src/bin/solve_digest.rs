@@ -1,24 +1,16 @@
 //! A stable fingerprint of everything `solve()` produces, over a scenario grid.
 //!
-//! # Why this exists
+//! Every calibrated number in this project was fitted against solver output,
+//! so a change meant to affect only performance must leave the solution set
+//! untouched. Run this before and after the change and diff the output: a
+//! byte-identical result shows no reported ray moved, so the WSPR calibration
+//! (a 40-minute re-fit) stays valid.
 //!
-//! The solver is about to be made faster by NOT tracing rays that cannot
-//! possibly reach the target. That is only safe if it changes which rays are
-//! skipped and nothing else - and "nothing else" has to be demonstrated, not
-//! asserted, because every calibrated number in this project was fitted against
-//! solver output. If the solution set moves, the calibration silently stops
-//! describing the model it was fitted to.
-//!
-//! So: run this BEFORE the change, keep the output, run it AFTER, and diff. A
-//! byte-identical diff is a proof that no reported ray moved, which means the
-//! WSPR calibration does not need re-running to stay valid. That is the whole
-//! point - a 40-minute re-fit is a poor substitute for an exact comparison.
-//!
-//! The grid deliberately covers the geometries where an elevation window is most
-//! likely to clip something real: very short paths that need steep launches, very
-//! long paths that need grazing ones, the skip zone where the low and high rays
-//! meet, multi-hop, both magnetoionic modes, day and night, and the sporadic-E
-//! stack, whose thin sheet reflects at an altitude no F-layer window would expect.
+//! The grid covers the geometries most likely to expose a clipped ray: very
+//! short paths that need steep launches, very long paths that need grazing
+//! ones, the skip zone where the low and high rays meet, multi-hop, both
+//! magnetoionic modes, day and night, and the sporadic-E stack, whose thin
+//! sheet reflects lower than any F layer.
 //!
 //! Run:
 //! ```text
@@ -121,10 +113,9 @@ fn main() -> ExitCode {
                                 s.free_space_loss_db,
                                 s.ground_reflection_loss_db,
                                 s.link.snr_db,
-                                // The apex is the sharpest single check that a ray
-                                // is the SAME ray: an elevation window that clipped
-                                // the high ray and left the low one would keep the
-                                // count and the layer and move this.
+                                // The apex is the sharpest check that a ray is the
+                                // same ray: losing the high ray but keeping the low
+                                // one would keep the count and layer but move this.
                                 s.hop_details.first().map_or(f64::NAN, |h| h.apex_alt_km),
                             );
                         }

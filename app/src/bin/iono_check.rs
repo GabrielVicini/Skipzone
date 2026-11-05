@@ -1,25 +1,18 @@
 //! Validate the ionosphere model against measured ionosonde characteristics.
 //!
-//! # Why this exists
+//! The WSPR calibrator sits on top of the ionosphere model, so the model's
+//! foF2 and foE should be checked against measurement first. The bundled
+//! `app/src/assets/fof2_grid.tsv` comes from [`fof2::climatology_fof2`], an
+//! order-of-magnitude climatology calibrated only to [`fof2::fof2_from_ssn`],
+//! not CCIR, URSI or IRI data.
 //!
-//! Everything the WSPR calibrator does sits on top of the ionosphere model, and
-//! the largest block of that model has never been checked against a measurement.
-//! `app/src/assets/fof2_grid.tsv` says so in its own header: its LAYOUT is the
-//! operational one, but its VALUES come from [`fof2::climatology_fof2`], an
-//! order-of-magnitude climatology calibrated only to [`fof2::fof2_from_ssn`]. It
-//! is not CCIR, not URSI, not IRI. Calibrating loss terms against WSPR while the
-//! layer underneath them is a guess is optimising the wrong thing.
+//! Ionosondes measure foF2 and foE directly, with none of WSPR's
+//! identification problems (unknown antennas and noise floors, fading, station
+//! effects, decode threshold), so this is a direct measurement of model error
+//! in MHz.
 //!
-//! Ionosondes measure foF2 and foE directly. They have none of WSPR's
-//! identification problems - no unknown antennas, no unknown noise floor, no
-//! fading, no station effects, no decode threshold - so the comparison here is a
-//! straight measurement of model error in MHz, with nothing absorbed and nothing
-//! fitted.
-//!
-//! # What it does NOT do
-//!
-//! It does not fit anything. It reports error. Anything that looks like a
-//! correction belongs in a separate, deliberate change with its own test.
+//! It fits nothing and only reports error; corrections belong in a separate
+//! change with its own test.
 //!
 //! # Data
 //!
@@ -61,8 +54,8 @@ struct Obs {
     foe: Option<f64>,
     /// Daily sunspot number for this observation's own date.
     ssn: f64,
-    /// Centred twelve-month mean of the daily series, i.e. R12 - the index the
-    /// CCIR maps are actually tabulated against - where the series covers
+    /// Centred twelve-month mean of the daily series, i.e. R12, the index the
+    /// CCIR maps are tabulated against, where the series covers
     /// enough of the window to form one. See [`smoothed_ssn`].
     r12: f64,
     /// Days of daily SSN that went into `r12`, out of the 365 the window asks
@@ -85,8 +78,7 @@ impl Obs {
 /// Every foF2 backend's answer for one observation, computed once.
 ///
 /// Computed once because the cuts below re-bin the same numbers several ways,
-/// and rebuilding a `Fof2Plane` per observation per cut is what made this tool
-/// slow enough that adding a fourth backend would have been unpleasant.
+/// and rebuilding a `Fof2Plane` per observation per cut is slow.
 struct Models {
     /// The bundled grid: what a real solve samples.
     grid: f64,
@@ -95,15 +87,14 @@ struct Models {
     /// CCIR, driven by the same daily SSN the other two get. This is the fair
     /// head-to-head: same driver, same observation, different map.
     ccir: f64,
-    /// CCIR, driven by R12 - the index it is actually tabulated against.
+    /// CCIR, driven by R12, the index it is tabulated against.
     ccir_r12: f64,
     /// CCIR driven by R12 converted back to the sunspot scale the maps were
-    /// FITTED on. See [`SSN_V2_OVER_V1`]: this is a unit conversion, not a
-    /// calibration knob.
+    /// fitted on. See [`SSN_V2_OVER_V1`]: a unit conversion, not a calibration.
     ccir_r12_v1: f64,
     /// CCIR on the day's own sunspot number, converted to the maps' scale.
-    /// This is the combination the APP could actually run: `spaceweather` gives
-    /// it an observed daily number and never a twelve-month mean.
+    /// This is what the app can run: `spaceweather` gives it an observed daily
+    /// number, not a twelve-month mean.
     ccir_daily_v1: f64,
 }
 
@@ -122,7 +113,7 @@ impl Models {
 }
 
 /// Running error accumulator: everything is reported in MHz, signed as
-/// `model - measured`, so POSITIVE means the model reads HIGH.
+/// `model - measured`, so positive means the model reads high.
 #[derive(Default)]
 struct Err2 {
     n: usize,
@@ -153,14 +144,14 @@ impl Err2 {
         self.my += model * measured;
     }
 
-    /// Standard deviation of the MODEL's own values.
+    /// Standard deviation of the model's own values.
     #[allow(clippy::cast_precision_loss)]
     fn sd_model(&self) -> f64 {
         let n = self.n as f64;
         (self.mm / n - (self.mdl / n).powi(2)).max(0.0).sqrt()
     }
 
-    /// Standard deviation of the MEASUREMENTS, i.e. how much there was to
+    /// Standard deviation of the measurements, i.e. how much there was to
     /// explain.
     #[allow(clippy::cast_precision_loss)]
     fn sd_measured(&self) -> f64 {
@@ -187,10 +178,8 @@ impl Err2 {
     fn mean_measured(&self) -> f64 {
         self.meas / self.n as f64
     }
-    /// Median of the ABSOLUTE error. Not `|median error|`: those differ by the
-    /// whole point of the statistic, and an earlier version of this printed the
-    /// second under the first's name, which made a heavy-tailed error look like a
-    /// near-perfect fit.
+    /// Median of the absolute error, which differs from `|median error|`; the
+    /// latter would make a heavy-tailed error look like a near-perfect fit.
     fn median_abs(&mut self) -> f64 {
         let mut v: Vec<f64> = self.abs.iter().map(|e| e.abs()).collect();
         v.sort_by(f64::total_cmp);
@@ -360,7 +349,7 @@ fn main() -> ExitCode {
         }
     };
 
-    // ---------------------------------------------------------------- foF2
+    // FoF2
     println!("\n--- foF2: THE HEADLINE ------------------------------------");
     println!("  The app's two backends - the bundled GRID (what a real run samples) and the");
     println!("  CLIMATOLOGY that generated it, which are supposed to agree - against the CCIR");
@@ -460,7 +449,7 @@ fn main() -> ExitCode {
         |o| o.station.clone(),
     );
 
-    // ----------------------------------------------------------------- foE
+    // FoE
     //
     // foE is reported only when the E layer is detectable, which is essentially
     // daytime, so this cut is day-only whether or not it says so.
@@ -550,17 +539,15 @@ fn main() -> ExitCode {
 }
 
 /// Search the diurnal shape and the foE anchor for the values that minimise RMS
-/// against these soundings, and PRINT them.
+/// against these soundings, and print them.
 ///
-/// Deliberately does not write anything back. Moving a constant in `fof2.rs` is a
-/// deliberate edit with a test attached and a grid regeneration behind it; a tool
-/// that silently retunes the model is how a model stops being inspectable.
+/// Nothing is written back: changing a constant in `fof2.rs` is a manual edit
+/// with a test and a grid regeneration.
 ///
 /// The search is coordinate descent with a shrinking step, restarted once from
-/// the best point. Five parameters against ten thousand observations is not a
-/// hard optimisation, and the profile is printed so a flat direction is visible
-/// rather than hidden - the same discipline the WSPR calibrator uses for its
-/// bound hits.
+/// the best point. Five parameters against ten thousand observations is an easy
+/// problem, and the profile is printed so a flat direction is visible, as the
+/// WSPR calibrator does for its bound hits.
 fn propose(obs: &[Obs], quiet: f64, big_x: f64) {
     println!("\n--- PROPOSED CONSTANTS -------------------------------------");
     println!("  Values that minimise RMS against these soundings. NOT applied: paste them into");
@@ -630,11 +617,10 @@ fn propose(obs: &[Obs], quiet: f64, big_x: f64) {
         ),
     ];
 
-    // Is the model OVER-DISPERSED? This decides whether a level scale below 1 is
-    // a finding or a trap. Shrinking any over-dispersed predictor towards its own
-    // mean always lowers RMS, and for a propagation model that is a bad trade: it
-    // buys the metric by lowering every MUF, closing paths that are in fact open.
-    // So the spread is reported before any scale is proposed.
+    // Is the model over-dispersed? Shrinking an over-dispersed predictor towards
+    // its mean always lowers RMS, but for a propagation model it lowers every
+    // MUF and closes open paths, so a level scale below 1 may be a trap. The
+    // spread is reported before any scale is proposed.
     #[allow(clippy::cast_precision_loss)]
     let n = obs.len() as f64;
     let d = DiurnalShape::default();
@@ -745,13 +731,11 @@ fn propose(obs: &[Obs], quiet: f64, big_x: f64) {
 
 /// Daily sunspot number by date, from the SILSO daily series (`--ssn=PATH`).
 ///
-/// The seasonal windows sit months apart on the solar cycle. Driving them all at
-/// one SSN would charge the model for that cycle and call the difference model
-/// error, which is the same confound as fitting a diurnal shape in one season.
+/// The seasonal windows sit months apart on the solar cycle, and one SSN for
+/// all of them would count the solar cycle as model error.
 ///
-/// A missing file is survivable - every observation falls back to the corpus
-/// median - but it changes what the run measures, so it is reported rather than
-/// swallowed.
+/// A missing file falls back to the corpus median for every observation, which
+/// changes what the run measures, so it is reported.
 fn ssn_daily(path: &str) -> BTreeMap<(i32, u32, u32), f64> {
     let mut out = BTreeMap::new();
     let text = match std::fs::read_to_string(path) {
@@ -787,8 +771,7 @@ fn ssn_daily(path: &str) -> BTreeMap<(i32, u32, u32), f64> {
 /// Median SSN over the WSPR corpus, used only for dates SILSO has not published
 /// a daily value for yet - its series lags real time by about a month.
 ///
-/// The 90.0 fallback is a mid-cycle guess and nothing more. If it is being used
-/// the run says so, because an SSN nobody chose is not a detail.
+/// The 90.0 fallback is a mid-cycle guess; the run says when it is used.
 const SSN_FALLBACK: f64 = 90.0;
 
 fn corpus_ssn(path: &str) -> f64 {
@@ -840,17 +823,13 @@ const CUT_BACKENDS: [usize; 3] = [0, 4, 5];
 /// replaced in July 2015. The recalibration multiplied the whole historical
 /// record by about this factor.
 ///
-/// It matters here because the two ends of the calculation are on different
-/// scales and nothing in between says so. `corpus/ssn_daily.tsv` is
-/// `SN_d_tot_V2.0.csv`, i.e. version 2. The CCIR maps were fitted in 1966
-/// against R12 on the version 1 scale, and their `R12 = 100` page means
-/// version 1's hundred. Feeding a version 2 number straight in is a unit
-/// error worth roughly a third of the solar term.
+/// `corpus/ssn_daily.tsv` is `SN_d_tot_V2.0.csv`, i.e. version 2, while the
+/// CCIR maps were fitted in 1966 against R12 on the version 1 scale. Feeding a
+/// version 2 number straight in is a unit error worth roughly a third of the
+/// solar term.
 ///
-/// This is a CONVERSION with a citable provenance, not a fitted coefficient,
-/// and it is applied to the driver rather than to the model's output - a scale
-/// on the output would be a level fudge and would say nothing about which of
-/// the two scales was wrong.
+/// This is a published conversion, not a fitted coefficient, and it is applied
+/// to the driver rather than to the model's output.
 const SSN_V2_OVER_V1: f64 = 1.44;
 
 /// Every backend's foF2, for every observation, computed once.
@@ -858,7 +837,7 @@ fn evaluate(obs: &[Obs], grid: &Fof2Grid) -> Vec<Models> {
     // The grid collapses to a plane per (season, SSN) pair, and the corpus has
     // far fewer distinct pairs than observations; CCIR collapses to a plane per
     // (month, UT, R12). Neither is cached here - the planes are cheap next to
-    // the parse - but the CCIR month IS parsed once per process, by OnceLock.
+    // the parse - but the CCIR month is parsed once per process, by OnceLock.
     obs.iter()
         .map(|o| {
             let season = o.season();
@@ -932,12 +911,11 @@ fn day_number(y: i32, m: u32, d: u32) -> i64 {
 }
 
 /// Centred mean of the daily sunspot series about a day, and how many days of
-/// the window were actually available.
+/// the window were available.
 ///
-/// This is R12 in intent. It is R12 in fact only where the window is complete;
-/// near the end of the published series it is a truncated mean, which on a
-/// sloping cycle is biased rather than merely noisy, so the count is returned
-/// and reported rather than swallowed.
+/// This is R12 only where the window is complete. Near the end of the
+/// published series it is a truncated mean, biased on a sloping cycle, so the
+/// count is returned and reported.
 fn smoothed_ssn(by_day: &BTreeMap<i64, f64>, day: i64) -> (f64, usize) {
     #[allow(clippy::cast_possible_wrap)]
     let half = SMOOTH_WINDOW_DAYS as i64 / 2;

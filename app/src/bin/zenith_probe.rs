@@ -1,28 +1,26 @@
-//! Probe: what solar-zenith law does the D region ACTUALLY produce?
+//! Probe: what solar-zenith law does the D region produce?
 //!
-//! `mode_audit` measures the exponent end-to-end, through a traced ray, and
-//! reports an effective `cos^1.3..1.5 chi`. That is the right measurement to
-//! believe, but it cannot say WHERE the exponent comes from, because a ray
-//! carries geometry, the E layer and the noise model along with it.
+//! `mode_audit` measures the exponent through a traced ray and reports an
+//! effective `cos^1.3..1.5 chi`, but a ray also carries geometry, the E layer
+//! and the noise model, so it cannot say where the exponent comes from.
 //!
-//! This probe strips all of that away. It integrates the non-deviative
-//! absorption kernel `Ne nu / (omega^2 + nu^2)` up a VERTICAL column through
-//! the real `SolarChapmanLayer` and the real `ExponentialCollisions`, at a
-//! series of solar zenith angles, and fits `log A` against `log cos chi`. No
-//! ray, no geometry, no other layer - so whatever exponent comes out is the
-//! layer's own, and the difference from `mode_audit` is the geometry's.
+//! This probe integrates the non-deviative absorption kernel
+//! `Ne nu / (omega^2 + nu^2)` up a vertical column through `SolarChapmanLayer`
+//! and `ExponentialCollisions` at a series of solar zenith angles, and fits
+//! `log A` against `log cos chi`. The exponent is the layer's own; the
+//! difference from `mode_audit` is the geometry's.
 //!
-//! It then sweeps the two scale heights, because the algebra says the exponent
-//! is not a free parameter at all:
+//! It then sweeps the two scale heights, because the algebra fixes the
+//! exponent:
 //!
 //! * an alpha-Chapman layer's realised peak is `Nm Ch^{-1/2}`, contributing 1/2;
-//! * that peak RISES by `H_D ln Ch`, and `nu` falls on `H_nu`, so the collision
-//!   frequency at the peak is down by `Ch^{-H_D/H_nu}`, contributing `H_D/H_nu`.
+//! * that peak rises by `H_D ln Ch` while `nu` falls on `H_nu`, so the
+//!   collision frequency at the peak is down by `Ch^{-H_D/H_nu}`, contributing
+//!   `H_D/H_nu`.
 //!
 //! With `Ch -> sec chi` away from the terminator that predicts
-//! `A ~ cos^(1/2 + H_D/H_nu) chi`. If the sweep reproduces that line, the
-//! exponent is a DERIVED consequence of two anchors rather than something a fit
-//! can chase, and the bounds on those anchors bound the exponent.
+//! `A ~ cos^(1/2 + H_D/H_nu) chi`. If the sweep reproduces it, the bounds on
+//! the two anchors bound the exponent.
 
 use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
 use skipzone::density::ElectronDensity;
@@ -37,9 +35,9 @@ const H_LO_KM: f64 = 40.0;
 const H_HI_KM: f64 = 140.0;
 const STEP_M: f64 = 25.0;
 
-/// Zenith angles the exponent is fitted over, degrees. Deliberately stops short
-/// of the terminator: `Ch` departs from `sec chi` past ~75 deg, so a fit that
-/// included 85 deg would be measuring the grazing correction, not the law.
+/// Zenith angles the exponent is fitted over, degrees. Stops short of the
+/// terminator, where `Ch` departs from `sec chi` (past ~75 deg) and a fit would
+/// measure the grazing correction instead of the law.
 const FIT_CHI_DEG: [f64; 8] = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0];
 
 /// The vertical absorption integral at one solar zenith angle, arbitrary units.
@@ -157,7 +155,7 @@ fn main() {
         println!("  {f_mhz:6.3} MHz  n = {n:.4}");
     }
 
-    // The claim under test: n is set by the RATIO of the two scale heights.
+    // The claim under test: n is set by the ratio of the two scale heights.
     println!("\n=== SWEEP: is n really 1/2 + H_D/H_nu ? ===");
     println!("   H_D   H_nu   ratio   n(measured)  n(predicted)   err");
     let mut worst = 0.0f64;
@@ -176,7 +174,7 @@ fn main() {
     }
     println!("\n  worst |measured - predicted| = {worst:.4}");
 
-    // What the calibration is ALLOWED to reach, given calib.rs's bounds.
+    // What the calibration can reach within calib.rs's bounds.
     println!("\n=== WHAT THE BOUNDS ADMIT ===");
     let ion = skipzone_app::calib::Anchors::default().ionosphere;
     let (d_lo, d_hi) = (ion.d_scale_height_km.min, ion.d_scale_height_km.max);
@@ -199,12 +197,10 @@ fn main() {
          because Nm Ch^-1/2 alone is worth exactly 1/2."
     );
 
-    // If no anchor setting can reach the target, the shape has to change. The
-    // cheapest defensible change is already half-present in the model: a
-    // chi-INDEPENDENT ionisation component. Cosmic rays and scattered
-    // Lyman-alpha on NO are exactly that, and `D_REGION_NIGHT_FLOOR_FRACTION`
-    // already names them - but it is applied as `max`, so in daylight it is
-    // swamped and contributes nothing to the law.
+    // If no anchor setting reaches the target, the shape must change. One
+    // option is a chi-independent ionisation component (cosmic rays and
+    // scattered Lyman-alpha on NO). `D_REGION_NIGHT_FLOOR_FRACTION` models
+    // these, but as a `max`, so in daylight it contributes nothing to the law.
     println!("\n=== A CHI-INDEPENDENT COMPONENT: max (shipping) vs + (physics) ===");
     println!("  frac    n(max, shipping)   n(additive)");
     for frac in [0.0f64, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50] {
@@ -265,10 +261,9 @@ fn main() {
         scenario::D_REGION_NIGHT_FLOOR_FRACTION
     );
 
-    // The decisive statement: the SMALLEST exponent reachable anywhere inside
-    // the calibration's own three-parameter box. If the target sits outside it,
-    // no fit can ever find it and every run that pushed these anchors to their
-    // bounds was reporting exactly that - which `calib.rs` says is a finding.
+    // The smallest exponent reachable inside the calibration's three-parameter
+    // box. If the target is outside it, no fit can find it, and fits pushing
+    // these anchors to their bounds are reporting that.
     println!("\n=== THE SMALLEST n THE CALIBRATION BOX CONTAINS ===");
     let f_hi = ion.d_night_floor_fraction.max;
     println!("  corner: H_D = {d_lo} km, H_nu = {v_hi} km, night floor = {f_hi} (all at bound)");
@@ -295,9 +290,9 @@ fn main() {
          any of them."
     );
 
-    // The anchor added for exactly this: how much of the photochemical peak
-    // RISE the profile takes. It is the only knob that reaches the exponent,
-    // because it is the only one that changes the layer's SHAPE.
+    // How much of the photochemical peak rise the profile takes: the only
+    // anchor that changes the layer's shape, and so the only one that reaches
+    // the exponent.
     println!("\n=== d_rise_fraction: THE KNOB THAT DOES REACH THE EXPONENT ===");
     println!("  derived law: n = 1/2 + f H_D/H_nu   (f = 1 is the textbook layer)\n");
     println!("     f    n(measured)   n(derived)     err");
@@ -312,9 +307,9 @@ fn main() {
     }
     println!("\n  worst |measured - derived| over f = {worst_f:.4}");
 
-    // The value the literature exponent implies. NOT applied as the default:
-    // it has not been fitted against the corpus, and this project does not move
-    // a shape anchor on the strength of one literature number.
+    // The value the literature exponent implies. Not the default: it has not
+    // been fitted against the corpus, and one literature number is not enough
+    // to move a shape anchor.
     let (mut lo_r, mut hi_r) = (0.0f64, 1.0f64);
     for _ in 0..60 {
         let mid = 0.5 * (lo_r + hi_r);
@@ -343,15 +338,15 @@ fn main() {
     bench_branches();
 }
 
-/// The column integral with a chi-INDEPENDENT ionisation component of
+/// The column integral with a chi-independent ionisation component of
 /// `frac * Nm` combined two ways: as the shipping `max` (a lower bound), and as
 /// a `+` (two independent sources adding, which is what they physically are).
 ///
-/// Cosmic-ray ionisation and scattered Lyman-alpha on NO do not switch off in
-/// daylight - they are simply swamped near the peak. `max` hides them until the
-/// sunlit layer falls below them, which is why the shipping night floor does
-/// nothing at all to the daytime law. Summing is the physics; the question this
-/// answers is how large the component has to be to bend the exponent.
+/// Cosmic-ray ionisation and scattered Lyman-alpha on NO continue in daylight
+/// but are swamped near the peak. `max` hides them until the sunlit layer falls
+/// below them, so the shipping night floor does not affect the daytime law.
+/// Summing is the physics; this shows how large the component must be to bend
+/// the exponent.
 fn column_with_floor(
     coll: &ExponentialCollisions,
     omega: f64,
@@ -380,9 +375,8 @@ fn column_with_floor(
         0.0,
     );
     let colat = (90.0 - chi_deg).to_radians();
-    // The floor has no sun of its own, so it is evaluated at the SUBSOLAR point
-    // (chi = 0, Ch = 1): same profile, no zenith dependence. That is exactly
-    // what `floor_at` computes.
+    // The floor has no zenith dependence, so it is evaluated at the subsolar
+    // point (chi = 0, Ch = 1), as `floor_at` does.
     let sub = 0.0_f64.to_radians();
     let mut sum = 0.0;
     let n = ((H_HI_KM - H_LO_KM) * 1e3 / STEP_M) as usize;
@@ -440,9 +434,9 @@ fn verdict(target: f64, lo: f64, hi: f64) -> String {
 }
 
 /// Cost of the partial-rise branch against the full-rise one, measured on the
-/// SAME sample pattern the ray equations drive: many `sample` calls at scattered
-/// points. Reported because `rise_fraction < 1` adds a `ln` and a `sqrt` per
-/// D-region density evaluation, and density evaluation is most of a solve.
+/// same sample pattern the ray equations drive (many `sample` calls at
+/// scattered points). `rise_fraction < 1` adds a `ln` and a `sqrt` per D-region
+/// density evaluation, and density evaluation is most of a solve.
 fn bench_branches() {
     use std::time::Instant;
     let n = 4_000_000;

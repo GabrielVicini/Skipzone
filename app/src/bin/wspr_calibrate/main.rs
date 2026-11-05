@@ -7,16 +7,14 @@
 //! ```
 //!
 //! Read `skipzone_app::fit`'s module documentation before believing any number
-//! this prints. In particular: absolute levels - absolute antenna gain, absolute
-//! noise floor - are UNIDENTIFIABLE from WSPR by construction, because they are
-//! constant per station and are absorbed into that station's effect. What is
-//! identifiable is how the signal VARIES with frequency, path length, zenith
-//! angle, hop count and layer, and that is what is calibrated here.
+//! this prints. Absolute levels (antenna gain, noise floor) cannot be
+//! identified from WSPR, because they are constant per station and absorbed
+//! into that station's effect. What is calibrated is how the signal varies
+//! with frequency, path length, zenith angle, hop count and layer.
 //!
-//! The hold-out is separated by DAY and, separately, by REGION. A random row
-//! split would not be a hold-out at all: adjacent spots share an ionosphere, so
-//! a model fitted on half of a cycle predicts the other half of the same cycle
-//! for reasons that have nothing to do with generalisation.
+//! The hold-out is separated by day and, separately, by region. A random row
+//! split would not test generalisation, since adjacent spots share an
+//! ionosphere.
 //!
 //! # Layout
 //!

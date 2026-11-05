@@ -20,8 +20,8 @@ pub(crate) struct Solved {
     /// Callsign for each station index, for the effect distribution report.
     pub(crate) tx_names: Vec<String>,
     pub(crate) rx_names: Vec<String>,
-    /// Spots dropped by `--exclude-es`, counted so the hit rate stays honest:
-    /// an excluded spot is not a spot the model missed.
+    /// Spots dropped by `--exclude-es`, counted so the hit rate does not treat
+    /// them as misses.
     pub(crate) es_excluded: usize,
 }
 
@@ -29,17 +29,15 @@ pub(crate) struct Solved {
 ///
 /// # Why this is a diagnostic and not a mode
 ///
-/// [`solve::best_with_es_fallback`] consults Es only when NOTHING deterministic
-/// closed. So "the layer is Es" does not mean the ionosphere used Es - it means
-/// the deterministic tracer failed to close a path that demonstrably existed,
-/// because the spot is a decode that really happened. The Es sheet then answers
-/// with a near-lossless mirror at 100 km, and that number enters the fit as
-/// though it were a prediction of the received signal.
+/// [`solve::best_with_es_fallback`] uses Es only when nothing deterministic
+/// closed. So an Es spot means the deterministic tracer failed to close a path
+/// that existed (the spot is a real decode), and the Es sheet answered with a
+/// near-lossless mirror at 100 km. Fitting those spots fits the fallback rather
+/// than the ionosphere.
 ///
-/// Fitting the physics on those spots is therefore fitting the fallback rather
-/// than the ionosphere. Dropping them says where the residual lives; it does not
-/// fix anything, and a run that drops a large fraction of its corpus is not a
-/// calibration to quote. What is dropped is always reported.
+/// Dropping them shows where the residual lives but fixes nothing; a run that
+/// drops a large fraction of its corpus is not a calibration to quote. What is
+/// dropped is always reported.
 pub(crate) fn drop_es(set: Solved) -> Solved {
     let kept: Vec<Cached> = set
         .spots
@@ -109,8 +107,7 @@ pub(crate) fn main_solve(
 
 /// Solve one corpus spot and reduce it to the cached terms the fit needs.
 ///
-/// `None` when the model found no path at all: there is then no modelled SNR to
-/// compare against, and inventing one would put a fabricated number into the fit.
+/// `None` when the model found no path, so there is no modelled SNR to compare.
 /// Those spots are counted separately and reported as a hit rate.
 pub(crate) fn solve_one(c: &CorpusSpot, base: &Inputs) -> Option<Cached> {
     let inputs = Inputs {
@@ -129,9 +126,9 @@ pub(crate) fn solve_one(c: &CorpusSpot, base: &Inputs) -> Option<Cached> {
         best.total_system_loss_db - best.total_absorption_db - best.total_gain_db;
 
     // The F2 path this one beat, if the reported layer was a lower one and an F2
-    // path also closed. Taken from the DETERMINISTIC list, which is where F2
-    // lives; when the winner came from the Es fallback this asks whether the
-    // deterministic stack really had nothing, or only nothing that outscored it.
+    // path also closed. Taken from the deterministic list, where F2 lives; when
+    // the winner came from the Es fallback this shows whether the deterministic
+    // stack had nothing or only nothing that outscored it.
     let alternative = (best.layer != solve::LayerMode::F2)
         .then(|| {
             out.solutions
@@ -188,7 +185,7 @@ pub(crate) fn describe_span(tag: &str, path: &str, spots: &[CorpusSpot]) {
 /// Load a corpus, thinned to at most `max` spots by a fixed stride.
 ///
 /// A prefix would be one day on one band, because the file is written in fetch
-/// order; a stride keeps the balance the corpus was deliberately built to have.
+/// order; a stride keeps the corpus balance.
 pub(crate) fn load_capped(path: &str, max: usize) -> Result<Vec<CorpusSpot>, String> {
     let all = load(path)?;
     if max == 0 || all.len() <= max {

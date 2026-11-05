@@ -27,12 +27,10 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         noise_env: args.noise_env,
         tx_antenna: antenna,
         rx_antenna: antenna,
-        // Explicitly ZERO, against the shipped default. This binary measures the
-        // UNCORRECTED model: the global offset it reports IS the bias, so leaving
-        // the shipped correction in would fit an offset on top of an offset. It
-        // would also break `fit::Cached`'s exact reconstruction, which rebuilds the
-        // SNR arithmetically and carries no bias term - the CACHE CHECK section
-        // would start reporting a constant disagreement.
+        // Zero, unlike the shipped default. This binary measures the uncorrected
+        // model, whose global offset is the bias. `fit::Cached` also rebuilds the
+        // SNR without a bias term, so a non-zero value would show up as a
+        // constant disagreement in the CACHE CHECK section.
         model_bias_db: 0.0,
         ..Inputs::default()
     };
@@ -104,7 +102,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         ));
     }
 
-    // -------------------------------------------------- reconstruction check
+    // Reconstruction check
     // The cached re-derivation must reproduce the solver bit for bit at the prior,
     // or every fitted number is measured against a slightly different model than
     // the one that will be shipped.
@@ -126,9 +124,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         worst
     );
 
-    // ------------------------------------------------- negatives, solved EARLY
-    // They are solved before the fit rather than after it because they are part
-    // of the objective now, not a score applied to its answer.
+    // Negatives, solved before the fit because they are part of its objective.
     let negatives_raw = match &args.negatives {
         Some(path) => {
             let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
@@ -139,28 +135,20 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
                     println!("   {p}");
                 }
             }
-            // COMMENSURABILITY FILTER, applied before the thinning.
+            // Commensurability filter, applied before the thinning.
             //
-            // A negative enters the objective as a claim about an absolute SNR,
-            // and that SNR depends on the two stations' own effects. A negative
-            // from a station the fit has never seen has to be judged at the
-            // population mean of zero - and that is not a neutral choice here,
-            // because the two populations are not the same population. The fit
-            // corpus is deliberately the well-equipped core of the network,
-            // restricted to its most active few dozen stations; a cycle census
-            // sweeps in every station that transmitted, most of them weaker.
+            // A negative is a claim about an absolute SNR, which depends on both
+            // stations' effects. A station the fit has never seen is judged at the
+            // population mean of zero, but the fit corpus is the well-equipped core
+            // of the network while a cycle census includes every transmitting
+            // station, most of them weaker.
             //
-            // Measured on this corpus: 53 754 negatives cover 260 transmitters
-            // and 518 receivers against the fit's 79 and 30, and only 2.5 % have
-            // BOTH stations in the fit's table. Constraining the physics with the
-            // other 97.5 % judged at the core's mean does not measure the model's
-            // bias, it measures the gap between the core and the whole network -
-            // and the fit then removes that gap from the physics, which is the
-            // exact failure this module's design exists to prevent.
-            //
-            // So the constraint is restricted to negatives the fit can price.
-            // That narrows what the false-positive rate is ABOUT - core stations
-            // rather than everyone - which is a smaller claim and a sound one.
+            // On this corpus 53 754 negatives cover 260 transmitters and 518
+            // receivers against the fit's 79 and 30, and only 2.5 % have both
+            // stations in the fit's table. Using the rest would measure the gap
+            // between the core and the whole network and fold it into the physics.
+            // So only negatives the fit can price are kept, and the false-positive
+            // rate then describes core stations.
             let known_tx: std::collections::BTreeSet<&str> =
                 fit_set.tx_names.iter().map(String::as_str).collect();
             let known_rx: std::collections::BTreeSet<&str> =
@@ -193,7 +181,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         None => Vec::new(),
     };
 
-    // -------------------------------------------------------------- baseline
+    // Baseline
     let baseline = score_set(
         &fit_set,
         1.0,
@@ -209,7 +197,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         &baseline.effects,
     );
 
-    // ------------------------------------------------------------------- fit
+    // Fit
     println!("\n=== FITTING ================================================");
     println!("  Alternating: station effects in closed form, then the physics by");
     println!("  coordinate descent with a pattern move, the absorption scale and the");
@@ -309,7 +297,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
     println!("    which is the uncertainty that matters here - far larger than the");
     println!("    within-day sampling error a textbook standard error would report.");
 
-    // ------------------------------------------------------------- fit vs holdout
+    // Fit vs holdout
     let after_fit = score_set(
         &fit_set,
         fitted.absorption_scale.value,
@@ -376,7 +364,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         println!("  and not one of the physics being tested.");
     }
 
-    // ------------------------------------------------------ per-band, per-cut
+    // Per-band, per-cut
     println!("\n--- PER BAND (after the fit) -------------------------------");
     print_cuts(&fit_set, &after_fit, &baseline, |c| {
         band_label(c.freq_mhz).to_string()
@@ -418,14 +406,12 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
     });
     report_layer_races(&fit_set);
     report_hop_geometry(&fit_set);
-    // A PROPAGATION term lives at the midpoint, where the reflection happens. A
-    // NOISE term lives at the receiver, which is where the floor is heard. On a
-    // long path those two disagree about whether it is daytime, and the cells
-    // where they disagree are the only place the two hypotheses make different
-    // predictions. P.372 Table 1 has no diurnal term at all, so the model's
-    // man-made noise is identical at local noon and local midnight - if the
-    // residual tracks the RECEIVER's terminator rather than the midpoint's, that
-    // missing swing is the daytime bias and no loss term is involved.
+    // A propagation term belongs to the midpoint, where the reflection happens;
+    // a noise term to the receiver, where the floor is heard. On a long path they
+    // can disagree about whether it is day, and only those cells separate the two
+    // hypotheses. P.372 Table 1 has no diurnal term, so if the residual tracks
+    // the receiver's terminator, the daytime bias is missing noise swing rather
+    // than a loss term.
     println!("\n--- RECEIVER TERMINATOR vs MIDPOINT TERMINATOR -------------");
     println!("  A propagation loss belongs to the MIDPOINT; a noise floor belongs to the");
     println!("  RECEIVER. The two disagree on long paths, and those cells discriminate: if the");
@@ -450,7 +436,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
     report_confound_census(&fit_set, &baseline.effects);
     report_absorption_range(&fit_set);
 
-    // ------------------------------------------------ station-effect distribution
+    // Station-effect distribution
     println!("\n=== THE STATION-EFFECT DISTRIBUTION ========================");
     println!("  A measurement of the WSPR station population in its own right: how much");
     println!("  better or worse each station is than the model's assumed antenna and");
@@ -486,7 +472,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
     println!("  declining to apply it, which is what made the shipped false-positive rate so");
     println!("  much worse than the level-matched one below.");
 
-    // ---------------------------------------------------------------- negatives
+    // Negatives
     if let Some((sample, available, stride)) = &negatives_raw {
         if sample.is_empty() {
             println!("\nNEGATIVES  file held none; the false-positive rate cannot be measured.");
@@ -522,7 +508,7 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
         );
     }
 
-    // Add the excluded spots back: the Es exclusion drops spots the model DID find
+    // Add the excluded spots back: the Es exclusion drops spots the model did find
     // a path for, so counting them as misses would misreport the hit rate.
     let fit_found = fit_set.spots.len() + fit_set.es_excluded;
     println!(
@@ -553,24 +539,20 @@ pub(crate) fn run(args: &Args) -> Result<(), String> {
 ///
 /// # Why these are scanned rather than optimised
 ///
-/// The cached fit works because absorption is linear in the collision frequency
-/// and because the D region does not bend the ray. Neither holds for the anchors
-/// here. Moving the E-layer geometry, foE or foEs changes WHICH GEOMETRIES
-/// CLOSE, meaning a path appears or disappears, and that is a step change in
-/// the objective, not something a least-squares gradient can follow. Moving
-/// the D-region or
-/// collision profile does not change the ray, but it changes the SHAPE of
-/// absorption against frequency and zenith angle, and the shape is exactly what
-/// the absorption scale cannot absorb.
+/// The cached fit relies on absorption being linear in the collision frequency
+/// and on the D region not bending the ray. Neither holds here. Moving the
+/// E-layer geometry, foE or foEs changes which geometries close, a step change
+/// that a least-squares gradient cannot follow. Moving the D-region or
+/// collision profile leaves the ray alone but changes the shape of absorption
+/// against frequency and zenith angle, which the absorption scale cannot
+/// absorb.
 ///
-/// So each is set to a few values across its plausible range, the corpus is
-/// re-solved, and the absorption scale is refitted underneath each one. What
-/// improves is then the shape rather than the level, which is the only part a
-/// scan of this kind can honestly claim.
+/// So each is set to a few values across its range, the corpus is re-solved,
+/// and the absorption scale is refitted under each, which shows the effect on
+/// the shape rather than the level.
 ///
 /// A subsample is used because a re-solve costs a few hundred milliseconds per
-/// spot: the point is to see which direction the data prefers, not to resolve the
-/// fourth decimal of a parameter the corpus can barely see.
+/// spot, and the aim is the direction the data prefers.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn scan_resolve_anchors(
     corpus_spots: &[CorpusSpot],
@@ -607,12 +589,10 @@ pub(crate) fn scan_resolve_anchors(
             vec![4.0, prior.d_scale_height_km.value, 10.0],
             |a, v| a.ionosphere.d_scale_height_km.value = v,
         ),
-        // The one anchor that changes the absorption ZENITH LAW rather than its
-        // level: n = 1/2 + f H_D/H_nu. It belongs here and not in the cached fit
-        // for the reason this function exists - it is pure shape, and the
-        // absorption scale cannot absorb shape. 0.285 is the value the
-        // literature exponent (n ~ 0.75) implies; it is offered as a trial
-        // point, not as a prior. See `bin/zenith_probe`.
+        // The anchor that changes the absorption zenith law rather than its
+        // level (n = 1/2 + f H_D/H_nu), so it is scanned rather than cached.
+        // 0.285 is the value the literature exponent (n ~ 0.75) implies, offered
+        // as a trial point. See `bin/zenith_probe`.
         (
             "D rise fraction [0..1]",
             vec![0.0, 0.285, 0.6, prior.d_rise_fraction.value],
@@ -681,9 +661,8 @@ pub(crate) fn scan_resolve_anchors(
                 solved.rx_names.len(),
                 args.rounds,
                 // The scan re-solves the corpus at each anchor value; the
-                // negatives are not re-solved with it, so constraining these
-                // fits with negatives from a DIFFERENT ionosphere would be
-                // comparing each row against the wrong evidence.
+                // negatives are not re-solved with it, so they would describe a
+                // different ionosphere.
                 fit::Negatives::none(),
             );
             let scored = score_set(&solved, p.absorption_scale.value, p.atm, args.trim_tails);

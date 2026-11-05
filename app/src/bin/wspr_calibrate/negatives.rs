@@ -16,24 +16,20 @@ use skipzone_app::noise::{self};
 use skipzone_app::scenario::{self, Inputs};
 use skipzone_app::solve;
 use skipzone_app::wspr::WSPR_DECODE_THRESHOLD_DB;
-/// Solve the negatives and map them onto the FIT SET's station index space.
+/// Solve the negatives and map them onto the fit set's station index space.
 ///
-/// # Why the index space has to be shared
+/// # Why the index space is shared
 ///
-/// A negative enters the objective as a statement about an absolute SNR, and the
-/// SNR a station would have produced depends on that station's own offset. So a
-/// negative from a transmitter the fit knows about must be judged against that
-/// transmitter's estimated effect, or the constraint is applied to a station the
-/// fit does not believe in.
+/// A negative is a statement about an absolute SNR, which depends on the
+/// station's offset, so a negative from a known transmitter is judged against
+/// that transmitter's estimated effect.
 ///
 /// Stations absent from the fit corpus keep index `usize::MAX`, which every
-/// effect lookup misses and therefore treats as 0. That is not a fallback, it is
-/// the correct estimate: the effects are gauge-centred to mean zero, so zero IS
-/// the population value for a station nothing is known about.
+/// effect lookup misses and treats as 0. The effects are centred on zero, so
+/// that is the population estimate for an unknown station.
 ///
-/// The negatives do NOT feed back into estimating the effects themselves. A
-/// station's offset is estimated from what it was heard at; a silence carries no
-/// level to average in, only a bound.
+/// The negatives do not feed back into the effects: a silence carries only a
+/// bound, no level to average.
 pub(crate) fn solve_negatives(
     negatives: &[Negative],
     base: &Inputs,
@@ -134,57 +130,42 @@ pub(crate) struct Levels {
 ///
 /// # Why this is reported at two levels
 ///
-/// The fit's objective subtracts the unattributable global offset from every
-/// residual, so it is EXACTLY INVARIANT to the level of the prediction: a
-/// parameter move that shifts every spot by a constant costs the objective
-/// nothing, because the offset re-solves to swallow it. The decode threshold is
-/// not invariant to that at all - it is an absolute comparison.
+/// The fit's objective subtracts the global offset from every residual, so it
+/// is invariant to the prediction's level, while the decode threshold is an
+/// absolute comparison. A fit that slides the whole model optimistic pays
+/// nothing in RMS but the whole slide in false positives: between the baseline
+/// and the fit the offset grew by about 8 dB and the median margin over
+/// threshold by 12.
 ///
-/// Score the negatives on the raw modelled SNR and those two facts collide. A fit
-/// that slides the whole model optimistic pays nothing in RMS and is charged the
-/// entire slide in false positives, so the false-positive column moves for a
-/// reason that has nothing to do with the model's SHAPE getting worse. Measured:
-/// between the baseline and the fit the offset grew by about 8 dB and the median
-/// margin over threshold grew by 12, most of it that slide.
-///
-/// So both are printed. AS SHIPPED is what a user of the app would actually see,
-/// and is the number that matters for the product. LEVEL-MATCHED subtracts each
-/// scoring's own offset, which is the number that says whether the fit made the
-/// model genuinely more permissive about which paths open, and it is the only one
-/// of the two that is comparable before against after.
+/// So both are printed. AS SHIPPED is what a user of the app would see.
+/// LEVEL-MATCHED subtracts each scoring's own offset, showing whether the fit
+/// made the model more permissive about which paths open; only it is
+/// comparable before against after.
 #[allow(clippy::too_many_arguments)]
-/// Fit the predictive spread and report whether the resulting probabilities are
-/// HONEST - whether "70 %" means seventy per cent.
+/// Fit the predictive spread and report whether the resulting probabilities
+/// are calibrated, i.e. whether "70 %" means seventy per cent.
 ///
-/// # Why the model should emit a probability
+/// # Why a probability
 ///
-/// The model produces one SNR and [`skipzone_app::noise::PathState`] compares it
-/// to a threshold. Two measurements say that is the wrong shape of answer:
+/// [`skipzone_app::noise::PathState`] compares one SNR with a threshold, but
+/// the same path measured twice inside ten minutes differs with an SD of
+/// 3.5 dB (129 pairs from the corpus), and the model's out-of-sample error is
+/// 7.3 dB. So the modelled SNR is treated as the median of a fading
+/// distribution: `P(decode) = Phi((margin + b) / sigma)`.
 ///
-///  * the same path measured twice inside ten minutes differs with an SD of
-///    3.5 dB (129 pairs, from the corpus itself);
-///  * the model's own out-of-sample error is 7.3 dB.
+/// # What is identifiable
 ///
-/// A hard threshold on a quantity that noisy reports a coin flip as a verdict.
-/// So the modelled SNR is treated as the MEDIAN of a fading distribution and
-/// turned into `P(decode) = Phi((margin + b) / sigma)`.
+/// `sigma`, the slope of the S-curve, is fixed by how the decode rate changes
+/// with margin.
 ///
-/// # What is and is not identifiable here
+/// The intercept `b` does not transfer: the corpus is decodes plus a small
+/// constructed negative set, so its class balance is an artefact of sampling
+/// and `b` absorbs it. The negatives are also an upper bound on false positives
+/// (a collision or off-beam arrival counts as a non-decode), so the fitted
+/// `sigma` is if anything too wide.
 ///
-/// `sigma` IS identifiable: it is the slope of the S-curve, fixed by how the
-/// decode rate actually changes with margin, and it is what makes a probability
-/// responsive instead of flat.
-///
-/// The intercept `b` is NOT transferable. This corpus is decodes plus a small
-/// CONSTRUCTED negative set, so its class balance is an artefact of how the
-/// negatives were sampled, not the real prior of an arbitrary path opening. `b`
-/// absorbs that balance and must not be shipped as if it were physics. And the
-/// negatives are documented as an UPPER bound on false positives - a collision or
-/// an off-beam arrival counts as a non-decode here - so the fitted `sigma` is, if
-/// anything, wider than the truth.
-///
-/// Note what this CANNOT do: `Phi` is monotone in the margin, so the AUC is
-/// unchanged to the last bit. This buys calibration, not discrimination.
+/// `Phi` is monotone in the margin, so the AUC is unchanged: this improves
+/// calibration, not discrimination.
 pub(crate) fn report_decode_probability(
     set: &Solved,
     after: &Scored,
@@ -339,12 +320,11 @@ pub(crate) fn report_decode_probability(
     println!("  the S-curve has the wrong slope, which is a statement about sigma and nothing");
     println!("  else - the ranking is untouched by any of this.");
 
-    // The SHIPPED sigma, scored the same way. The app does NOT use the fitted
-    // value: `noise::PREDICTIVE_SPREAD_DB` is the measured out-of-sample error,
-    // and the negatives being an upper bound on false positives inflates anything
-    // fitted here. So the number that actually reaches a user gets validated
-    // rather than assumed. Only the intercept is re-optimised, by a plain scan -
-    // it is the one parameter that has to absorb this corpus's class balance.
+    // The shipped sigma, scored the same way. The app uses
+    // `noise::PREDICTIVE_SPREAD_DB`, the measured out-of-sample error, rather
+    // than the fitted value, which the negatives inflate. Only the intercept is
+    // re-optimised, by a plain scan, since it absorbs this corpus's class
+    // balance.
     let shipped = noise::PREDICTIVE_SPREAD_DB;
     let mut b_ship = 0.0;
     let mut best_ship = f64::INFINITY;
@@ -519,15 +499,13 @@ pub(crate) fn report_negatives(
     println!("  it is far worse than LEVEL-MATCHED then the app is shipping a known bias it has");
     println!("  measured and declined to apply.");
 
-    // The decoded corpus is CONDITIONED ON DECODING, so any bias measured on it
-    // can belong to the selection rather than to the model - and fading
-    // survivorship biases the surviving MEASURED values upward, which shows up as
-    // a NEGATIVE residual, not a positive one. The negatives carry no such
-    // conditioning: they are the paths that did not decode. A model that really
-    // over-predicts by day must produce its false positives by day. If instead
-    // the daytime and night-time false-positive rates are the same, the daytime
-    // bias measured on the decodes is not an absolute over-prediction at all.
-    // Level-matched, so no constant offset can move either side.
+    // The decoded corpus is conditioned on decoding, so a bias measured on it
+    // may come from selection; fading survivorship biases the measured values
+    // upward, giving a negative residual. The negatives have no such
+    // conditioning. A model that over-predicts by day must produce its false
+    // positives by day; equal day and night rates would mean the daytime bias
+    // on the decodes is not an absolute over-prediction. Level-matched, so no
+    // constant offset moves either side.
     println!("\n  -- LEVEL-MATCHED FALSE POSITIVES, SPLIT AT THE MIDPOINT TERMINATOR --");
     println!("  The decodes are conditioned on decoding; these are not. A daytime bias that is");
     println!("  a real absolute over-prediction has to spend itself here, by day.");

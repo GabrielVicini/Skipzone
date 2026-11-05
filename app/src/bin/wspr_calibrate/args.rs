@@ -22,7 +22,7 @@ pub(crate) struct Args {
     /// the whole file, which preserves the band, hour and day balance the corpus
     /// was built to have - a prefix would be one day on one band.
     pub(crate) max_spots: usize,
-    /// The antenna ASSUMED at both ends. See [`Args::default`] for why the
+    /// The antenna assumed at both ends. See [`Args::default`] for why the
     /// calibration default is not the GUI default.
     pub(crate) antenna: AntennaKind,
     /// Height above ground of that antenna, m. Ignored by the isotropic
@@ -45,37 +45,27 @@ impl Default for Args {
             scan: 0,
             max_negatives: 2000,
             max_spots: 3000,
-            // ISOTROPIC, deliberately, and NOT the GUI's 10 m dipole.
+            // Isotropic rather than the GUI's 10 m dipole.
             //
-            // A station's absolute gain is constant for that station and is
-            // absorbed exactly into its fixed effect, so a flat reference throws
-            // away nothing this corpus could ever identify - the identification
-            // table at the foot of the report says so.
+            // A station's absolute gain is constant per station and absorbed into
+            // its fixed effect, so a flat reference loses nothing the corpus could
+            // identify (see the identification table at the end of the report).
             //
-            // A dipole at a fixed HEIGHT IN METRES is a different matter. It is
-            // 0.06 wavelengths up on 160 m and 0.94 on 10 m, so its gain at the
-            // 5 deg launch angle a long path uses climbs 11.6 dB per end across
-            // that span - 23 dB across the pair - and at 30 deg the same tilt
-            // REVERSES SIGN. That is a band-shaped, elevation-coupled term, so a
-            // per-station constant cannot absorb it and it lands in the residual,
-            // where the only things able to chase it are the absorption scale and
-            // the atmospheric noise slopes. Measured: they all run to their
-            // bounds doing so.
-            //
-            // So the flat reference is not a simplification, it is the removal of
-            // an assumption the data cannot see past. Pass `--antenna dipole` to
-            // put it back and reproduce the older runs.
+            // A dipole at a fixed height in metres is 0.06 wavelengths up on 160 m
+            // and 0.94 on 10 m, so its gain at a 5 deg launch climbs 11.6 dB per
+            // end across that span, and at 30 deg the tilt reverses sign. A
+            // per-station constant cannot absorb that band- and elevation-coupled
+            // term, so it lands in the residual and drives the absorption scale and
+            // noise slopes to their bounds. Pass `--antenna dipole` to use it.
             antenna: AntennaKind::Isotropic,
             antenna_height_m: 10.0,
-            // Es spots are EXCLUDED from the fit by default. `best_with_es_fallback`
-            // consults Es only where nothing deterministic closed, so an Es spot
-            // records that the deterministic tracer failed to close a path which
-            // demonstrably existed - the spot is a decode that really happened.
-            // Fitting physics to the sheet's answer is fitting the fallback.
-            // Measured on this corpus: they were 41 % of the solved spots at
-            // +21 dB, and their presence inverted the fitted slope (0.69 -> 0.59)
-            // while the same fit without them left it alone (0.73 -> 0.74).
-            // They are still solved, still reported, and still scored.
+            // Es spots are excluded from the fit by default. `best_with_es_fallback`
+            // uses Es only where nothing deterministic closed, so an Es spot marks
+            // a real decode the deterministic tracer failed to close, and fitting
+            // to it fits the fallback. On this corpus they were 41 % of solved
+            // spots at +21 dB and lowered the fitted slope (0.69 -> 0.59), while
+            // the fit without them barely moved (0.73 -> 0.74). They are still
+            // solved, reported and scored.
             include_es: false,
         }
     }
