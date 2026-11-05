@@ -33,7 +33,9 @@ LAYERS = {
 # The only normal dependencies the engine may declare.
 ENGINE_ALLOWED_DEPS = {"num-complex", "thiserror"}
 
-GUI_AND_NET = {"egui", "eframe", "winit", "ureq"}
+GUI = {"egui", "eframe", "winit"}
+NET = {"ureq"}
+GUI_AND_NET = GUI | NET
 
 # Crates that must not appear anywhere in the normal dependency tree.
 # rayon is allowed in skipzone-predict: its compute, solve and antenna modules
@@ -43,6 +45,10 @@ BANNED_TRANSITIVE = {
     "skipzone": GUI_AND_NET | {"rayon"},
     "skipzone-iono": GUI_AND_NET | {"rayon"},
     "skipzone-predict": GUI_AND_NET,
+    # lab is the only crate with network access and has no GUI; the app is
+    # the only crate with a GUI and makes no network calls.
+    "skipzone-lab": GUI,
+    "skipzone-app": NET,
 }
 
 
