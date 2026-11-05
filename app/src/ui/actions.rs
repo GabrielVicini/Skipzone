@@ -142,6 +142,15 @@ pub enum Action {
     },
     /// Choose which station a map click moves.
     SetPlaceMode(Station),
+    /// Show or hide one solved mode on the map.
+    SetSolutionVisible {
+        index: usize,
+        visible: bool,
+    },
+    /// Pick the mode the trace panel details.
+    SelectSolution(usize),
+    /// The trace panel's close button.
+    CloseTrace,
     /// Run the point-to-point solve and show the trace readout.
     Calculate,
     /// Run the frequency sweep and show its charts.

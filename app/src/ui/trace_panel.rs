@@ -25,7 +25,7 @@ const MAX_WIDTH: f32 = 900.0;
 
 /// Draw the panel when it is open, and record the width it took so the floating
 /// overlays can inset by it. Pushes any action its buttons produced.
-pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+pub fn draw(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
     if !state.ui.trace_open {
         scratch.right_inset = 0.0;
         return;
@@ -61,12 +61,12 @@ pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch, out: &
     // strip the panel covers.
     scratch.right_inset = (right_edge - panel.response.rect.left()).clamp(0.0, right_edge);
     if close {
-        state.ui.trace_open = false;
+        out.push(Action::CloseTrace);
         scratch.right_inset = 0.0;
     }
 }
 
-fn body(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
+fn body(ui: &mut Ui, state: &AppState, actions: &mut Vec<Action>) {
     let busy = state.results.is_busy();
     let error = state.results.errors.main.as_deref();
 
@@ -112,9 +112,8 @@ fn body(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
     panels::verdict_chip(ui, out);
     ui.add_space(6.0);
     panels::reference_panel(ui, out);
-    let selection = &mut state.ui.selection;
-    panels::legend_panel(ui, out, &mut selection.visible, &mut selection.selected);
-    if let Some(sol) = selection.selected.and_then(|i| out.solutions.get(i)) {
+    panels::legend_panel(ui, out, &state.ui.selection, actions);
+    if let Some(sol) = state.selected_solution() {
         panels::solution_panel(ui, sol);
     }
     panels::near_miss_panel(ui, out);

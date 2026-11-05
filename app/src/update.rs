@@ -48,6 +48,13 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
             InputChange::Position { station, lat, lon }.apply(&mut state.inputs);
         }
         Action::SetPlaceMode(place) => state.ui.place = place,
+        Action::SetSolutionVisible { index, visible } => {
+            if let Some(v) = state.ui.selection.visible.get_mut(index) {
+                *v = visible;
+            }
+        }
+        Action::SelectSolution(index) => state.ui.selection.selected = Some(index),
+        Action::CloseTrace => state.ui.trace_open = false,
         Action::Calculate => {
             // Re-running replaces what the panel is showing; the panel
             // itself stays where the operator sized it.
@@ -502,5 +509,42 @@ mod tests {
         assert_eq!(s.inputs.coverage, grid);
         assert_eq!(s.inputs.display.coverage_alpha, 80);
         assert_eq!(s.inputs.scenario, scenario);
+    }
+
+    /// A solve resets the legend; toggles and picks then change only the
+    /// selection, never the solve's results.
+    #[test]
+    fn legend_toggles_and_picks_change_the_selection() {
+        let (mut s, jobs) = setup();
+        // The full default scenario, which finds several modes.
+        s.inputs.scenario = Inputs::default();
+        apply(&mut s, &jobs, [Action::Calculate]);
+        absorb_all(&mut s, &jobs);
+        let n = s.results.main.solutions().len();
+        assert!(n >= 1, "the default path has a mode");
+        assert_eq!(s.ui.selection.visible, vec![true; n]);
+        assert_eq!(s.ui.selection.selected, Some(0));
+
+        apply(
+            &mut s,
+            &jobs,
+            [
+                Action::SetSolutionVisible {
+                    index: 0,
+                    visible: false,
+                },
+                Action::SelectSolution(n - 1),
+                // Out of range is ignored, not a panic.
+                Action::SetSolutionVisible {
+                    index: n,
+                    visible: false,
+                },
+                Action::CloseTrace,
+            ],
+        );
+        assert!(!s.ui.selection.visible[0]);
+        assert_eq!(s.ui.selection.selected, Some(n - 1));
+        assert_eq!(s.results.main.solutions().len(), n);
+        assert!(!s.ui.trace_open);
     }
 }

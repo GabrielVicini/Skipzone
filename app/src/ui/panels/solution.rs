@@ -2,17 +2,20 @@
 
 use egui::{CollapsingHeader, RichText, Ui};
 
+use crate::state::Selection;
+use crate::ui::actions::{Action, edited};
 use crate::ui::theme::{self, FAIL, OK, WARN};
 use crate::ui::widgets::{data_grid, head_cells, hint, kv, num, sub_head, wide_table};
 use skipzone_predict::noise::PathState;
 use skipzone_predict::solve::{Solution, SolveOutcome, mode_label};
 
-/// Legend + per-solution visibility and selection.
+/// Legend + per-solution visibility and selection. Toggles and picks are
+/// pushed to `actions`.
 pub fn legend_panel(
     ui: &mut Ui,
     out: &SolveOutcome,
-    visible: &mut [bool],
-    selected: &mut Option<usize>,
+    selection: &Selection,
+    actions: &mut Vec<Action>,
 ) {
     CollapsingHeader::new(format!("Modes found ({})", out.solutions.len()))
         .default_open(true)
@@ -23,8 +26,12 @@ pub fn legend_panel(
             }
             for (i, sol) in out.solutions.iter().enumerate() {
                 ui.horizontal_wrapped(|ui| {
-                    if let Some(v) = visible.get_mut(i) {
-                        ui.checkbox(v, "");
+                    if let Some(&shown) = selection.visible.get(i)
+                        && let Some(visible) = edited(shown, |v| {
+                            ui.checkbox(v, "");
+                        })
+                    {
+                        actions.push(Action::SetSolutionVisible { index: i, visible });
                     }
                     ui.colored_label(theme::solution_color(i), "\u{25A0}");
                     let label = RichText::new(format!(
@@ -40,8 +47,11 @@ pub fn legend_panel(
                         },
                     ))
                     .small();
-                    if ui.selectable_label(*selected == Some(i), label).clicked() {
-                        *selected = Some(i);
+                    if ui
+                        .selectable_label(selection.selected == Some(i), label)
+                        .clicked()
+                    {
+                        actions.push(Action::SelectSolution(i));
                     }
                 });
             }
