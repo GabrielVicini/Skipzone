@@ -14,3 +14,8 @@
 
 # Git notes
 upload.txt
+# Snapshot test output next to the committed references: the new render, the
+# diff and the backup an update leaves behind.
+/app/tests/snapshots/*.new.png
+/app/tests/snapshots/*.diff.png
+/app/tests/snapshots/*.old.png

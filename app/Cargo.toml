@@ -23,6 +23,17 @@ serde = { version = "1", features = ["derive"] }
 # Not clippy-pedantic, unlike the engine crate: pedantic lints on egui layout
 # code add churn without catching bugs.
 
+[features]
+# Image snapshot tests in tests/snapshots.rs. They render with wgpu, so they
+# need a GPU or a software Vulkan driver such as Mesa lavapipe. Off by default:
+# the normal test run stays renderer-free.
+snapshots = ["egui_kittest/snapshot", "egui_kittest/wgpu"]
+
 [dev-dependencies]
-# Headless UI tests. The plain harness only: no snapshot or wgpu features.
+# Headless UI tests. The snapshot and wgpu features come only with the
+# `snapshots` feature above.
 egui_kittest = { version = "=0.36.2", features = ["eframe"] }
+
+[[test]]
+name = "snapshots"
+required-features = ["snapshots"]

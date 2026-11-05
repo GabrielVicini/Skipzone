@@ -82,6 +82,41 @@ jobs:
       - name: Engine builds standalone
         run: cargo build -p skipzone --lib
 
+  snapshots:
+    name: UI snapshots (software Vulkan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: snapshots
+      # The GUI headers, plus Mesa's lavapipe: a CPU Vulkan driver that wgpu
+      # renders the snapshots on, since the runner has no GPU.
+      - name: Install Linux GUI dependencies and lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libxcb1-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libx11-dev libgl1-mesa-dev mesa-vulkan-drivers
+      # The snapshot code is behind a feature, so the clippy job never sees it.
+      - run: cargo clippy -p skipzone-app --all-targets --features snapshots -- -D warnings
+      - run: cargo test -p skipzone-app --features snapshots
+      # The new render and the diff for every snapshot that failed.
+      - name: Upload snapshot diffs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snapshot-diffs
+          path: |
+            app/tests/snapshots/*.new.png
+            app/tests/snapshots/*.diff.png
+          if-no-files-found: ignore
+
   msrv:
     name: engine-side crates on their declared rust-version
     runs-on: ubuntu-24.04
