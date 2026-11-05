@@ -44,6 +44,12 @@ impl SkipzoneApp {
     pub fn session(&self) -> &Session {
         &self.session
     }
+
+    /// Mutable access for tests, which pin the inputs to a fixed scenario
+    /// instead of today's date and time.
+    pub fn session_mut(&mut self) -> &mut Session {
+        &mut self.session
+    }
 }
 
 impl App for SkipzoneApp {

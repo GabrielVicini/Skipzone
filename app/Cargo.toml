@@ -18,3 +18,7 @@ egui = "0.36"
 
 # Not clippy-pedantic, unlike the engine crate: pedantic lints on egui layout
 # code add churn without catching bugs.
+
+[dev-dependencies]
+# Headless UI tests. The plain harness only: no snapshot or wgpu features.
+egui_kittest = { version = "=0.36.2", features = ["eframe"] }
