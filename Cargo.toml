@@ -5,3 +5,14 @@
 resolver = "3"
 members = ["crates/skipzone", "crates/skipzone-iono", "crates/skipzone-predict", "crates/skipzone-lab", "app"]
 default-members = ["app"]
+
+# Tests run real solves, which take minutes each unoptimised. Debug assertions
+# and overflow checks stay on; only the optimiser changes.
+[profile.test.package.skipzone]
+opt-level = 3
+
+[profile.test.package.skipzone-iono]
+opt-level = 3
+
+[profile.test.package.skipzone-predict]
+opt-level = 3

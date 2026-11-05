@@ -1,21 +1,20 @@
 //! Session state: the scenario being worked on, the results computed from it,
-//! and the handle to the background solver.
+//! and the handle to the background jobs.
 //!
-//! This is the layer between the UI and the compute layer. It owns no egui
-//! types beyond the `Context` the solver needs to request repaints, and the UI
-//! never talks to [`SolverService`] directly - it calls [`Session::calculate`]
-//! or [`Session::find_best_frequency`] and reads the fields back. That keeps
+//! This is the layer between the UI and the compute layer. The UI never talks
+//! to [`Jobs`] directly - it calls [`Session::calculate`] or
+//! [`Session::find_best_frequency`] and reads the fields back. That keeps
 //! "what has been computed" in one place instead of scattered across widgets.
-
-use egui::Context;
 
 use skipzone_iono::clock::{self, CivilDate};
 use skipzone_predict::coverage::{CoverageCell, CoverageConfig};
 use skipzone_predict::scenario::{Assumptions, Inputs, ProfileRow};
 use skipzone_predict::solve::{Solution, SolveOutcome};
-use skipzone_predict::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
+use skipzone_predict::sweep::{SweepBest, SweepPoint};
 
-/// What the background solver is currently doing, for the status readout.
+use crate::jobs::{Jobs, Request, Response};
+
+/// What the background jobs are currently doing, for the status readout.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Busy {
     Idle,
@@ -154,6 +153,15 @@ impl CoverageResults {
     }
 }
 
+/// The last failure of each job kind, so a failed sweep is reported as a
+/// sweep failure and not in the trace panel.
+#[derive(Default)]
+pub struct JobErrors {
+    pub main: Option<String>,
+    pub sweep: Option<String>,
+    pub coverage: Option<String>,
+}
+
 pub struct Session {
     pub inputs: Inputs,
     pub solve: SolveResults,
@@ -163,9 +171,9 @@ pub struct Session {
     pub coverage_config: CoverageConfig,
     pub coverage: CoverageResults,
     pub busy: Busy,
-    /// Model-build or solver failure from the last dispatched job.
-    pub error: Option<String>,
-    solver: SolverService,
+    /// Model-build failures, one slot per job kind.
+    pub errors: JobErrors,
+    jobs: Jobs,
 }
 
 impl Session {
@@ -173,7 +181,7 @@ impl Session {
     /// operator almost always wants "now", and `Inputs::default()` stays a
     /// fixed, test-reproducible scenario rather than a moving target.
     #[must_use]
-    pub fn new(ctx: Context) -> Self {
+    pub fn new(jobs: Jobs) -> Self {
         let (today, hours) = clock::utc_now();
         let inputs = Inputs {
             year: today.year,
@@ -189,10 +197,8 @@ impl Session {
             coverage_config: CoverageConfig::default(),
             coverage: CoverageResults::default(),
             busy: Busy::Idle,
-            error: None,
-            // The computation layer knows nothing about egui; all it needs from
-            // the view is a way to say "redraw, there is something new".
-            solver: SolverService::new(std::sync::Arc::new(move || ctx.request_repaint())),
+            errors: JobErrors::default(),
+            jobs,
         }
     }
 
@@ -218,38 +224,44 @@ impl Session {
 
     /// Kick off the point-to-point solve on the worker thread.
     pub fn calculate(&mut self) {
-        self.error = None;
+        self.close_running_job();
+        self.errors.main = None;
         self.busy = Busy::Solving;
-        self.solver.dispatch(Job::Main(self.inputs.clone()));
+        self.jobs.submit(Request::Main(self.inputs.clone()));
     }
 
     /// Kick off the frequency sweep. The current solution stays on screen;
     /// this is a separate query alongside it.
     pub fn find_best_frequency(&mut self) {
-        self.error = None;
+        self.close_running_job();
+        self.errors.sweep = None;
         self.sweep.clear();
         self.busy = Busy::Sweeping { done: 0, total: 0 };
-        self.solver.dispatch(Job::Sweep(self.inputs.clone()));
+        self.jobs.submit(Request::Sweep(self.inputs.clone()));
     }
 
     /// Kick off the area coverage grid. Any tiles from a previous run are
     /// cleared first.
     pub fn run_coverage(&mut self) {
-        self.error = None;
+        self.close_running_job();
+        self.errors.coverage = None;
         self.coverage.clear();
         self.busy = Busy::Covering {
             done: 0,
             total: 0,
             threads: 0,
         };
-        self.solver
-            .dispatch(Job::Coverage(self.inputs.clone(), self.coverage_config));
+        self.jobs
+            .submit(Request::Coverage(self.inputs.clone(), self.coverage_config));
     }
 
     /// Stop the running coverage grid. Everything already computed stays on the
     /// map; only the calculations still queued are abandoned.
     pub fn cancel_coverage(&mut self) {
-        self.solver.cancel();
+        if matches!(self.busy, Busy::Covering { .. }) {
+            self.jobs.cancel();
+            self.close_running_job();
+        }
     }
 
     /// Clear the coverage tiles from the map.
@@ -257,48 +269,58 @@ impl Session {
         self.coverage.clear();
     }
 
+    /// Close out the running job before it is cancelled or replaced. The job's
+    /// own closing response will carry a stale generation and be dropped, so
+    /// a coverage grid cut short is marked cancelled here.
+    fn close_running_job(&mut self) {
+        if matches!(self.busy, Busy::Covering { .. }) {
+            self.coverage.cancelled = true;
+        }
+        self.busy = Busy::Idle;
+    }
+
     /// Absorb any results the worker has posted since the last frame.
     pub fn pump(&mut self) {
-        for msg in self.solver.drain() {
-            self.apply(msg);
+        for response in self.jobs.poll() {
+            self.apply(response);
         }
     }
 
-    fn apply(&mut self, msg: Msg) {
-        match msg {
-            Msg::MainDone(result) => {
+    fn apply(&mut self, response: Response) {
+        match response {
+            Response::MainDone(result) => {
                 let result = *result;
                 self.solve.visible = vec![true; result.outcome.solutions.len()];
                 self.solve.selected = (!result.outcome.solutions.is_empty()).then_some(0);
                 self.solve.outcome = Some(result.outcome);
                 self.solve.assumptions = Some(result.assumptions);
                 self.solve.profile = result.profile;
-                self.error = None;
+                self.errors.main = None;
                 self.busy = Busy::Idle;
             }
-            Msg::MainFailed(e) => {
+            Response::MainFailed(e) => {
                 self.solve.clear();
-                self.error = Some(e);
+                self.errors.main = Some(e);
                 self.busy = Busy::Idle;
             }
-            Msg::SweepStart { total } => {
+            Response::SweepStart { total } => {
                 self.sweep.clear();
                 self.sweep.points.reserve(total);
                 self.busy = Busy::Sweeping { done: 0, total };
             }
-            Msg::SweepProgress { done, total, point } => {
+            Response::SweepPoint { done, total, point } => {
                 self.sweep.points.push(point);
                 self.busy = Busy::Sweeping { done, total };
             }
-            Msg::SweepDone { best } => {
+            Response::SweepDone { best } => {
                 self.sweep.best = best;
                 self.busy = Busy::Idle;
             }
-            Msg::SweepFailed(e) => {
-                self.error = Some(e);
+            Response::SweepFailed(e) => {
+                self.errors.sweep = Some(e);
                 self.busy = Busy::Idle;
             }
-            Msg::CoverageStart { total, threads } => {
+            Response::CoverageStart { total, threads } => {
                 self.coverage.clear();
                 self.coverage.cells.reserve(total);
                 self.busy = Busy::Covering {
@@ -307,7 +329,7 @@ impl Session {
                     threads,
                 };
             }
-            Msg::CoverageProgress {
+            Response::CoverageCell {
                 done,
                 total,
                 threads,
@@ -320,14 +342,69 @@ impl Session {
                     threads,
                 };
             }
-            Msg::CoverageDone { cancelled } => {
-                self.coverage.cancelled = cancelled;
+            Response::CoverageDone => {
+                self.coverage.cancelled = false;
                 self.busy = Busy::Idle;
             }
-            Msg::CoverageFailed(e) => {
-                self.error = Some(e);
+            Response::CoverageFailed(e) => {
+                self.errors.coverage = Some(e);
                 self.busy = Busy::Idle;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A session on inline jobs with a tiny coverage grid. Inline jobs finish
+    /// inside `submit`, but `busy` only changes when `pump` applies the
+    /// responses, so a run looks in progress until then.
+    fn session() -> Session {
+        let mut s = Session::new(Jobs::inline(|| {}));
+        s.inputs = Inputs {
+            max_hops: 1,
+            es_enabled: false,
+            ..Inputs::default()
+        };
+        s.coverage_config = CoverageConfig {
+            half_span_deg: 4.0,
+            points_per_deg: 0.25,
+        };
+        s
+    }
+
+    #[test]
+    fn cancelling_coverage_marks_it_cancelled() {
+        let mut s = session();
+        s.run_coverage();
+        s.cancel_coverage();
+        // The job's own responses are stale now and dropped.
+        s.pump();
+        assert!(s.coverage.cancelled);
+        assert!(s.busy.is_idle());
+        assert!(s.coverage.cells.is_empty());
+    }
+
+    #[test]
+    fn a_new_job_marks_running_coverage_cancelled() {
+        let mut s = session();
+        s.run_coverage();
+        s.calculate();
+        s.pump();
+        assert!(s.coverage.cancelled);
+        assert!(s.solve.outcome.is_some(), "the Calculate result arrives");
+        assert!(s.busy.is_idle());
+    }
+
+    #[test]
+    fn a_finished_coverage_run_is_not_cancelled() {
+        let mut s = session();
+        s.run_coverage();
+        s.pump();
+        assert!(!s.coverage.cancelled);
+        assert!(s.coverage.has_tiles());
+        assert!(s.busy.is_idle());
     }
 }

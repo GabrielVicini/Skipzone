@@ -1,33 +1,22 @@
-//! Background solver service: runs every `solve()` off the UI thread so the
-//! interface never freezes, and drives the frequency sweep.
+//! The frequency sweep behind "Find best frequency": `solve()` run at each
+//! candidate frequency across the HF band, reduced to one [`SweepPoint`] per
+//! frequency and a best pick.
 //!
-//! Two job kinds share one worker thread and one result channel:
-//!   * `Job::Main`  - the single point-to-point solve behind RUN TRACE.
-//!   * `Job::Sweep` - the frequency sweep behind "Find best frequency": it
-//!     reuses `solve()` verbatim at each candidate frequency (no duplicated
-//!     ray logic) and streams one `SweepProgress` per frequency so the UI can
-//!     advance a progress bar and redraw the live band chart.
+//! It reuses `solve()` verbatim at each frequency (no duplicated ray logic)
+//! and reports one [`SweepEvent::Point`] per frequency, so a caller can advance
+//! a progress bar and redraw the live band chart.
 //!
-//! Nothing here implements physics: it clones the `Inputs`, rebuilds the engine
-//! models once per job, and calls the existing `scenario`/`solve` API.
-//!
-//! It does not depend on egui: the view is notified through a [`Wake`]
-//! callback rather than an `egui::Context`, so the harnesses in `src/bin` can
-//! drive the module headlessly.
+//! [`run_sweep`] runs on the calling thread; it owns no thread or channel. See
+//! [`crate::run`] for the other job runners.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use skipzone::magnetoionic::Mode;
 
-use crate::compute::{
-    ComputePool, Execution, Timing, background_pool_config, build_pool, coverage_pool_config,
-};
-use crate::coverage::{CoverageCell, CoverageConfig, CoverageEvent};
+use crate::compute::{ComputePool, Execution, Timing};
 use crate::noise::PathState;
-use crate::run::{self, MainResult, RunError};
+use crate::run::RunError;
 use crate::scenario::{self, Assumptions, Inputs, Models};
 use crate::solve::{self, SolveOutcome};
 
@@ -174,47 +163,6 @@ pub enum SweepEvent {
     },
 }
 
-pub enum Job {
-    Main(Inputs),
-    Sweep(Inputs),
-    Coverage(Inputs, CoverageConfig),
-}
-
-pub enum Msg {
-    MainDone(Box<MainResult>),
-    MainFailed(String),
-    SweepStart {
-        total: usize,
-    },
-    SweepProgress {
-        done: usize,
-        total: usize,
-        point: SweepPoint,
-    },
-    SweepDone {
-        best: Option<SweepBest>,
-    },
-    SweepFailed(String),
-    CoverageStart {
-        total: usize,
-        threads: usize,
-    },
-    /// One finished grid point, streamed the instant it is computed so the map
-    /// fills in progressively rather than appearing at the end.
-    CoverageProgress {
-        done: usize,
-        total: usize,
-        threads: usize,
-        cell: Box<CoverageCell>,
-    },
-    CoverageDone {
-        /// True when the run stopped early because Cancel was pressed. The
-        /// cells already streamed stay on the map either way.
-        cancelled: bool,
-    },
-    CoverageFailed(String),
-}
-
 /// Reduce a full solve to the cached summary for one frequency.
 ///
 /// The mode with the strongest SNR is kept, since that is what an operator
@@ -277,170 +225,6 @@ pub fn better(a: SweepPoint, b: SweepPoint) -> SweepPoint {
                 b
             }
         }
-    }
-}
-
-/// "New results have landed, redraw." Called from the solver worker thread, so
-/// it must be `Send + Sync`; the view layer supplies one that requests a repaint
-/// and a headless caller supplies one that does nothing.
-pub type Wake = Arc<dyn Fn() + Send + Sync>;
-
-/// A [`Wake`] that does nothing, for headless callers with no window to redraw.
-#[must_use]
-pub fn no_wake() -> Wake {
-    Arc::new(|| {})
-}
-
-/// Handle to the worker thread. Dispatch jobs, drain results each frame.
-///
-/// Each dispatch bumps an epoch and cancels the previous job; results carry
-/// their job's epoch and `drain` returns only current-epoch messages, so
-/// straggler progress from a superseded job can never flip the UI state.
-pub struct SolverService {
-    job_tx: Sender<(u64, Job, Arc<AtomicBool>)>,
-    msg_rx: Receiver<(u64, Msg)>,
-    current_cancel: Option<Arc<AtomicBool>>,
-    epoch: u64,
-}
-
-impl SolverService {
-    /// Start the worker thread. `wake` is called from the worker whenever new
-    /// results are available; the view layer passes something that asks its
-    /// window to redraw.
-    #[must_use]
-    pub fn new(wake: Wake) -> Self {
-        let (job_tx, job_rx) = mpsc::channel::<(u64, Job, Arc<AtomicBool>)>();
-        let (msg_tx, msg_rx) = mpsc::channel::<(u64, Msg)>();
-        std::thread::Builder::new()
-            .name("skipzone-solver".to_string())
-            .spawn(move || worker(&job_rx, &msg_tx, &wake))
-            .expect("spawn solver thread");
-        Self {
-            job_tx,
-            msg_rx,
-            current_cancel: None,
-            epoch: 0,
-        }
-    }
-
-    /// Queue a job. Any in-flight job is asked to stop first (the sweep checks
-    /// the flag between frequencies; a single main solve is atomic and
-    /// finishes, its result then dropped by the epoch filter).
-    pub fn dispatch(&mut self, job: Job) {
-        if let Some(c) = self.current_cancel.take() {
-            c.store(true, Ordering::Relaxed);
-        }
-        self.epoch += 1;
-        let cancel = Arc::new(AtomicBool::new(false));
-        let _ = self.job_tx.send((self.epoch, job, Arc::clone(&cancel)));
-        self.current_cancel = Some(cancel);
-    }
-
-    /// Ask the in-flight job to stop without queuing anything in its place.
-    ///
-    /// The epoch is not bumped: finished work was delivered under the current
-    /// epoch, and the job's closing message must still arrive so the UI learns
-    /// the run ended. Remaining items stop at the next flag check, which for a
-    /// coverage grid is before each grid point.
-    pub fn cancel(&mut self) {
-        if let Some(c) = self.current_cancel.take() {
-            c.store(true, Ordering::Relaxed);
-        }
-    }
-
-    /// Current-epoch messages that have arrived since the last call
-    /// (non-blocking); stale messages from superseded jobs are discarded.
-    pub fn drain(&self) -> Vec<Msg> {
-        let epoch = self.epoch;
-        self.msg_rx
-            .try_iter()
-            .filter_map(|(e, m)| (e == epoch).then_some(m))
-            .collect()
-    }
-}
-
-/// Run one job to completion on the worker thread, translating the runner's
-/// events and result into messages.
-fn run_job(
-    epoch: u64,
-    job: Job,
-    pool: &ComputePool,
-    cancel: &AtomicBool,
-    msg_tx: &Sender<(u64, Msg)>,
-    wake: &Wake,
-) {
-    let send = |m: Msg| {
-        let _ = msg_tx.send((epoch, m));
-        wake();
-    };
-    let cancelled = || cancel.load(Ordering::Relaxed);
-    match job {
-        Job::Main(inputs) => match run::run_main(&inputs, &cancelled) {
-            Ok(r) => send(Msg::MainDone(Box::new(r))),
-            Err(RunError::Failed(e)) => send(Msg::MainFailed(e)),
-            // Only a superseded job is cancelled, and its result would be
-            // dropped by the epoch filter anyway.
-            Err(RunError::Cancelled) => {}
-        },
-        Job::Sweep(inputs) => {
-            let on_event = |e: SweepEvent| {
-                send(match e {
-                    SweepEvent::Start { total } => Msg::SweepStart { total },
-                    SweepEvent::Point { done, total, point } => {
-                        Msg::SweepProgress { done, total, point }
-                    }
-                });
-            };
-            match run_sweep(&inputs, pool, &cancelled, &on_event) {
-                Ok(best) => send(Msg::SweepDone { best }),
-                Err(RunError::Failed(e)) => send(Msg::SweepFailed(e)),
-                Err(RunError::Cancelled) => {}
-            }
-        }
-        Job::Coverage(inputs, config) => {
-            let on_event = |e: CoverageEvent| {
-                send(match e {
-                    CoverageEvent::Start { total, threads } => {
-                        Msg::CoverageStart { total, threads }
-                    }
-                    CoverageEvent::Cell {
-                        done,
-                        total,
-                        threads,
-                        cell,
-                    } => Msg::CoverageProgress {
-                        done,
-                        total,
-                        threads,
-                        cell: Box::new(cell),
-                    },
-                });
-            };
-            match run::run_coverage(&inputs, config, pool, &cancelled, &on_event) {
-                Ok(()) => send(Msg::CoverageDone { cancelled: false }),
-                Err(RunError::Cancelled) => send(Msg::CoverageDone { cancelled: true }),
-                Err(RunError::Failed(e)) => send(Msg::CoverageFailed(e)),
-            }
-        }
-    }
-}
-
-fn worker(
-    job_rx: &Receiver<(u64, Job, Arc<AtomicBool>)>,
-    msg_tx: &Sender<(u64, Msg)>,
-    wake: &Wake,
-) {
-    // One pool per job kind for the worker's whole lifetime: sizing a rayon pool
-    // costs a thread spawn per worker, so it is paid once.
-    let pool = build_pool("sweep", background_pool_config());
-    let coverage_pool = build_pool("coverage", coverage_pool_config());
-    while let Ok((epoch, job, cancel)) = job_rx.recv() {
-        // The pool a job gets is the only thing the worker decides.
-        let pool = match job {
-            Job::Coverage(..) => &coverage_pool,
-            Job::Main(_) | Job::Sweep(_) => &pool,
-        };
-        run_job(epoch, job, pool, &cancel, msg_tx, wake);
     }
 }
 

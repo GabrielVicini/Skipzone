@@ -10,5 +10,6 @@
 //! mentions egui.
 
 pub mod app;
+pub mod jobs;
 pub mod state;
 pub mod ui;

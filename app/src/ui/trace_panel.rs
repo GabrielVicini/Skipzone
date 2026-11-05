@@ -31,7 +31,7 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
     }
 
     let busy = session.is_busy();
-    let error = session.error.clone();
+    let error = session.errors.main.clone();
     let solve = &mut session.solve;
     let mut close = false;
 

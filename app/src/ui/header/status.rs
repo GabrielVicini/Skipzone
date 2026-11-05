@@ -8,13 +8,20 @@ use crate::ui::theme::{ACCENT, FAIL, MUTED};
 /// Right-aligned status readout. Silent when idle and nothing has failed, so
 /// the corner of the map stays clear during normal work.
 pub fn status(ui: &mut Ui, session: &Session) {
-    if let Some(error) = &session.error {
-        ui.label(
-            RichText::new(format!("\u{26A0} {error}"))
-                .small()
-                .color(FAIL),
-        )
-        .on_hover_text(error);
+    let errors = &session.errors;
+    for (job, error) in [
+        ("trace", &errors.main),
+        ("sweep", &errors.sweep),
+        ("coverage", &errors.coverage),
+    ] {
+        if let Some(error) = error {
+            ui.label(
+                RichText::new(format!("\u{26A0} {job}: {error}"))
+                    .small()
+                    .color(FAIL),
+            )
+            .on_hover_text(error);
+        }
     }
 
     let Some(label) = session.busy.label() else {

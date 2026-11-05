@@ -98,6 +98,10 @@ The engine and the ionosphere are single-threaded. All parallelism lives in
 pool. Parallel and sequential runs give bit-identical results, and a test
 checks that.
 
+Predict starts no threads of its own beyond those pools. Its job runners in
+`run` work on the calling thread, and the app calls them from one background
+thread it owns (`app/src/jobs.rs`), so the window never waits on a solve.
+
 Two environment variables control the pool at runtime, with no rebuild:
 
 ```text

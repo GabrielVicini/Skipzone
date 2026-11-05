@@ -63,3 +63,62 @@ pub fn run_main(
         outcome,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compute::{ComputePool, Execution, PoolConfig};
+
+    /// The numbers `solve_digest` prints for each solution, as raw bits.
+    fn fingerprint(r: &MainResult) -> Vec<(u32, [u64; 7])> {
+        r.outcome
+            .solutions
+            .iter()
+            .map(|s| {
+                let first = s.hop_details.first();
+                (
+                    s.hops,
+                    [
+                        first.map_or(0, |h| h.launch_elev_deg.to_bits()),
+                        first.map_or(0, |h| h.apex_alt_km.to_bits()),
+                        s.total_arc_km.to_bits(),
+                        s.total_absorption_db.to_bits(),
+                        s.free_space_loss_db.to_bits(),
+                        s.ground_reflection_loss_db.to_bits(),
+                        s.link.snr_db.to_bits(),
+                    ],
+                )
+            })
+            .collect()
+    }
+
+    /// The pool a solve runs in only decides where its rays are traced, so
+    /// one thread, a few threads and rayon's global pool give the same bits.
+    #[test]
+    fn main_solve_is_identical_in_any_pool() {
+        let inputs = Inputs::default();
+        let run_in = |threads: usize| {
+            let pool = ComputePool::new(PoolConfig {
+                execution: Execution::Parallel,
+                max_threads: Some(threads),
+            })
+            .unwrap();
+            pool.install(|| run_main(&inputs, &|| false).map(|r| fingerprint(&r)))
+                .expect("default scenario solves")
+        };
+        let global = run_main(&inputs, &|| false)
+            .map(|r| fingerprint(&r))
+            .expect("default scenario solves");
+        assert!(!global.is_empty(), "the default scenario finds a path");
+        assert_eq!(run_in(1), global);
+        assert_eq!(run_in(3), global);
+    }
+
+    #[test]
+    fn main_solve_stops_when_cancelled() {
+        assert!(matches!(
+            run_main(&Inputs::default(), &|| true),
+            Err(RunError::Cancelled)
+        ));
+    }
+}

@@ -155,6 +155,20 @@ impl ComputePool {
         self.execution
     }
 
+    /// Run `op` inside this pool, so any rayon work it does (such as the
+    /// parallel parts of a solve) uses this pool's threads instead of rayon's
+    /// global pool. In sequential mode `op` runs on the calling thread as is.
+    pub fn install<R, OP>(&self, op: OP) -> R
+    where
+        R: Send,
+        OP: FnOnce() -> R + Send,
+    {
+        match &self.pool {
+            Some(pool) => pool.install(op),
+            None => op(),
+        }
+    }
+
     /// Run `f` over every item, returning results in input order plus [`Timing`].
     ///
     /// Each item is timed individually; there is no shared mutable state, so the
@@ -372,10 +386,14 @@ mod tests {
         let pool = ComputePool::all_cores().unwrap();
         let input: Vec<u64> = (0..64).collect();
         // Give each item real, roughly-equal work so the numbers mean something.
+        // black_box keeps the optimiser from folding the loop away, which would
+        // leave pool overhead larger than the work.
         let (_out, timing) = pool.map(&input, |&n| {
             let mut acc = n;
             for i in 0..200_000u64 {
-                acc = acc.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(i);
+                acc = std::hint::black_box(
+                    acc.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(i),
+                );
             }
             acc
         });
