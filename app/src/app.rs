@@ -2,10 +2,11 @@
 //! service, and runs one frame as absorb, draw, update. All layout lives in
 //! [`crate::ui::shell`].
 
-use eframe::{App, CreationContext, Frame};
+use eframe::{App, CreationContext, Frame, Storage};
 use egui::Ui;
 
 use crate::jobs::Jobs;
+use crate::persist;
 use crate::state::AppState;
 use crate::ui::scratch::ViewScratch;
 use crate::ui::shell;
@@ -28,11 +29,21 @@ impl SkipzoneApp {
     }
 
     /// Build the app around a given job service, so a test can pass
-    /// [`Jobs::inline`].
+    /// [`Jobs::inline`]. Restores the saved settings from `cc.storage`.
     #[must_use]
     pub fn with_jobs(cc: &CreationContext<'_>, jobs: Jobs) -> Self {
-        let state = AppState::new();
-        let scratch = ViewScratch::new(&cc.egui_ctx, &state);
+        Self::restoring(cc, jobs, cc.storage)
+    }
+
+    /// Build the app and restore the saved settings from `storage`, if any.
+    /// Tests pass their own storage here.
+    #[must_use]
+    pub fn restoring(cc: &CreationContext<'_>, jobs: Jobs, storage: Option<&dyn Storage>) -> Self {
+        let mut state = AppState::new();
+        let mut scratch = ViewScratch::new(&cc.egui_ctx, &state);
+        if let Some(storage) = storage {
+            persist::load(storage, &mut state, &mut scratch);
+        }
         Self {
             state,
             scratch,
@@ -63,5 +74,15 @@ impl App for SkipzoneApp {
             ui.ctx().request_repaint();
         }
         update::update_all(&mut self.state, actions, &self.jobs);
+    }
+
+    fn save(&mut self, storage: &mut dyn Storage) {
+        persist::save(storage, &self.state, &self.scratch);
+    }
+
+    /// Only the settings in [`persist`] carry over. egui's own memory holds
+    /// window positions and other layout, which start fresh each run.
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 }

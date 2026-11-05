@@ -12,9 +12,13 @@ path = "src/main.rs"
 
 [dependencies]
 skipzone-iono = { path = "../crates/skipzone-iono" }
-skipzone-predict = { path = "../crates/skipzone-predict" }
-eframe = "0.36"
+skipzone-predict = { path = "../crates/skipzone-predict", features = ["serde"] }
+# `persistence` gives App::save and the storage handed to SkipzoneApp::new.
+eframe = { version = "0.36", features = ["persistence"] }
 egui = "0.36"
+# The saved settings, as RON in eframe's storage (see persist.rs).
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
 
 # Not clippy-pedantic, unlike the engine crate: pedantic lints on egui layout
 # code add churn without catching bugs.

@@ -6,6 +6,9 @@ use skipzone_app::app;
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1700.0, 980.0]),
+        // The window opens at its default size each run. Only the settings in
+        // `persist` are saved.
+        persist_window: false,
         ..Default::default()
     };
     eframe::run_native(

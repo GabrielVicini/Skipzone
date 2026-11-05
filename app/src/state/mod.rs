@@ -34,7 +34,7 @@ pub enum Station {
 
 /// Display preferences: they change how results are drawn, never a computed
 /// value.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Display {
     /// Draw the live day/night terminator shading on the map.
     pub show_terminator: bool,

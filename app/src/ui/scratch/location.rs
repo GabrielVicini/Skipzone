@@ -9,7 +9,7 @@
 
 use skipzone_iono::grid;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum LocationMode {
     /// Maidenhead locator, e.g. `IO91wm`.
     Grid,

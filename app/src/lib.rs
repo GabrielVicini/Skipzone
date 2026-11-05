@@ -9,10 +9,12 @@
 //! Each frame the app absorbs job responses into [`state::AppState`], draws
 //! it with [`ui::shell`], and applies the actions the draw emitted through
 //! [`update::update`]. Nothing in `ui` computes a physical quantity, and
-//! nothing in `state` mentions egui.
+//! nothing in `state` mentions egui. [`persist`] saves and restores the
+//! settings between runs.
 
 pub mod app;
 pub mod jobs;
+pub mod persist;
 pub mod state;
 pub mod ui;
 pub mod update;
