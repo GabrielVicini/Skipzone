@@ -15,8 +15,8 @@ ignore = [
     # Neither parses input from the network. Fixed in 0.41.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml via winit/accesskit; no untrusted XML parsed" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml via winit/accesskit; no untrusted XML parsed" },
-    # Unmaintained, pulled in by egui (fonts) and accesskit (Linux a11y).
-    { id = "RUSTSEC-2026-0192", reason = "ttf-parser via egui; unmaintained, no known vulnerability" },
+    # Unmaintained, pulled in by winit (window decorations) and accesskit (Linux a11y).
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser via winit; unmaintained, no known vulnerability" },
     { id = "RUSTSEC-2026-0370", reason = "zvariant via accesskit; unmaintained, no known vulnerability" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names via accesskit; unmaintained, no known vulnerability" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via accesskit; unmaintained, no known vulnerability" },
