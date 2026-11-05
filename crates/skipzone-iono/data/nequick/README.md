@@ -1,10 +1,10 @@
 # NeQuick G reference data
 
-**Status: in use.** `app/src/ccir.rs` compiles all thirteen files in with
+**Status: in use.** `crates/skipzone-iono/src/ccir.rs` compiles all thirteen files in with
 `include_str!` and evaluates the CCIR foF2 map, which is the app's default F2
 peak-density source. Measured against 70 219 GIRO ionosonde soundings it reads
 foF2 to 1.10 MHz RMS against the previous model's 1.70; see
-`wiki/Ionosphere-Model.md`.
+[How It Works](https://github.com/GabrielVicini/Skipzone/wiki/How-It-Works).
 
 The M(3000)F2 half of each file is parsed and evaluated but not yet consumed.
 
@@ -36,7 +36,7 @@ ITU-R P.531-16 to 5.6e-7 relative.
 
 ## If you are removing this
 
-Do not, without also removing `app/src/ccir.rs` and moving the default foF2
+Do not, without also removing `crates/skipzone-iono/src/ccir.rs` and moving the default foF2
 backend back to `Fof2Backend::Gridded` - the app will not compile otherwise.
 If you do remove it, delete the whole `data/nequick/` directory in one go:
 keeping the coefficient files without `_SOURCE_AND_LICENSE.txt` would breach the
