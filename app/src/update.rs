@@ -7,12 +7,18 @@
 
 use crate::jobs::{Jobs, Request, Response};
 use crate::state::{AppState, Busy};
-use crate::ui::actions::Action;
+use crate::ui::actions::{Action, InputChange};
 use crate::ui::map::view::ZOOM_STEP;
 
 /// Apply one action.
 pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
     match action {
+        Action::SetInput(change) => change.apply(&mut state.inputs),
+        Action::PlaceStation { lat, lon } => {
+            let station = state.ui.place;
+            InputChange::Position { station, lat, lon }.apply(&mut state.inputs);
+        }
+        Action::SetPlaceMode(place) => state.ui.place = place,
         Action::Calculate => {
             // Re-running replaces what the panel is showing; the panel
             // itself stays where the operator sized it.
@@ -186,6 +192,7 @@ mod tests {
     use skipzone_predict::scenario::Inputs;
 
     use super::*;
+    use crate::state::Station;
 
     /// A scenario that solves quickly: one hop, no sporadic E.
     fn cheap_scenario() -> Inputs {
@@ -267,5 +274,40 @@ mod tests {
         assert!(s.ui.modals.settings);
         assert!(s.ui.modals.about);
         assert!((s.inputs.scenario.freq_mhz - 10.1).abs() < 1e-12);
+    }
+
+    /// A map click moves whichever station is being placed, and only that one.
+    #[test]
+    fn a_map_click_moves_the_station_being_placed() {
+        let (mut s, jobs) = setup();
+        let tx = (s.inputs.scenario.tx_lat, s.inputs.scenario.tx_lon);
+        apply(
+            &mut s,
+            &jobs,
+            [
+                Action::SetPlaceMode(Station::Rx),
+                Action::PlaceStation {
+                    lat: 10.0,
+                    lon: 20.0,
+                },
+            ],
+        );
+        assert_eq!(s.ui.place, Station::Rx);
+        assert_eq!(
+            (s.inputs.scenario.rx_lat, s.inputs.scenario.rx_lon),
+            (10.0, 20.0)
+        );
+        assert_eq!((s.inputs.scenario.tx_lat, s.inputs.scenario.tx_lon), tx);
+
+        let typed = InputChange::Position {
+            station: Station::Tx,
+            lat: -5.0,
+            lon: 30.0,
+        };
+        apply(&mut s, &jobs, [Action::SetInput(typed)]);
+        assert_eq!(
+            (s.inputs.scenario.tx_lat, s.inputs.scenario.tx_lon),
+            (-5.0, 30.0)
+        );
     }
 }

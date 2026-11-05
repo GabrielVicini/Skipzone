@@ -27,7 +27,7 @@ pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch, out: &
                 });
             });
             ui.add_space(2.0);
-            stations::rows(ui, state, scratch);
+            stations::rows(ui, state, scratch, out);
         });
 
     scratch.header_height = panel.response.rect.height();

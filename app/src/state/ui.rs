@@ -5,8 +5,7 @@
 //! Text being typed, the open menu and last frame's layout sizes are not here.
 //! They belong to the views and live in [`crate::ui::scratch::ViewScratch`].
 
-use skipzone_predict::scenario::PlaceMode;
-
+use super::Station;
 use crate::ui::map::projection::Camera;
 
 /// The dialog windows.
@@ -92,7 +91,7 @@ pub struct UiState {
     /// panel rather than a window so it never covers the map.
     pub trace_open: bool,
     /// Which station a map click moves.
-    pub place: PlaceMode,
+    pub place: Station,
     pub selection: Selection,
     pub map: MapState,
 }
@@ -102,7 +101,7 @@ impl Default for UiState {
         Self {
             modals: Modals::default(),
             trace_open: false,
-            place: PlaceMode::Tx,
+            place: Station::Tx,
             selection: Selection::default(),
             map: MapState::default(),
         }

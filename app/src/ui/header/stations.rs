@@ -1,47 +1,49 @@
 //! The TX and RX rows: each station's position, typed as either a Maidenhead
 //! grid square or decimal degrees.
 //!
-//! The scenario's latitude/longitude is authoritative. A row writes to it only
-//! when what has been typed parses, and rewrites its own buffers from it
-//! whenever the operator is not typing - which is what lets a map click move a
-//! station and have both notations follow.
+//! The scenario's latitude/longitude is authoritative. A row emits a new
+//! position only when what has been typed parses, and rewrites its own
+//! buffers from the scenario whenever the operator is not typing - which is
+//! what lets a map click move a station and have both notations follow.
 
 use egui::{Color32, RichText, Ui};
 
-use crate::state::AppState;
+use crate::state::{AppState, Station};
+use crate::ui::actions::{Action, InputChange};
 use crate::ui::scratch::{LocationEntry, LocationMode, ViewScratch};
 use crate::ui::theme::MUTED;
 use crate::ui::widgets::fields;
-use skipzone_predict::scenario::PlaceMode;
 
 /// TX above RX, both on the solid header background.
-pub fn rows(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
-    let tx = (state.inputs.scenario.tx_lat, state.inputs.scenario.tx_lon);
-    if let Some((lat, lon)) = row(
-        ui,
-        "TX",
-        Color32::from_rgb(0xD0, 0x21, 0x1C),
-        PlaceMode::Tx,
-        &mut state.ui.place,
-        &mut scratch.tx,
-        tx,
-    ) {
-        state.inputs.scenario.tx_lat = lat;
-        state.inputs.scenario.tx_lon = lon;
+pub fn rows(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+    let inputs = &state.inputs.scenario;
+    let mut place = state.ui.place;
+    for (station, label, colour, entry, current) in [
+        (
+            Station::Tx,
+            "TX",
+            Color32::from_rgb(0xD0, 0x21, 0x1C),
+            &mut scratch.tx,
+            (inputs.tx_lat, inputs.tx_lon),
+        ),
+        (
+            Station::Rx,
+            "RX",
+            Color32::from_rgb(0x14, 0x65, 0xC0),
+            &mut scratch.rx,
+            (inputs.rx_lat, inputs.rx_lon),
+        ),
+    ] {
+        if let Some((lat, lon)) = row(ui, label, colour, station, &mut place, entry, current) {
+            out.push(Action::SetInput(InputChange::Position {
+                station,
+                lat,
+                lon,
+            }));
+        }
     }
-
-    let rx = (state.inputs.scenario.rx_lat, state.inputs.scenario.rx_lon);
-    if let Some((lat, lon)) = row(
-        ui,
-        "RX",
-        Color32::from_rgb(0x14, 0x65, 0xC0),
-        PlaceMode::Rx,
-        &mut state.ui.place,
-        &mut scratch.rx,
-        rx,
-    ) {
-        state.inputs.scenario.rx_lat = lat;
-        state.inputs.scenario.rx_lon = lon;
+    if place != state.ui.place {
+        out.push(Action::SetPlaceMode(place));
     }
 }
 
@@ -51,8 +53,8 @@ fn row(
     ui: &mut Ui,
     label: &str,
     colour: Color32,
-    this: PlaceMode,
-    place: &mut PlaceMode,
+    this: Station,
+    place: &mut Station,
     entry: &mut LocationEntry,
     current: (f64, f64),
 ) -> Option<(f64, f64)> {

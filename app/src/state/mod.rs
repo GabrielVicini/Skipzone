@@ -22,6 +22,13 @@ use skipzone_predict::solve::Solution;
 pub use results::{Busy, CoverageResults, JobErrors, Results, SolveResults, SweepResults};
 pub use ui::{MapState, Modal, Modals, Selection, UiState};
 
+/// One end of the path.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Station {
+    Tx,
+    Rx,
+}
+
 /// Display preferences: they change how results are drawn, never a computed
 /// value.
 #[derive(Clone, Copy, PartialEq, Debug)]

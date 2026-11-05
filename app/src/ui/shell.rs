@@ -10,7 +10,6 @@ use egui::Ui;
 use crate::state::AppState;
 use crate::ui::actions::Action;
 use crate::ui::scratch::ViewScratch;
-use skipzone_predict::scenario::PlaceMode;
 
 use super::{header, map, modals, overlays, theme, trace_panel};
 
@@ -29,28 +28,10 @@ pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) -> Vec
     // The map is the centrepiece: it takes every pixel the header and the
     // trace panel left.
     if let Some((lat, lon)) = map::view::draw(ui, state, scratch) {
-        place(state, scratch, lat, lon);
+        actions.push(Action::PlaceStation { lat, lon });
     }
 
     overlays::draw(&ctx, state, scratch, &mut actions);
     modals::draw(&ctx, state, &mut actions);
     actions
-}
-
-/// Move whichever station the operator is placing to a clicked position, and
-/// re-fill that station's entry buffers so both notations follow immediately.
-fn place(state: &mut AppState, scratch: &mut ViewScratch, lat: f64, lon: f64) {
-    let inputs = &mut state.inputs.scenario;
-    match state.ui.place {
-        PlaceMode::Tx => {
-            inputs.tx_lat = lat;
-            inputs.tx_lon = lon;
-            scratch.tx.refresh(lat, lon);
-        }
-        PlaceMode::Rx => {
-            inputs.rx_lat = lat;
-            inputs.rx_lon = lon;
-            scratch.rx.refresh(lat, lon);
-        }
-    }
 }
