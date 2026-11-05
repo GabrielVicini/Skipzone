@@ -1,5 +1,10 @@
 # Conventions
 
+- **Crate:** `crates/skipzone`, and every crate built on it
+- **Implemented in:** `src/lib.rs`, `src/magnetoionic.rs::appleton_hartree`, `src/geo.rs::launch_direction`, `src/units.rs`
+- **Tested by:** `src/magnetoionic.rs::tests::absorption_sign_and_collisionless_reality`, `tests/absorption.rs::absorption_monotone_and_positive`, `src/geo.rs::tests::launch_direction_is_unit_and_oriented`
+- **Section anchors used by code:** none; the file is cited as a whole
+
 Fixed crate-wide. Every other derivation assumes these.
 
 ## Coordinates

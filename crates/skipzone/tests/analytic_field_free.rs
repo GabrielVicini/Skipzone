@@ -1,5 +1,5 @@
 //! Validation of the field-free tracer against solutions derived in
-//! docs/derivations/analytic-solutions.md. Every reference here is computed
+//! docs/derivations/engine/analytic-solutions.md. Every reference here is computed
 //! from that document's formulas, independently of the tracer.
 
 use skipzone::collision::ZeroCollisions;
@@ -286,7 +286,7 @@ fn bouguer_invariant_and_apex_condition_along_ray() {
         )
         .unwrap();
     // Bouguer L = n r sin(chi) and the azimuthal momentum are exact
-    // invariants of the continuous equations (analytic-solutions.md sec. 1);
+    // invariants of the continuous equations (docs/derivations/engine/analytic-solutions.md §1);
     // deviation is pure integrator error, budget ~ rtol * path/step scale.
     assert!(max_dev_l < 1e-9, "Bouguer deviation {max_dev_l:e}");
     assert!(max_dev_pphi < 1e-9, "p_phi deviation {max_dev_pphi:e}");
@@ -329,7 +329,7 @@ fn convergence_order_is_five() {
     );
     let beta = Radians::from_degrees(35.0);
     let az = Radians::from_degrees(90.0);
-    // Span crosses the apex (smooth in sigma; haselgrove.md section 7).
+    // Span crosses the apex (smooth in sigma; docs/derivations/engine/haselgrove.md §7).
     let span = 900e3;
     let sol = |n: usize| {
         tracer

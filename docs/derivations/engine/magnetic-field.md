@@ -1,8 +1,13 @@
 # Geomagnetic field from a scalar potential
 
-Implements: `crates/skipzone/src/mag/`. Conventions: see `conventions.md`.
+- **Crate:** `crates/skipzone`
+- **Implemented in:** `src/mag/igrf.rs::IgrfModel::sample`, `src/mag/legendre.rs::schmidt`, `src/mag/dipole.rs::Dipole::sample`, `src/mag/mod.rs::div_curl`
+- **Tested by:** `src/mag/legendre.rs::tests::low_degree_closed_forms`, `src/mag/legendre.rs::tests::schmidt_normalisation`, `src/mag/legendre.rs::tests::derivatives_match_finite_differences`, `src/mag/igrf.rs::tests::parses_and_field_is_potential`, `src/mag/igrf.rs::tests::jacobian_matches_finite_differences`, `src/mag/igrf.rs::tests::degree_one_truncation_matches_analytic_dipole`, `src/mag/dipole.rs::tests::axial_magnitude_matches_closed_form`, `src/mag/dipole.rs::tests::tilted_dipole_is_divergence_and_curl_free`
+- **Section anchors used by code:** §1, §2, §3, §4, §5
 
-## 1. Potential and components
+Symbols and sign conventions: [conventions.md](../conventions.md).
+
+## 1 Potential and components
 
 In the current-free region above the Earth's surface, `∇×B = 0` and
 `∇·B = 0`, so `B = -∇V` with `∇²V = 0`. The internal-source solution of
@@ -29,7 +34,7 @@ Since `d/dr (a/r)^{n+1} = -((n+1)/r)(a/r)^{n+1}`:
 Sanity anchor: Earth's `g_1^0 < 0`, so at the north geographic pole
 `B_r = 2(a/r)³g_1^0 < 0`: the field points downward there, as observed.
 
-## 2. Coordinate Jacobian ∂B_i/∂(r,θ,φ)
+## 2 Coordinate Jacobian ∂B_i/∂(r,θ,φ)
 
 Needed analytically by the ray equations (chain rule through Y and the field
 direction). Each component is a finite sum of terms
@@ -46,7 +51,7 @@ coordinate poles**; the tracer's pole guard keeps rays away, and the field
 module documents the restriction rather than special-casing a region the
 tracer cannot enter.
 
-## 3. Schmidt semi-normalised Legendre functions
+## 3 Schmidt semi-normalised Legendre functions
 
 Definition: with `P̂_n^m` the unnormalised associated Legendre functions
 *without* the Condon–Shortley phase (geomagnetic convention),
@@ -102,7 +107,7 @@ recurrences for `S' = dS/dθ` and `S'' = d²S/dθ²` carried alongside `S`
 
 Derivatives are validated against central finite differences in tests.
 
-## 4. Centered tilted dipole (n = 1 closed form)
+## 4 Centered tilted dipole (n = 1 closed form)
 
 Keeping only n = 1 with `G(φ) = g_1^1 cos φ + h_1^1 sin φ` and
 `S_1^0 = cosθ`, `S_1^1 = sinθ`:
@@ -119,7 +124,7 @@ in tests.
 The IGRF truncated to n = 1 must agree with this closed form to rounding
 error; asserted in tests (internal consistency, not external differencing).
 
-## 5. Test invariants
+## 5 Test invariants
 
 From the Jacobian, in spherical coordinates:
 

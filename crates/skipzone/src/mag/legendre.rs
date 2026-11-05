@@ -1,6 +1,6 @@
 //! Schmidt semi-normalised associated Legendre functions `S_n^m(theta)` with
 //! first and second theta-derivatives, computed by the recurrences derived in
-//! docs/derivations/magnetic-field.md section 3.
+//! docs/derivations/engine/magnetic-field.md §3.
 //!
 //! Geomagnetic convention: no Condon-Shortley phase. Valid for all theta, but
 //! callers dividing by sin(theta) (the B_phi terms) must stay away from the
@@ -155,7 +155,7 @@ mod tests {
         }
     }
 
-    /// Hand-expanded Schmidt functions (derivation doc, section 3 checks).
+    /// Hand-expanded Schmidt functions (docs/derivations/engine/magnetic-field.md §3).
     #[test]
     fn low_degree_closed_forms() {
         for &theta in &[0.3, 1.0, std::f64::consts::FRAC_PI_2, 2.4] {

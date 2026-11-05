@@ -1,7 +1,7 @@
 //! Validation for absorption, the integral of
-//! (omega/c) Im(n) along the ray. References: docs/derivations/
-//! haselgrove.md section 4 and the collisional sign conventions in
-//! conventions.md. Collision magnitudes in these scenarios are
+//! (omega/c) Im(n) along the ray. References:
+//! docs/derivations/engine/haselgrove.md §4 and the collisional sign conventions in
+//! docs/derivations/conventions.md. Collision magnitudes in these scenarios are
 //! test-arbitrary (documented in collision.rs: the crate provides no
 //! default); every assertion here is an invariant that cannot depend on
 //! the chosen magnitude.
@@ -144,7 +144,7 @@ fn absorption_monotone_and_positive() {
 }
 
 /// Reciprocity extends to absorption: n(-k) = n(k) makes the attenuation
-/// integral direction-independent (appleton-hartree.md; the Y_L^2/Y_T^2
+/// integral direction-independent (docs/derivations/engine/appleton-hartree.md §3; the Y_L^2/Y_T^2
 /// structure covers the complex index, not just its real part).
 #[test]
 fn absorption_reciprocity() {

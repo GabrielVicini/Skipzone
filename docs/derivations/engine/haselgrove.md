@@ -1,8 +1,13 @@
 # Haselgrove ray equations in spherical coordinates, derived canonically
 
-Implements: `crates/skipzone/src/hamiltonian.rs`, `crates/skipzone/src/trace.rs`. Conventions: `conventions.md`.
+- **Crate:** `crates/skipzone`
+- **Implemented in:** `src/hamiltonian.rs::RayEquations::rhs`, `src/hamiltonian.rs::RayEquations::hamiltonian`, `src/hamiltonian.rs::RayEquations::initial_state`, `src/trace.rs::Tracer::trace`
+- **Tested by:** `tests/analytic_field_free.rs::bouguer_invariant_and_apex_condition_along_ray`, `tests/magnetoionic_3d.rs::reciprocity_forward_backward`, `tests/magnetoionic_3d.rs::spitze_meridian_ray_fails_typed`, `tests/absorption.rs::field_free_absorption_matches_quadrature`
+- **Section anchors used by code:** §1, §2, §3, §4, §6, §7
 
-## 1. Canonical variables
+Symbols and sign conventions: [conventions.md](../conventions.md).
+
+## 1 Canonical variables
 
 Ray phase psi = S(r) - omega t, wave vector k = grad S. In spherical
 coordinates dl = dr r_hat + r dtheta theta_hat + r sin(theta) dphi phi_hat, so
@@ -32,7 +37,7 @@ partials at fixed position. (Derivation: substitute k_th = p_th/r,
 k_ph = p_ph/(r sin th) into D, differentiate, e.g. dp_th/dtau = -dD/dtheta|_p
 = -D_th + D_kph k_ph cot th, and dp_th/dtau = (dr/dtau) k_th + r dk_th/dtau.)
 
-## 2. The Hamiltonian and the working variables
+## 2 The Hamiltonian and the working variables
 
     H(q, m) = 1/2 [ m.m - Re n^2(q, m_hat) ] ,   m := (c/omega) k
 
@@ -71,7 +76,7 @@ density/collision coordinate partials. Zero field: v = m exactly and G has
 only the d_x term - the field-free (2D) tracer is this system with Y = 0, not
 separate code.
 
-## 3. Group delay from the extended phase space
+## 3 Group delay from the extended phase space
 
 Treat (t, -omega) as a conjugate pair: dt/dtau = -dH/domega at fixed k.
 With H above (k fixed, so m = ck/omega varies as omega^-1):
@@ -88,7 +93,7 @@ Checks: vacuum gives dP'/ds = 1; isotropic collisionless gives
 dP'/ds = n^2 + X = 1 (with ds arc length = n dsigma this is the classical
 group index mu' = 1/mu).
 
-## 4. Phase path, absorption, arc length
+## 4 Phase path, absorption, arc length
 
     dP/ds = m . v          (phase path; = (c/omega) k . dr/dsigma)
     dA/ds = (omega/c) Im(n) |v|   , n = principal sqrt of complex n^2;
@@ -97,7 +102,7 @@ group index mu' = 1/mu).
 
 Absorption in nepers; the field amplitude decays as exp(-A).
 
-## 5. Doppler
+## 5 Doppler
 
 For a time-varying medium the received frequency shifts by
 df = -(f/c) dP/dt|_medium. All media in this crate are static, so the shift
@@ -105,7 +110,7 @@ is identically zero; the observable P is what a caller differentiates across
 model epochs to get Doppler. No integrand is carried for it (documented
 scope decision, not an omission).
 
-## 6. Initialization and termination
+## 6 Initialization and termination
 
 Launch at point q0 with unit wave normal k_hat (from elevation/azimuth):
 cos(Th) from k_hat and b; n0^2 = Re AH; if n0^2 <= 0 the mode is evanescent
@@ -113,7 +118,7 @@ at the source (typed error); else m = sqrt(n0^2) k_hat, which puts the state
 exactly on shell (n depends only on direction, so no iteration is needed).
 H = 0 is then a conserved diagnostic; its drift measures integrator error.
 
-## 7. Conditioning near reflection
+## 7 Conditioning near reflection
 
 At an O-mode apex n^2 -> 0: v -> m -> 0, so d(position)/dsigma -> 0 while
 dm/dsigma -> (1/2) grad n^2, finite. The trajectory is smooth in sigma; this

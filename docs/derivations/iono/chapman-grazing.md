@@ -1,12 +1,17 @@
 # Chapman grazing-incidence function and the twilight D region
 
-Derived here for `crates/skipzone-iono/src/chapman.rs`. Unlike everything else in
-docs/derivations/, this supports the *scenario-level* app, not the engine
-crate: it is the day/night-aware D-region absorbing layer the app feeds to the
-(unchanged) engine tracer. Notation and sign conventions follow conventions.md
-and density.rs.
+- **Crate:** `crates/skipzone-iono`
+- **Implemented in:** `src/chapman.rs::erfcx`, `src/chapman.rs::erfcx_deriv`, `src/chapman.rs::chapman_grazing`, `src/chapman.rs::SolarChapmanLayer::zenith_angle`, `src/chapman.rs::SolarChapmanLayer::sample`
+- **Tested by:** `src/chapman.rs::tests::erfcx_reference_values`, `src/chapman.rs::tests::erfcx_deriv_matches_fd`, `src/chapman.rs::tests::chapman_grazing_limits`, `src/chapman.rs::tests::chapman_grazing_deriv_matches_fd`, `src/chapman.rs::tests::terminator_layer_is_finite_and_thinned`, `src/chapman.rs::tests::deep_night_is_vacuum`, `src/chapman.rs::tests::horizontal_partials_match_fd`
+- **Section anchors used by code:** §1, §2, §3, §4; equations (3), (4), (5), (7), (8)
 
-## 1. Why the plane-parallel layer is not enough
+This is the ionosphere crate's derivation, not the engine's: the day/night-aware
+Chapman layer that `skipzone-iono` builds and hands to the unchanged engine
+tracer through its `ElectronDensity` trait. `skipzone-predict` builds its D, E
+and F2 layers from it. Notation and sign conventions follow
+[conventions.md](../conventions.md).
+
+## 1 Why the plane-parallel layer is not enough
 
 The engine's `ChapmanLayer::with_zenith_angle` places an alpha-Chapman layer
 
@@ -29,7 +34,7 @@ consequences the midpoint-`sec(chi)` model cannot represent:
 The fix replaces `sec(chi)` by the Chapman grazing-incidence function
 `Ch(X, chi)` and evaluates `chi` locally at each sampled point.
 
-## 2. The Chapman function
+## 2 The Chapman function
 
 `Ch(X, chi)` is the ratio of the slant optical depth to the vertical optical
 depth for an exponential atmosphere on a sphere, with
@@ -70,7 +75,7 @@ X is taken constant at `X = r_m / H` (the reference height); it varies by
 < 0.5 % across the layer, so `dCh/dr = 0` and Ch depends on position only
 through chi.
 
-## 3. Scaled complementary error function
+## 3 Scaled complementary error function
 
 `erfcx(t)`, t >= 0 (the argument in (3) is always non-negative), is computed
 without any external crate:
@@ -91,7 +96,7 @@ Derivative (needed for the horizontal density gradient, section 4):
 
 from d/dt ( e^{t^2} erfc(t) ) = 2 t e^{t^2} erfc(t) - (2/sqrt(pi)).
 
-## 4. Local zenith angle and density gradients
+## 4 Local zenith angle and density gradients
 
 The engine's density trait returns Ne plus its coordinate partials
 (d/dr, d/dtheta, d/dphi). Unlike the spherically-symmetric engine profiles this
@@ -134,7 +139,7 @@ with `dCh/dchi` obtained by differentiating (3a)/(3b) and using (4):
 All partials are checked against central finite differences in the module
 tests, both modes of (3) and across the 90 deg branch.
 
-## 5. Numerical night guard
+## 5 Numerical night guard
 
 For chi well past 90 deg the `e^{X(1-sin chi)}` term in (3b) overflows f64
 (argument exceeds ~709 near chi ~ 100 deg at X = 1076). By then `Ch e^{-z}`

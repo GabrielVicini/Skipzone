@@ -1,6 +1,11 @@
 # Appleton–Hartree dispersion relation, derived
 
-Implements: `crates/skipzone/src/magnetoionic.rs`. Conventions: `conventions.md`
+- **Crate:** `crates/skipzone`
+- **Implemented in:** `src/magnetoionic.rs::appleton_hartree`, `src/constants.rs::OMEGA_P_SQ_PER_DENSITY`, `src/constants.rs::OMEGA_H_PER_TESLA`
+- **Tested by:** `src/magnetoionic.rs::tests::transverse_and_longitudinal_limits`, `src/magnetoionic.rs::tests::reflection_conditions`, `src/magnetoionic.rs::tests::agrees_with_classical_form`, `src/magnetoionic.rs::tests::ordinary_stable_across_reflection`, `src/magnetoionic.rs::tests::partials_match_finite_differences`, `src/magnetoionic.rs::tests::absorption_sign_and_collisionless_reality`, `src/magnetoionic.rs::tests::zero_field_modes_bit_identical_and_isotropic`
+- **Section anchors used by code:** §1, §3, §4, §6, §7
+
+Symbols and sign conventions: [conventions.md](../conventions.md)
 (`exp(-iωt)`, `U = 1 + iZ`, `Im(n) > 0` = loss).
 
 Assumptions, stated up front: cold electron plasma (no thermal corrections),
@@ -9,7 +14,7 @@ frequency enters as a velocity-independent drag ν (documented limitation: no
 Sen–Wyller generalisation), medium locally homogeneous over a wavelength
 (WKB / ray optics).
 
-## 1. Dielectric tensor
+## 1 Dielectric tensor
 
 Linearised electron momentum equation with static B₀ = |B₀| b̂ and drag:
 
@@ -31,7 +36,7 @@ Z = 0), as it must for electrons. Define S = (R+L)/2, D = (R-L)/2:
 
     S = (U(U-X) - Y²)/(U² - Y²) ,  D = -XY/(U² - Y²) ,  RL = ((U-X)² - Y²)/(U² - Y²)
 
-## 2. Booker quartic and its discriminant
+## 2 Booker quartic and its discriminant
 
 `n×(n×E) + εE = 0` with n = ck/ω at angle θ to b̂ (c := cos θ, s := sin θ)
 has nontrivial solutions when (standard determinant expansion of the 3×3
@@ -50,7 +55,7 @@ form): using `(1+c²)² = (2-s²)²` and `S² - RL = D²`,
 P²S²(4-4s²+s⁴) - 4P²RLc² = P²S²s⁴ + 4P²c²(S²-RL); collecting gives
 s⁴(RL-PS)² + 4P²D²c².]
 
-## 3. Reduction to Appleton–Hartree
+## 3 Reduction to Appleton–Hartree
 
 Substituting the section-1 values and clearing the common denominator
 `U(U² - Y²)` turns the quartic into `A' n⁴ - B' n² + C' = 0` with
@@ -89,7 +94,7 @@ recovers the classical textbook form
 `n² = 1 - X/[U - Y_T²/(2(U-X)) ± √(Y_T⁴/4(U-X)² + Y_L²)]`; (AH) is the
 form that remains meaningful at W = 0.
 
-## 4. Mode labels and branch conventions
+## 4 Mode labels and branch conventions
 
 Square root: **principal branch** (Re ≥ 0; for a non-negative real argument
 this is the ordinary real root). For Z = 0 the argument `¼Y_T⁴ + Y_L²W²` is
@@ -107,7 +112,7 @@ Labels, anchored by limits (each is a unit test):
 - Longitudinal (Y_T = 0, W > 0): O → 1 - X/(U+|Y_L|), X → 1 - X/(U-|Y_L|),
   the L/R circular waves.
 
-## 5. Numerically stable evaluation forms
+## 5 Numerically stable evaluation forms
 
 Near O-mode reflection X → 1 (W → 0) the classical form suffers
 `Y_T²/(2W) → ∞` cancellation and (AH) becomes 0/0. Exact rewrite: with
@@ -124,7 +129,7 @@ Both are algebraically identical to (AH); the O form makes the X → 1
 behaviour manifest: n² → 1 - X/U, which vanishes at X = 1, Z = 0. This is
 the O reflection condition for every θ except the degenerate window below.
 
-## 6. Conditioning and known degeneracies (spec: state them)
+## 6 Conditioning and known degeneracies (spec: state them)
 
 - **X = 1, θ = 0 (Ellis window / critical coupling).** The limits X→1 and
   θ→0 do not commute; the dispersion surfaces are degenerate and no global
@@ -147,7 +152,7 @@ the O reflection condition for every θ except the degenerate window below.
   +,-,*,/ and √ of a non-negative real, so collisionless evaluation returns
   Im = 0.0 exactly, making "zero collisions ⇒ zero absorption" bit-exact.
 
-## 7. Analytic partial derivatives
+## 7 Analytic partial derivatives
 
 All ray-equation gradients come from the complex differentials of the forms
 in section 5, with a1 := Y_L², a2 := Y_T², W = U - X:

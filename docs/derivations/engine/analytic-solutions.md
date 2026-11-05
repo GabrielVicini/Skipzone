@@ -1,10 +1,15 @@
 # Analytic reference solutions for the field-free tracer
 
-All derived here from scratch; used by `crates/skipzone/tests/analytic_field_free.rs`.
+- **Crate:** `crates/skipzone`
+- **Implemented in:** `tests/common/mod.rs::bouguer_reference`, `tests/common/mod.rs::qp_closed_form`, `src/density.rs::QuasiParabolicLayer`, `src/density.rs::LinearLayer`
+- **Tested by:** `tests/analytic_field_free.rs::vacuum_rays_are_straight`, `tests/analytic_field_free.rs::quasi_parabolic_closed_form_agreement`, `tests/analytic_field_free.rs::qp_closed_form_cross_checked_by_quadrature`, `tests/analytic_field_free.rs::chapman_linear_parabolic_match_bouguer_quadrature`, `tests/analytic_field_free.rs::bouguer_invariant_and_apex_condition_along_ray`, `tests/homing.rs::qp_field_free_agrees_with_closed_form_and_between_methods`
+- **Section anchors used by code:** §1, §4, §5, §6
+
+All derived here from scratch.
 Setting: isotropic (Y = 0), collisionless (Z = 0), spherically stratified
 n = n(r); ground radius r0; launch elevation beta.
 
-## 1. Bouguer invariant (derived from the ray equations)
+## 1 Bouguer invariant (derived from the ray equations)
 
 For n = n(r) the Haselgrove system (haselgrove.md section 2, v = m) has
 G_th = G_ph = 0, and
@@ -24,7 +29,7 @@ A second exact invariant for any phi-independent medium: p_ph = r sin(th) m_ph
 (shown by direct substitution the same way). Both are asserted along traced
 rays.
 
-## 2. Ray integrals in a stratified medium
+## 2 Ray integrals in a stratified medium
 
 From C = n r sin(chi): along the up-leg,
 dr/ds(arc) = cos(chi), r dDelta/ds(arc) = sin(chi) with Delta the central
@@ -38,7 +43,7 @@ angle, so
 The turning point r_t solves n^2 r_t^2 = C^2. A ray that reflects has
 Delta_total = 2 * integral(r0 -> r_t), etc., by up/down symmetry.
 
-## 3. Vacuum (n = 1): straight lines
+## 3 Vacuum (n = 1): straight lines
 
     Delta(r) = arccos(C/r) - arccos(C/r0),  s(r) = sqrt(r^2 - C^2) - sqrt(r0^2 - C^2)
 
@@ -47,7 +52,7 @@ phase = arc = chord length; the traced direction re-expressed in a fixed
 Cartesian frame must be constant, and its wander is the reported integrator
 error ("zero density means exactly straight rays").
 
-## 4. Quasi-parabolic layer: closed forms
+## 4 Quasi-parabolic layer: closed forms
 
 Layer (density.rs): Ne = Nm [1 - ((r - rm) rb/(ym r))^2] on [rb, r_top],
 rb = rm - ym. With F2 := (fc/f)^2 (fc = critical frequency of Nm):
@@ -111,7 +116,7 @@ J_k := I_k(r_t) - I_k(rb):
 At r_t, F = 0: I2 and I4's sqrt(F) terms vanish; asinh arguments are finite
 (u(r_t) = -1), so every expression is evaluable without limits.
 
-## 5. Linear-gradient rays: parabolas, not circles (spec correction)
+## 5 Linear-gradient rays: parabolas, not circles (spec correction)
 
 Flat stratified geometry, Snell n sin(theta) = C_f: the ray curvature is
 d(theta)/d(arc) = -(1/n) dn/dz sin(theta) = -(C_f/n^2) dn/dz. A circular arc
@@ -129,7 +134,7 @@ statements are the two above). In spherical geometry neither profile is
 elementary (n^2 r^2 - C^2 becomes cubic), so the spherical tracer is checked
 against:
 
-## 6. Bouguer quadrature reference (any stratified profile)
+## 6 Bouguer quadrature reference (any stratified profile)
 
 The section-2 integrals evaluated by high-order numerical quadrature give a
 tracer-independent reference for *any* n(r) (used for linear, parabolic and

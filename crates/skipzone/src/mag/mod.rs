@@ -2,7 +2,7 @@
 //! local (r_hat, theta_hat, phi_hat) basis in tesla; Jacobian entries are
 //! plain coordinate partials of those component functions. The basis-rotation
 //! terms are handled once, in the Haselgrove derivation
-//! (docs/derivations/haselgrove.md).
+//! (docs/derivations/engine/haselgrove.md §1).
 
 mod dipole;
 mod igrf;
@@ -44,7 +44,7 @@ impl MagneticField for ZeroField {
 }
 
 /// Divergence and curl from a sample, spherical-coordinate formulas of
-/// docs/derivations/magnetic-field.md section 5. Test-only: a potential field
+/// docs/derivations/engine/magnetic-field.md §5. Test-only: a potential field
 /// must return zero for both, which exercises every Jacobian entry.
 #[cfg(test)]
 pub(crate) fn div_curl(p: &SphericalPoint, s: &FieldSample) -> (f64, [f64; 3]) {

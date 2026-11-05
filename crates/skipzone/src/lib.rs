@@ -18,7 +18,8 @@
 //!   integrator state is raw `f64` in SI units, converted at the edges.
 //!
 //! Every equation is derived in `docs/derivations/` before implementation;
-//! code comments cite the derivation file.
+//! code comments cite the derivation file and section, for example
+//! docs/derivations/engine/haselgrove.md §2.
 
 pub mod collision;
 pub mod constants;
