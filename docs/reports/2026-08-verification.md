@@ -3,8 +3,7 @@
 > **Snapshot of commit `d92bf9f` (2026-08-10). Not maintained: numbers may not
 > match current code.** Most of the evidence below comes from GIRO ionosonde
 > data and a WSPR corpus fetched into the git-ignored `corpus/` directory, so
-> it cannot be regenerated from the repository alone. `HANDOFF.md`, cited in
-> section 10, has since been deleted from the repository.
+> it cannot be regenerated from the repository alone.
 
 **Report date:** 2026-08-10
 **Configuration under test:** commit `d92bf9f`, `skipzone` 0.1.0 / `skipzone-app` 0.1.0, rustc 1.97.1, Windows 11 x86-64
@@ -419,7 +418,7 @@ rarely seen in a research codebase.
 
 **The stale baseline is the one real reporting problem.** The headline accuracy
 figures describe a configuration that no longer ships. That is not misconduct,
-it is an unfinished step clearly flagged in `HANDOFF.md`, but until the
+it is an unfinished step flagged in the project notes, but until the
 calibration is re-run the project genuinely does not know its current end-to-end
 accuracy. Given that foF2 RMS improved from 1.70 to 1.10 MHz and correlation
 from 0.723 to 0.894, there is reason to expect improvement, and expectation is
