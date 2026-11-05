@@ -1,6 +1,6 @@
 //! Editable state for one station's position.
 //!
-//! The authoritative position always lives in [`crate::scenario::Inputs`] as a
+//! The authoritative position always lives in [`skipzone_predict::scenario::Inputs`] as a
 //! latitude/longitude pair - the map, the solver and the terminator all read it
 //! from there. This type holds only what typing needs: the text the operator
 //! has entered so far and which of the two notations they are entering it in.
@@ -73,7 +73,7 @@ impl LocationEntry {
         // The Mercator limit, not the pole: past it there is no basemap to put
         // a station on, and a typed position must be reachable the same way a
         // clicked one is.
-        let limit = crate::coverage::LAT_LIMIT_DEG;
+        let limit = skipzone_predict::coverage::LAT_LIMIT_DEG;
         ((-limit..=limit).contains(&lat) && (-180.0..=180.0).contains(&lon)).then_some((lat, lon))
     }
 

@@ -39,7 +39,7 @@ angle, local solar time. This is what makes the ionosphere day/night aware.
 ### `coastline`
 
 Decides whether a point is sea, fresh water or land, from the Natural Earth
-1:50m `land` and `lakes` polygon datasets bundled under `app/src/assets/`.
+1:50m `land` and `lakes` polygon datasets bundled under `crates/skipzone-predict/src/assets/`.
 
 Two things to know. First, it classifies **water versus land only**; it does not
 distinguish sea state, ice or terrain. Second, at 1:50m resolution small

@@ -22,9 +22,9 @@
 //!
 //! So the harness measures bias and spread, not skill.
 
-use crate::noise::OperatingMode;
-use crate::scenario::Inputs;
 use skipzone_iono::grid;
+use skipzone_predict::noise::OperatingMode;
+use skipzone_predict::scenario::Inputs;
 
 /// Reference bandwidth WSPR SNRs are quoted in, Hz.
 pub const WSPR_REFERENCE_BANDWIDTH_HZ: f64 = 2500.0;
@@ -74,7 +74,7 @@ impl WsprSpot {
     /// defined in 2500 Hz.
     ///
     /// The receiver's noise environment (for example
-    /// [`crate::noise::NoiseEnvironment::Rural`]) is an assumption rather than
+    /// [`skipzone_predict::noise::NoiseEnvironment::Rural`]) is an assumption rather than
     /// part of the measurement, so it comes from `base`. It is worth roughly
     /// 10 dB between city and quiet rural. It is also nearly unidentifiable from
     /// WSPR: being constant per receiver, a two-way fixed-effects fit absorbs it
@@ -313,7 +313,12 @@ fn percentile(sorted: &[f64], q: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::NoiseEnvironment;
+    use skipzone_predict::antenna::GainCurve;
+    use skipzone_predict::calib::AtmosphericAnchors;
+    use skipzone_predict::noise::{
+        LinkBudget, LinkSettings, NoiseEnvironment, NoiseFloor, dbm_from_watts,
+    };
+    use skipzone_predict::scenario::Season;
 
     const SAMPLE: &str = "\
 # a comment
@@ -453,5 +458,52 @@ mod tests {
         assert!((percentile(&v, 0.5) - 2.5).abs() < 1e-12);
         assert!(percentile(&[], 0.5).is_nan());
         assert!((percentile(&[7.0], 0.9) - 7.0).abs() < 1e-12);
+    }
+
+    /// The calibrated bias must reach the probability as well as the SNR:
+    /// `model_bias_db` is subtracted from `snr_db`, `margin_db` derives from
+    /// `snr_db`, and `decode_probability` from `margin_db`.
+    #[test]
+    fn the_calibrated_bias_reaches_the_decode_probability() {
+        let noise = NoiseFloor::compute(
+            14.0,
+            2500.0,
+            NoiseEnvironment::Rural,
+            true,
+            Season::Equinox,
+            50.0,
+            AtmosphericAnchors::default(),
+        );
+        let flat = GainCurve::flat("isotropic", 0.0);
+        let settings = |bias| LinkSettings {
+            tx_power_w: 5.0,
+            noise,
+            threshold_db: WSPR_DECODE_THRESHOLD_DB,
+            model_bias_db: bias,
+            tx_antenna: &flat,
+            rx_antenna: &flat,
+        };
+        // A loss that lands the uncorrected path a little over threshold.
+        let loss = dbm_from_watts(5.0) - noise.power_dbm - WSPR_DECODE_THRESHOLD_DB - 2.0;
+        let raw = LinkBudget::from_settings(settings(0.0), loss);
+        let corrected = LinkBudget::from_settings(settings(5.1), loss);
+
+        // The bias moves the SNR, the margin and the probability, by exactly itself.
+        assert!((raw.snr_db - corrected.snr_db - 5.1).abs() < 1e-9);
+        assert!((raw.margin_db() - corrected.margin_db() - 5.1).abs() < 1e-9);
+        assert!(
+            corrected.decode_probability() < raw.decode_probability(),
+            "a pessimistic correction must lower the probability: {} vs {}",
+            corrected.decode_probability(),
+            raw.decode_probability()
+        );
+        // The received power stays uncorrected.
+        assert!((raw.rx_power_dbm - corrected.rx_power_dbm).abs() < 1e-12);
+
+        // The uncorrected path reads as over threshold; 5.1 dB of measured
+        // pessimism is enough to turn this one into a coin flip or worse.
+        assert!(raw.margin_db() > 0.0);
+        assert!(corrected.margin_db() < 0.0);
+        assert!(corrected.decode_probability() < 0.5);
     }
 }

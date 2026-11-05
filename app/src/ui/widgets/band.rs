@@ -8,8 +8,8 @@
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepPoint};
 use crate::ui::theme::{self, ACCENT, MUTED};
+use skipzone_predict::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepPoint};
 
 /// Draw the band. `points` need not be sorted.
 pub fn band(ui: &mut Ui, points: &[SweepPoint], tuned_mhz: f64, best: Option<SweepPoint>) {

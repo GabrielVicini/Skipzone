@@ -8,14 +8,14 @@ use crate::solving::*;
 
 use std::collections::BTreeMap;
 
-use skipzone_app::calib::AtmosphericAnchors;
-use skipzone_app::compute::ComputePool;
 use skipzone_app::corpus::Negative;
 use skipzone_app::fit::{self, Cached, CachedParams, NegativeScore, Spread};
-use skipzone_app::noise::{self};
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve;
 use skipzone_app::wspr::WSPR_DECODE_THRESHOLD_DB;
+use skipzone_predict::calib::AtmosphericAnchors;
+use skipzone_predict::compute::ComputePool;
+use skipzone_predict::noise::{self};
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve;
 /// Solve the negatives and map them onto the fit set's station index space.
 ///
 /// # Why the index space is shared
@@ -61,7 +61,7 @@ pub(crate) fn solve_negatives(
             tx: usize::MAX,
             rx: usize::MAX,
             measured_db: f64::NAN,
-            tx_power_dbm: skipzone_app::noise::dbm_from_watts(inputs.tx_power_w),
+            tx_power_dbm: skipzone_predict::noise::dbm_from_watts(inputs.tx_power_w),
             loss_without_absorption_db: loss,
             absorption_db: best.total_absorption_db,
             freq_mhz: inputs.freq_mhz,
@@ -147,7 +147,7 @@ pub(crate) struct Levels {
 ///
 /// # Why a probability
 ///
-/// [`skipzone_app::noise::PathState`] compares one SNR with a threshold, but
+/// [`skipzone_predict::noise::PathState`] compares one SNR with a threshold, but
 /// the same path measured twice inside ten minutes differs with an SD of
 /// 3.5 dB (129 pairs from the corpus), and the model's out-of-sample error is
 /// 7.3 dB. So the modelled SNR is treated as the median of a fading

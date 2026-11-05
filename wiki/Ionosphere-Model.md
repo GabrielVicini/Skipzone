@@ -382,7 +382,7 @@ plus the foEs value, never a missing loss term. Do not go looking for one again.
 
 ## The noise floor
 
-`app/src/noise.rs` answers the question the ray tracer cannot: given that a path
+`crates/skipzone-predict/src/noise.rs` answers the question the ray tracer cannot: given that a path
 geometrically closes, would anyone actually hear it. It touches no ray tracing,
 absorption or ground reflection maths. It consumes the total system loss those
 produce and adds a transmitter power and a noise floor.
@@ -413,7 +413,7 @@ boundaries.
 
 ## Anchors and how to change them
 
-Every unverified value above is gathered in `app/src/calib.rs` with the range it
+Every unverified value above is gathered in `crates/skipzone-predict/src/calib.rs` with the range it
 is physically defensible over, so a calibration run can vary it and an ordinary
 run can ignore it. Nothing new is introduced there; each value already existed
 as a named module constant with a unit and a docstring. See

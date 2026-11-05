@@ -28,7 +28,6 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative, Rejections};
-use skipzone_app::scenario;
 use skipzone_app::spaceweather::{self, Ssn, SsnSource};
 use skipzone_app::wspr::{WsprSpot, parse_spots};
 use skipzone_app::wsprlive::{
@@ -36,6 +35,7 @@ use skipzone_app::wsprlive::{
     cycle_census_tsv,
 };
 use skipzone_iono::grid;
+use skipzone_predict::scenario;
 
 /// UTC hours the negatives schedule walks. Es occurrence and D-region
 /// absorption vary strongly through the day, so negatives from one hour would

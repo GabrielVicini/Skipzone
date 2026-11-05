@@ -19,10 +19,10 @@
 
 use std::process::ExitCode;
 
-use skipzone_app::compute::{ComputePool, PoolConfig};
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve;
 use skipzone_app::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
+use skipzone_predict::compute::{ComputePool, PoolConfig};
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve;
 
 struct Args {
     path: String,

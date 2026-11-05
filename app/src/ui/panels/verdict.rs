@@ -12,9 +12,9 @@
 
 use egui::{CornerRadius, Margin, RichText, Stroke, Ui};
 
-use crate::noise::PathState;
-use crate::solve::{LayerStatus, SolveOutcome};
 use crate::ui::theme::{self, FAIL, MUTED, WARN};
+use skipzone_predict::noise::PathState;
+use skipzone_predict::solve::{LayerStatus, SolveOutcome};
 
 pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
     let best = out

@@ -6,10 +6,10 @@
 
 use egui::{ComboBox, DragValue, RichText, Ui};
 
-use crate::noise::{OperatingMode, dbm_from_watts};
 use crate::state::{Session, UiState};
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, MUTED};
+use skipzone_predict::noise::{OperatingMode, dbm_from_watts};
 
 /// Transmitter power presets, watts: QRP through the common legal limits.
 const POWER_LEVELS_W: [f64; 10] = [

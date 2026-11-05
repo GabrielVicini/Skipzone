@@ -10,13 +10,13 @@ use crate::solving::*;
 
 use std::collections::BTreeMap;
 
-use skipzone_app::calib::{Anchors, AtmosphericAnchors};
 use skipzone_app::fit::{
     self, Cached, CachedParams, EffectDistribution, Fit, Spread, StationEffects,
 };
-use skipzone_app::noise::NoiseFloor;
-use skipzone_app::scenario::{self, Inputs};
 use skipzone_app::wspr_report::band_label;
+use skipzone_predict::calib::{Anchors, AtmosphericAnchors};
+use skipzone_predict::noise::NoiseFloor;
+use skipzone_predict::scenario::{self, Inputs};
 /// How far the fitted atmospheric anchors moved the noise floor, band by band,
 /// over this corpus's day/night and latitude mix.
 ///
@@ -276,7 +276,7 @@ pub(crate) fn report_layer_races(set: &Solved) {
 /// # What this measures
 ///
 /// The noise floor is the only link-budget term that switches discontinuously
-/// at the terminator: [`skipzone_app::noise::atmospheric_noise_figure_db`]
+/// at the terminator: [`skipzone_predict::noise::atmospheric_noise_figure_db`]
 /// takes a boolean day flag. Everything else, the D region above all, varies
 /// smoothly because `Ch(X, chi)` is smooth.
 ///
@@ -1023,7 +1023,7 @@ pub(crate) fn report_local_minimum_check(
 /// Whether each bound hit is a finding or an artefact of a flat objective.
 ///
 /// A parameter reaches a bound in one of two ways, which
-/// [`skipzone_app::calib::Bounded::at_bound`] cannot tell apart:
+/// [`skipzone_predict::calib::Bounded::at_bound`] cannot tell apart:
 ///
 /// * the objective falls all the way to the edge, so the minimum lies outside
 ///   the range, which is what the bound-hit warning describes;
@@ -1070,7 +1070,7 @@ pub(crate) fn report_bound_profiles(
     );
 
     // Each row: the objective sampled across the range, as RMS dB.
-    let row = |name: &str, b: skipzone_app::calib::Bounded, curve: &[(f64, f64)]| {
+    let row = |name: &str, b: skipzone_predict::calib::Bounded, curve: &[(f64, f64)]| {
         let (best_at, best) =
             curve
                 .iter()

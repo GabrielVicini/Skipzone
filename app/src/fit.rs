@@ -72,9 +72,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::calib::{Anchors, AtmosphericAnchors, Bounded};
-use crate::noise::{NoiseEnvironment, NoiseFloor};
 use skipzone_iono::solar::Season;
+use skipzone_predict::calib::{Anchors, AtmosphericAnchors, Bounded};
+use skipzone_predict::noise::{NoiseEnvironment, NoiseFloor};
 
 /// Everything about one solved spot that lets its SNR be re-derived without
 /// tracing the ray again.
@@ -215,7 +215,7 @@ impl Cached {
 ///
 /// Absorption depends on the product of D-region electron density and
 /// collision frequency, so the data cannot split the two. The scale is
-/// attributed to [`crate::scenario::NU_REF_PER_S`] because doubling the
+/// attributed to [`skipzone_predict::scenario::NU_REF_PER_S`] because doubling the
 /// collision frequency doubles the reported absorption, while doubling the
 /// D-region peak density changes it by only about 5 % (the E and F2 layers
 /// contribute most of the absorption integral).
@@ -1198,7 +1198,7 @@ impl NegativeScore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::{dbm_from_watts, noise_power_dbm};
+    use skipzone_predict::noise::{dbm_from_watts, noise_power_dbm};
 
     pub(super) fn mk(tx: usize, rx: usize, measured: f64, absorption: f64, freq: f64) -> Cached {
         Cached {

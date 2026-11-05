@@ -17,7 +17,7 @@
 
 use egui::{Color32, ColorImage, Context, TextureHandle, TextureOptions, TextureWrapMode};
 
-use crate::coastline::{self, Outline};
+use skipzone_predict::coastline::{self, Outline};
 
 /// Raster size. Width is twice height because the projection is
 /// equirectangular: the world is 360 degrees by 180.

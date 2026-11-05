@@ -10,7 +10,7 @@ use egui::{
     Color32, CornerRadius, FontFamily, FontId, Frame, Margin, Shadow, Stroke, Style, TextStyle, Ui,
 };
 
-use crate::noise::PathState;
+use skipzone_predict::noise::PathState;
 
 // Verdict palette
 

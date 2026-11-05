@@ -60,8 +60,9 @@ Haselgrove ray equations in Hamiltonian form.
 The engine is about 4,000 lines and the app is about 30,000. That split is
 deliberate but it is easy to misread, so to be explicit: `crates/skipzone/` is a ray tracer
 and a magnetic field model. The ionosphere itself (Chapman layers, foF2
-climatology, sporadic E), the noise model, the link budget, the solver and the
-GUI all live in `app/`. Embedding `skipzone` alone gets you a tracer that you
+climatology, sporadic E) lives in `crates/skipzone-iono/`; the noise model, the
+link budget and the solver live in `crates/skipzone-predict/`; the GUI lives in
+`app/`. Embedding `skipzone` alone gets you a tracer that you
 must supply an electron-density model to.
 
 ## Project Layout
@@ -70,19 +71,21 @@ must supply an electron-density model to.
 skipzone/
 ├── Cargo.toml          # virtual workspace root
 ├── crates/skipzone/    # the engine: field model, magnetoionic theory, ray tracer
-│   ├── src/bin/        # hfpredict, the headless engine CLI
 │   ├── data/           # IGRF-14 coefficients
 │   ├── examples/       # nvis_probe, a high-angle diagnostic
 │   ├── benches/        # criterion baseline for one traced hop
 │   └── tests/          # analytic and invariant suites
+├── crates/skipzone-iono/     # the ionosphere model, foF2 grid and NeQuick data
+├── crates/skipzone-predict/  # headless prediction: scenario, solve, link budget
+│   └── src/
+│       ├── assets/     # bundled coastline shapefiles
+│       └── bin/        # hfpredict, the headless engine-only CLI
 ├── app/                # skipzone-app: egui desktop application
 │   ├── Cargo.toml
 │   └── src/
-│       ├── assets/     # bundled foF2 grid and coastline shapefiles
 │       └── bin/        # validation and calibration harnesses
 ├── docs/derivations/   # the physics, derived before it was implemented
-├── wiki/               # project wiki (GitHub wiki source)
-└── data/               # staged NeQuick reference data
+└── wiki/               # project wiki (GitHub wiki source)
 ```
 
 The app is a separate workspace member so its `eframe`/`winit`/HTTP dependency
@@ -115,7 +118,7 @@ in [Command Line Tools](https://github.com/GabrielVicini/Skipzone/wiki/Command-L
 
 | Tool | Crate | What it does |
 |---|---|---|
-| `hfpredict` | engine | Headless first-order path predictor. Engine only, no app code. |
+| `hfpredict` | predict | Headless first-order path predictor. Engine only, no app code. |
 | `wspr_corpus` | app | Fetches a reproducible WSPR corpus once and writes it to disk. |
 | `wspr_calibrate` | app | Fits the unverified anchors against that corpus, treating station effects as nuisance parameters. |
 | `wspr_validate` | app | Scores the model against a saved list of WSPR spots. |
@@ -170,6 +173,6 @@ The bundled NeQuick reference data under `crates/skipzone-iono/data/nequick/` is
 carries its own notice; see [crates/skipzone-iono/data/nequick/README.md](crates/skipzone-iono/data/nequick/README.md).
 The other bundled data keeps its upstream terms: the IGRF-14 coefficients in
 `crates/skipzone/data/igrf14coeffs.txt` are published by IAGA and freely available, and the Natural
-Earth shapefiles in `app/src/assets/` are public domain.
+Earth shapefiles in `crates/skipzone-predict/src/assets/` are public domain.
 
 For any licensing concerns or questions, email `hello@vicini.io`.

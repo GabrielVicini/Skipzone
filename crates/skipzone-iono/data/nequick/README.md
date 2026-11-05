@@ -8,7 +8,7 @@ foF2 to 1.10 MHz RMS against the previous model's 1.70; see
 
 The M(3000)F2 half of each file is parsed and evaluated but not yet consumed.
 
-Do not confuse these with `app/src/assets/fof2_grid.tsv`, which is **not**
+Do not confuse these with `crates/skipzone-iono/src/assets/fof2_grid.tsv`, which is **not**
 derived from them: its layout is the operational one but its values come from
 the app's own order-of-magnitude climatology. It is not CCIR, not URSI and not
 IRI, it is still selectable as `Fof2Backend::Gridded`, and it is no longer the

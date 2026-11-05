@@ -44,7 +44,7 @@ That is sometimes the right answer, but it should be a stated decision.
 
 ## Changing an anchor
 
-Anchors are the unverified values in `app/src/calib.rs`. Changing one is
+Anchors are the unverified values in `crates/skipzone-predict/src/calib.rs`. Changing one is
 allowed. Changing one **because a fit wanted it** is not, unless the fit could
 identify it.
 
@@ -111,11 +111,11 @@ production calls, it is the same mistake.
 
 ## Adding an antenna
 
-Closed-form patterns go in `app/src/antenna/image.rs` with a `provenance` string
+Closed-form patterns go in `crates/skipzone-predict/src/antenna/image.rs` with a `provenance` string
 saying where the model comes from and what it excludes. That string is held to
 the same standard as the existing ones, which cite NEC-4 comparisons.
 
-Measured or NEC-modelled patterns go through `app/src/antenna/table.rs`, which
+Measured or NEC-modelled patterns go through `crates/skipzone-predict/src/antenna/table.rs`, which
 is built and tested for exactly this and is deliberately not wired up yet. The
 module documentation has the four steps. Adding one should be a data file plus
 an `AntennaKind` variant, not a redesign. If it turns into a redesign, that is a

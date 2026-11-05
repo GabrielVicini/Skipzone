@@ -2,10 +2,10 @@
 
 use egui::{CollapsingHeader, RichText, Ui};
 
-use crate::noise::PathState;
-use crate::solve::{Solution, SolveOutcome, mode_label};
 use crate::ui::theme::{self, FAIL, OK, WARN};
 use crate::ui::widgets::{data_grid, head_cells, hint, kv, num, sub_head, wide_table};
+use skipzone_predict::noise::PathState;
+use skipzone_predict::solve::{Solution, SolveOutcome, mode_label};
 
 /// Legend + per-solution visibility and selection.
 pub fn legend_panel(

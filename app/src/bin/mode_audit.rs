@@ -25,9 +25,9 @@
 
 use std::process::ExitCode;
 
-use skipzone_app::antenna::{AntennaConfig, AntennaKind};
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve;
+use skipzone_predict::antenna::{AntennaConfig, AntennaKind};
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve;
 
 /// Transmitter latitude for every sweep, degrees. Mid-latitude Europe, where
 /// most of the corpus is.
@@ -74,7 +74,7 @@ fn place(inputs: Inputs, range_km: f64) -> Inputs {
 /// If the second term dominates, no exponent on `cos chi` is the right repair:
 /// the layer carries its ionisation out of the collisional region faster than
 /// the real D region does. Both factors are printed.
-fn print_d_region_decomposition(probe: &skipzone_app::scenario::Assumptions) {
+fn print_d_region_decomposition(probe: &skipzone_predict::scenario::Assumptions) {
     let nu_at = |alt_km: f64| {
         scenario::NU_REF_PER_S
             * (-(alt_km - scenario::NU_REF_ALT_KM) / scenario::NU_SCALE_HEIGHT_KM).exp()

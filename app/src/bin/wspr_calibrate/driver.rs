@@ -7,14 +7,14 @@ use crate::negatives::*;
 use crate::report::*;
 use crate::solving::*;
 
-use skipzone_app::antenna::AntennaConfig;
-use skipzone_app::calib::{Anchors, AtmosphericAnchors};
-use skipzone_app::compute::{ComputePool, PoolConfig};
 use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative};
 use skipzone_app::fit::{self, Cached, CachedParams, Fit, StationEffects};
-use skipzone_app::scenario::Inputs;
 use skipzone_app::wspr::WSPR_DECODE_THRESHOLD_DB;
 use skipzone_app::wspr_report::band_label;
+use skipzone_predict::antenna::AntennaConfig;
+use skipzone_predict::calib::{Anchors, AtmosphericAnchors};
+use skipzone_predict::compute::{ComputePool, PoolConfig};
+use skipzone_predict::scenario::Inputs;
 #[allow(clippy::too_many_lines)] // one report, printed top to bottom
 pub(crate) fn run(args: &Args) -> Result<(), String> {
     println!("=== CALIBRATING SKIPZONE AGAINST MEASURED WSPR SPOTS ===\n");
@@ -691,7 +691,10 @@ pub(crate) fn scan_resolve_anchors(
 }
 
 /// The prior value of a scanned anchor, by the name the sweep table uses.
-pub(crate) fn prior_value_for(name: &str, prior: &skipzone_app::calib::IonosphereAnchors) -> f64 {
+pub(crate) fn prior_value_for(
+    name: &str,
+    prior: &skipzone_predict::calib::IonosphereAnchors,
+) -> f64 {
     match name {
         "D peak altitude [km]" => prior.d_peak_alt_km.value,
         "D scale height [km]" => prior.d_scale_height_km.value,

@@ -9,14 +9,14 @@
 
 use egui::{Button, Color32, Context, RichText, Ui, vec2};
 
-use crate::noise::PathState;
-use crate::solve::mode_label;
 use crate::state::{Session, UiState};
-use crate::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepBest, SweepPoint};
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, ACCENT, MUTED};
 use crate::ui::widgets::chart::{Chart, Series};
 use crate::ui::widgets::{band, card, data_grid, hint, kv, section};
+use skipzone_predict::noise::PathState;
+use skipzone_predict::solve::mode_label;
+use skipzone_predict::sweep::{SWEEP_MAX_MHZ, SWEEP_MIN_MHZ, SweepBest, SweepPoint};
 
 /// Colours used consistently across the three charts for the same quantity.
 const SNR_COLOR: Color32 = Color32::from_rgb(0x6E, 0xC8, 0xF2);

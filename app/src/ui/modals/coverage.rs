@@ -7,12 +7,12 @@
 
 use egui::{Button, Color32, Context, ProgressBar, RichText, Ui, vec2};
 
-use crate::coverage::{CoverageCell, MAX_POINTS, MIN_RANGE_KM};
-use crate::solve::mode_label;
 use crate::state::{Busy, Session, UiState};
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, ACCENT, MUTED, WARN};
 use crate::ui::widgets::{card, data_grid, hint, kv, section};
+use skipzone_predict::coverage::{CoverageCell, MAX_POINTS, MIN_RANGE_KM};
+use skipzone_predict::solve::mode_label;
 
 /// Grid sizes past this take long enough that the operator should be told
 /// before starting rather than after. A full solve measures at a few seconds of
@@ -130,7 +130,7 @@ fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
             RichText::new(format!(
                 "Capped at {effective:.1} deg by the {} point limit - lower the resolution to \
                  reach {:.0} deg.",
-                crate::coverage::MAX_POINTS,
+                skipzone_predict::coverage::MAX_POINTS,
                 cfg.half_span_deg
             ))
             .small()

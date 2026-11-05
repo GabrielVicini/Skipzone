@@ -3,9 +3,9 @@
 
 use egui::{CollapsingHeader, RichText, Ui};
 
-use crate::solve::{SolveOutcome, mode_label};
 use crate::ui::theme::{BAD, MUTED, WARN};
 use crate::ui::widgets::{data_grid, head_cells, hint, num, wide_table};
+use skipzone_predict::solve::{SolveOutcome, mode_label};
 
 pub fn near_miss_panel(ui: &mut Ui, out: &SolveOutcome) {
     if out.near_misses.is_empty() && out.sweep_notes.is_empty() {

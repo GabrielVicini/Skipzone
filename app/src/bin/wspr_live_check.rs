@@ -19,15 +19,15 @@
 
 use std::process::ExitCode;
 
-use skipzone_app::compute::{ComputePool, PoolConfig};
-use skipzone_app::noise::NoiseEnvironment;
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve;
 use skipzone_app::spaceweather::{self, Ssn, SsnSource};
 use skipzone_app::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
 use skipzone_app::wspr_report::{self, Breakdown};
 use skipzone_app::wsprlive::{Query, Window};
 use skipzone_iono::grid;
+use skipzone_predict::compute::{ComputePool, PoolConfig};
+use skipzone_predict::noise::NoiseEnvironment;
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve;
 
 struct Args {
     file: Option<String>,

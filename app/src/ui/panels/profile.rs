@@ -3,8 +3,8 @@
 
 use egui::{CollapsingHeader, Ui};
 
-use crate::scenario::ProfileRow;
 use crate::ui::widgets::{data_grid, head_cells, num, wide_table};
+use skipzone_predict::scenario::ProfileRow;
 
 pub fn profile_panel(ui: &mut Ui, rows: &[ProfileRow]) {
     CollapsingHeader::new("Vertical profile actually used (at path midpoint)")

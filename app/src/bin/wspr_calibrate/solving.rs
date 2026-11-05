@@ -3,12 +3,12 @@
 
 use std::collections::BTreeMap;
 
-use skipzone_app::compute::ComputePool;
 use skipzone_app::corpus::{self, CorpusSpot};
 use skipzone_app::fit::{self, Cached};
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve;
 use skipzone_app::wspr::WsprSpot;
+use skipzone_predict::compute::ComputePool;
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve;
 /// A corpus, solved once, with its station index space.
 pub(crate) struct Solved {
     pub(crate) spots: Vec<Cached>,
@@ -148,7 +148,7 @@ pub(crate) fn solve_one(c: &CorpusSpot, base: &Inputs) -> Option<Cached> {
         tx: 0,
         rx: 0,
         measured_db: c.spot.snr_db,
-        tx_power_dbm: skipzone_app::noise::dbm_from_watts(inputs.tx_power_w),
+        tx_power_dbm: skipzone_predict::noise::dbm_from_watts(inputs.tx_power_w),
         loss_without_absorption_db,
         absorption_db: best.total_absorption_db,
         freq_mhz: inputs.freq_mhz,

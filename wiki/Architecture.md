@@ -72,7 +72,7 @@ top, not a binary with some helpers.
 ## Threading
 
 The engine is single-threaded and has no thread-pool dependency. All parallelism
-lives in `app/src/compute.rs`, which owns a reusable `ComputePool` built on a
+lives in `crates/skipzone-predict/src/compute.rs`, which owns a reusable `ComputePool` built on a
 private `rayon` pool, isolated from rayon's global pool so it never fights other
 users of it.
 

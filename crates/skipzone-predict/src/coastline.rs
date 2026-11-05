@@ -1,6 +1,6 @@
 //! Coastline lookup: decides whether a point on the globe is sea, fresh water
 //! or land, from the Natural Earth 1:50m `land` and `lakes` polygon datasets
-//! shipped alongside this crate's source, under `app/src/assets/`.
+//! shipped alongside this crate's source, under `src/assets/`.
 //!
 //! This is a geographic classification only; the datasets say nothing about
 //! soil moisture. Every answer is one of the existing [`GroundType`] presets,

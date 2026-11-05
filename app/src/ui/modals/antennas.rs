@@ -2,17 +2,17 @@
 //!
 //! Every control here reaches the solver. The chosen pattern is evaluated at
 //! the launch elevation of the first hop and the arrival elevation of the last,
-//! and both gains enter the link budget - see [`crate::antenna`] and
-//! [`crate::solve`]. Nothing in this file computes a gain; it selects a model
+//! and both gains enter the link budget - see [`skipzone_predict::antenna`] and
+//! [`skipzone_predict::solve`]. Nothing in this file computes a gain; it selects a model
 //! and renders the curve that model produces.
 
 use egui::{Color32, ComboBox, Context, DragValue, Grid, RichText, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::antenna::{AntennaConfig, AntennaKind, GainCurve};
-use crate::scenario::Inputs;
 use crate::state::{Session, UiState};
 use crate::ui::theme::WARN;
 use crate::ui::widgets::{card, data_grid, hint, kv, labelled_drag, section};
+use skipzone_predict::antenna::{AntennaConfig, AntennaKind, GainCurve};
+use skipzone_predict::scenario::Inputs;
 
 pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) {
     let inputs = &mut session.inputs;

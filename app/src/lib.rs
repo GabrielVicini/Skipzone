@@ -13,38 +13,30 @@
 //! only ever feeds the engine tracer through the standard `ElectronDensity`
 //! trait.
 //!
+//! Headless prediction (scenario, solve, link budget, noise, antennas,
+//! sweep, coverage, calibration anchors and the land mask) lives in the
+//! `skipzone-predict` crate.
+//!
 //! Layered by concern, with each layer depending only on the ones above it:
 //!
 //! | layer       | modules                                    | knows about     |
 //! |-------------|--------------------------------------------|-----------------|
-//! | conversion  | `coastline`                                | nothing else    |
-//! | model       | `scenario`, `noise`                        | the engine, `skipzone-iono` |
-//! | computation | `compute`, `solve`, `sweep`, `coverage`    | the model       |
-//! | state       | `state`                                    | the computation |
+//! | state       | `state`                                    | `skipzone-predict` |
 //! | view        | `ui`, `app`                                | the state       |
 //!
 //! Nothing in `ui` computes a physical quantity, and nothing below `state`
 //! mentions egui.
 
-pub mod antenna;
 pub mod app;
-pub mod calib;
-pub mod coastline;
-pub mod compute;
 /// A saved, reproducible WSPR corpus for calibration. Harness-only.
 pub mod corpus;
-pub mod coverage;
 /// Two-way fixed-effects calibration against measured WSPR spots. Harness-only.
 pub mod fit;
 /// Outbound HTTP, used only by the validation harnesses.
 pub mod net;
-pub mod noise;
-pub mod scenario;
-pub mod solve;
 /// Observed solar indices, fetched rather than assumed.
 pub mod spaceweather;
 pub mod state;
-pub mod sweep;
 pub mod ui;
 pub mod wspr;
 pub mod wspr_report;

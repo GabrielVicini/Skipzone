@@ -26,8 +26,8 @@ use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
 use skipzone::density::ElectronDensity;
 use skipzone::geo::SphericalPoint;
 use skipzone::units::{Meters, PerSecond, Radians};
-use skipzone_app::scenario;
 use skipzone_iono::chapman::SolarChapmanLayer;
+use skipzone_predict::scenario;
 
 /// Column integration limits and step, km. 40-140 km covers the D region and
 /// the bottom of E; 25 m is far finer than the 6 km scale height.
@@ -176,7 +176,7 @@ fn main() {
 
     // What the calibration can reach within calib.rs's bounds.
     println!("\n=== WHAT THE BOUNDS ADMIT ===");
-    let ion = skipzone_app::calib::Anchors::default().ionosphere;
+    let ion = skipzone_predict::calib::Anchors::default().ionosphere;
     let (d_lo, d_hi) = (ion.d_scale_height_km.min, ion.d_scale_height_km.max);
     let (v_lo, v_hi) = (ion.nu_scale_height_km.min, ion.nu_scale_height_km.max);
     println!("  H_D  in [{d_lo}, {d_hi}] km");

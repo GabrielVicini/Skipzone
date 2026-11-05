@@ -12,9 +12,9 @@
 use egui::epaint::{Vertex, WHITE_UV};
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 
-use crate::coverage::{CoverageCell, LAT_LIMIT_DEG};
-use crate::solve::Solution;
 use crate::ui::theme;
+use skipzone_predict::coverage::{CoverageCell, LAT_LIMIT_DEG};
+use skipzone_predict::solve::Solution;
 
 use super::basemap;
 use super::projection::{Proj, unwrap_run};
@@ -243,7 +243,7 @@ const MIN_SEGMENT_PX: f32 = 1.5;
 /// the land and lake rings in their own colours, so a hop's "sea water" or
 /// "fresh water" verdict can be checked against the geometry that produced it.
 pub fn coastline(painter: &Painter, proj: &Proj, debug: bool) {
-    let Ok(coast) = crate::coastline::get() else {
+    let Ok(coast) = skipzone_predict::coastline::get() else {
         return;
     };
     let (land_color, lake_color, width) = if debug {
@@ -274,7 +274,7 @@ fn draw_rings(
     painter: &Painter,
     proj: &Proj,
     view: Rect,
-    shapes: &[crate::coastline::OutlineShape],
+    shapes: &[skipzone_predict::coastline::OutlineShape],
     color: Color32,
     width: f32,
 ) {

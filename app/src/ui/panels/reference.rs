@@ -2,8 +2,8 @@
 
 use egui::{CollapsingHeader, Ui};
 
-use crate::solve::SolveOutcome;
 use crate::ui::widgets::{data_grid, kv, sub_head};
+use skipzone_predict::solve::SolveOutcome;
 
 pub fn reference_panel(ui: &mut Ui, out: &SolveOutcome) {
     CollapsingHeader::new("Great-circle reference")

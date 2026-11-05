@@ -7,9 +7,9 @@
 //! absorption charged. If it moves, the scan's null result is about the
 //! corpus; if not, it is a bug.
 
-use skipzone_app::calib::Anchors;
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve::{self, SolveOutcome};
+use skipzone_predict::calib::Anchors;
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve::{self, SolveOutcome};
 
 fn best_absorption(o: &SolveOutcome) -> Option<(f64, f64, f64)> {
     o.solutions
@@ -86,8 +86,8 @@ fn main() {
 /// shift varies by several dB, the law is identifiable and the null result
 /// comes from looking at too few spots.
 fn corpus_leverage(path: &str, max_spots: usize) {
-    use skipzone_app::compute::{ComputePool, PoolConfig};
     use skipzone_app::corpus;
+    use skipzone_predict::compute::{ComputePool, PoolConfig};
 
     let Ok(text) = std::fs::read_to_string(path) else {
         println!("\n(no corpus at {path}; skipping the leverage measurement)");

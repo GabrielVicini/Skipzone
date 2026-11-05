@@ -7,8 +7,8 @@
 
 use egui::Ui;
 
-use crate::scenario::PlaceMode;
 use crate::state::{Session, UiState};
+use skipzone_predict::scenario::PlaceMode;
 
 use super::map::MapView;
 use super::{actions, header, modals, overlays, theme, trace_panel};

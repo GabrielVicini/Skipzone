@@ -30,11 +30,11 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
-use skipzone_app::calib::Anchors;
 use skipzone_iono::ccir::CcirMonth;
 use skipzone_iono::chapman::chapman_grazing;
 use skipzone_iono::fof2::{self, DiurnalShape, Fof2Grid};
 use skipzone_iono::solar::{self, Season};
+use skipzone_predict::calib::Anchors;
 
 /// Reject autoscaled points below this confidence score. GIRO uses 0-100, with
 /// 999 for a hand-scaled trace and -1 for unknown. Autoscaling failures produce

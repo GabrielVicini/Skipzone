@@ -1,6 +1,6 @@
 # Solver and Link Budget
 
-`app/src/solve/`. Drives the engine's homing and tracer to produce every mode
+`crates/skipzone-predict/src/solve/`. Drives the engine's homing and tracer to produce every mode
 that connects, plus full per-hop geometry for drawing, plus a near-miss report
 when nothing connects. It calls the engine's public API only and implements no
 physics of its own.

@@ -6,13 +6,13 @@
 
 use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 
-use crate::noise::{
-    MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
-};
-use crate::scenario::{GroundType, Inputs, fof2_from_ssn};
 use crate::state::{Session, UiState};
 use crate::ui::widgets::{card, hint, labelled_drag, section};
 use skipzone_iono::fof2::Fof2Backend;
+use skipzone_predict::noise::{
+    MAN_MADE_VALID_MAX_MHZ, MAN_MADE_VALID_MIN_MHZ, NoiseEnvironment, OperatingMode,
+};
+use skipzone_predict::scenario::{GroundType, Inputs, fof2_from_ssn};
 
 pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) {
     let inputs = &mut session.inputs;
@@ -218,7 +218,7 @@ fn noise(ui: &mut Ui, inputs: &mut Inputs) {
                     ui.selectable_value(&mut inputs.noise_env, env, env.label());
                 }
             });
-        if !crate::noise::man_made_range_is_valid(inputs.freq_mhz) {
+        if !skipzone_predict::noise::man_made_range_is_valid(inputs.freq_mhz) {
             hint(
                 ui,
                 &format!(
@@ -349,7 +349,7 @@ fn surface(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
                 show_coastlines,
                 "Debug: draw the land / lake polygons on the map",
             );
-            match crate::coastline::get() {
+            match skipzone_predict::coastline::get() {
                 Ok(c) => hint(ui, &c.summary()),
                 Err(e) => {
                     ui.colored_label(

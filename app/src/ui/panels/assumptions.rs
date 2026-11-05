@@ -3,8 +3,8 @@
 
 use egui::{CollapsingHeader, Ui};
 
-use crate::scenario::Assumptions;
 use crate::ui::widgets::{data_grid, kv, sub_head, wide_table};
+use skipzone_predict::scenario::Assumptions;
 
 pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
     CollapsingHeader::new("Assumed values (all of them)")

@@ -3,5 +3,5 @@
 # dependency tree stays in its own member. `cargo run` launches the GUI.
 [workspace]
 resolver = "3"
-members = ["crates/skipzone", "crates/skipzone-iono", "app"]
+members = ["crates/skipzone", "crates/skipzone-iono", "crates/skipzone-predict", "app"]
 default-members = ["app"]

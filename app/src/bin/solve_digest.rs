@@ -19,9 +19,9 @@
 
 use std::process::ExitCode;
 
-use skipzone_app::antenna::{AntennaConfig, AntennaKind};
-use skipzone_app::scenario::{self, Inputs};
-use skipzone_app::solve;
+use skipzone_predict::antenna::{AntennaConfig, AntennaKind};
+use skipzone_predict::scenario::{self, Inputs};
+use skipzone_predict::solve;
 
 /// Transmitter position for the whole grid. Mid-latitude, non-zero longitude so
 /// no term degenerates on a special value.

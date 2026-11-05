@@ -9,11 +9,11 @@
 
 use egui::Context;
 
-use crate::coverage::{CoverageCell, CoverageConfig};
-use crate::scenario::{Assumptions, Inputs, ProfileRow};
-use crate::solve::{Solution, SolveOutcome};
-use crate::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
 use skipzone_iono::clock::{self, CivilDate};
+use skipzone_predict::coverage::{CoverageCell, CoverageConfig};
+use skipzone_predict::scenario::{Assumptions, Inputs, ProfileRow};
+use skipzone_predict::solve::{Solution, SolveOutcome};
+use skipzone_predict::sweep::{Job, Msg, SolverService, SweepBest, SweepPoint};
 
 /// What the background solver is currently doing, for the status readout.
 #[derive(Clone, Copy, PartialEq, Eq)]

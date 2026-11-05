@@ -8,10 +8,10 @@
 
 use egui::{Color32, RichText, Ui};
 
-use crate::scenario::PlaceMode;
 use crate::state::{LocationEntry, LocationMode, Session, UiState};
 use crate::ui::theme::MUTED;
 use crate::ui::widgets::fields;
+use skipzone_predict::scenario::PlaceMode;
 
 /// TX above RX, both on the solid header background.
 pub fn rows(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) {

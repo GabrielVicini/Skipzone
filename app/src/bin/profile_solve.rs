@@ -18,7 +18,7 @@ use skipzone::magnetoionic::Mode;
 use skipzone::trace::{Outcome, TraceConfig, Tracer};
 use skipzone::units::{Hertz, Meters, Radians};
 
-use skipzone_app::scenario::{self, EARTH_RADIUS_M, Inputs, ground_point};
+use skipzone_predict::scenario::{self, EARTH_RADIUS_M, Inputs, ground_point};
 
 static N_DENSITY: AtomicU64 = AtomicU64::new(0);
 static N_FIELD: AtomicU64 = AtomicU64::new(0);
@@ -132,10 +132,10 @@ fn main() {
         // Repeat and report the median: the first solve in a process pays for
         // the rayon pool's threads being created.
         let mut runs = Vec::new();
-        let mut out = skipzone_app::solve::solve(&inputs, &a, &models);
+        let mut out = skipzone_predict::solve::solve(&inputs, &a, &models);
         for _ in 0..7 {
             let t = Instant::now();
-            out = skipzone_app::solve::solve(&inputs, &a, &models);
+            out = skipzone_predict::solve::solve(&inputs, &a, &models);
             runs.push(t.elapsed().as_secs_f64() * 1e3);
         }
         runs.sort_by(f64::total_cmp);
@@ -157,7 +157,7 @@ fn main() {
 
     println!("\n== FIXED PER-SOLVE OVERHEAD (not ray tracing) ==");
     {
-        use skipzone_app::antenna::Ground;
+        use skipzone_predict::antenna::Ground;
         let f_hz = inputs.freq_mhz * 1e6;
         let g = Ground::Lossy {
             eps_r: 13.0,

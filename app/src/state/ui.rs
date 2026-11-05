@@ -6,8 +6,8 @@
 //! flags through call chains. It holds no egui types: the widgets take these
 //! fields by reference and are otherwise stateless.
 
-use crate::scenario::PlaceMode;
 use skipzone_iono::clock::{self, CivilDate};
+use skipzone_predict::scenario::PlaceMode;
 
 use super::location::LocationEntry;
 

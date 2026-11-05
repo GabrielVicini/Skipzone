@@ -1,8 +1,8 @@
 //! Command line surface: [`Args`], its documented defaults, the usage
 //! text and the parser.
 
-use skipzone_app::antenna::AntennaKind;
-use skipzone_app::noise::NoiseEnvironment;
+use skipzone_predict::antenna::AntennaKind;
+use skipzone_predict::noise::NoiseEnvironment;
 pub(crate) struct Args {
     pub(crate) fit: String,
     pub(crate) holdout: Option<String>,
