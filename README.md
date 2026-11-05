@@ -155,8 +155,9 @@ There is no browser build. A WebAssembly proof of concept existed and was
 removed: it carried its own code paths for having no threads, and keeping them
 correct cost more than the target was worth. (Last commit to have WebASM was ebfbdea)
 
-`rust-version = "1.85"` is a promise about the engine crate, and CI enforces it
-there. The app tracks whatever `eframe` requires, which moves.
+The engine crate declares `rust-version = "1.85"`, and `skipzone-iono` and
+`skipzone-predict` declare 1.88. CI checks each one on the version it declares.
+The app and lab track whatever `eframe` requires, which moves.
 
 ## Documentation
 

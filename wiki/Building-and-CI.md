@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Rust 1.85 or newer, edition 2024.
+- Rust 1.88 or newer for the whole workspace (the engine alone builds on 1.85), edition 2024.
 - On Linux, the X11 and Wayland development headers that `eframe`/`winit` need.
   The engine crate needs none of them, which is the point of the workspace
   split.
@@ -127,7 +127,8 @@ build would pull the app's tree in and hide a leak.
 
 ### `msrv`
 
-`cargo check --package skipzone --lib` on Rust 1.85.
+`cargo check` of each engine-side crate on the `rust-version` it declares: 1.85 for
+`skipzone`, 1.88 for `skipzone-iono` and `skipzone-predict`.
 
 `rust-version = "1.85"` in `crates/skipzone/Cargo.toml` is a promise about the **engine**
 crate, which is the portable, embeddable one. The app is not held to it: eframe

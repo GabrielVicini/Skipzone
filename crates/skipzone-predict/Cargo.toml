@@ -3,6 +3,7 @@ name = "skipzone-predict"
 license = "MIT"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 description = "Headless HF link prediction on the Skipzone engine: scenarios, solve, link budget, sweep, coverage"
 publish = false
 

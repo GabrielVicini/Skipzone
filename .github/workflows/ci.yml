@@ -83,7 +83,7 @@ jobs:
         run: cargo build -p skipzone --lib
 
   msrv:
-    name: engine crates on MSRV (1.85)
+    name: engine-side crates on their declared rust-version
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -93,19 +93,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: msrv
-      # rust-version = "1.85" covers the engine-side crates only. The app and
-      # lab follow eframe's own minimum.
+      # Each engine-side crate is checked on the rust-version it declares:
+      # 1.85 for the engine, 1.88 for iono and predict. The app and lab
+      # follow eframe's own minimum.
       - name: cargo check engine-side crates
         run: |
-          members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
+          meta=$(cargo metadata --no-deps --format-version 1)
           for crate in skipzone skipzone-iono skipzone-predict; do
-            if grep -qx "$crate" <<<"$members"; then
-              echo "::group::cargo check -p $crate"
-              cargo check -p "$crate" --all-features
-              echo "::endgroup::"
-            else
+            ver=$(jq -r --arg c "$crate" '.packages[] | select(.name == $c) | .rust_version // "none"' <<<"$meta")
+            if [ -z "$ver" ]; then
               echo "$crate: not present, skipped"
+              continue
             fi
+            if [ "$ver" = "none" ]; then
+              echo "::error::$crate has no rust-version in its Cargo.toml"
+              exit 1
+            fi
+            rustup toolchain install "$ver" --profile minimal --no-self-update
+            echo "::group::cargo +$ver check -p $crate"
+            cargo "+$ver" check -p "$crate" --all-features
+            echo "::endgroup::"
           done
 
   docs:
