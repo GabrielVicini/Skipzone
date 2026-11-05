@@ -1,185 +1,335 @@
-# Appleton–Hartree dispersion relation, derived
+# Appleton–Hartree dispersion relation
 
 - **Crate:** `crates/skipzone`
 - **Implemented in:** `src/magnetoionic.rs::appleton_hartree`, `src/constants.rs::OMEGA_P_SQ_PER_DENSITY`, `src/constants.rs::OMEGA_H_PER_TESLA`
 - **Tested by:** `src/magnetoionic.rs::tests::transverse_and_longitudinal_limits`, `src/magnetoionic.rs::tests::reflection_conditions`, `src/magnetoionic.rs::tests::agrees_with_classical_form`, `src/magnetoionic.rs::tests::ordinary_stable_across_reflection`, `src/magnetoionic.rs::tests::partials_match_finite_differences`, `src/magnetoionic.rs::tests::absorption_sign_and_collisionless_reality`, `src/magnetoionic.rs::tests::zero_field_modes_bit_identical_and_isotropic`
 - **Section anchors used by code:** §1, §3, §4, §6, §7
 
-Symbols and sign conventions: [conventions.md](../conventions.md)
-(`exp(-iωt)`, `U = 1 + iZ`, `Im(n) > 0` = loss).
+Symbols and sign conventions: [conventions.md](../conventions.md#5-symbols).
+The time convention is $e^{-i\omega t}$, so $U = 1 + iZ$ and
+$\operatorname{Im} n > 0$ means loss.
 
-Assumptions, stated up front: cold electron plasma (no thermal corrections),
-ions immobile (valid at HF, ω ≫ ion gyro/plasma frequencies), collision
-frequency enters as a velocity-independent drag ν (documented limitation: no
-Sen–Wyller generalisation), medium locally homogeneous over a wavelength
-(WKB / ray optics).
+This file derives the complex refractive index of a cold magnetised electron
+plasma and the forms of it the code evaluates. Sections 1 to 3 go from the
+electron equation of motion to the Appleton–Hartree formula. Section 4 fixes
+which root is the ordinary mode. Section 5 rewrites the formula so it stays
+accurate through O-mode reflection, section 6 lists where it degenerates, and
+section 7 gives the analytic partial derivatives the ray equations need.
+
+The model assumes a cold electron plasma with no thermal corrections and
+immobile ions, which holds at HF where $\omega$ is far above the ion gyro and
+plasma frequencies. Collisions enter as a velocity-independent drag $\nu$, so
+the Sen–Wyller generalisation is not included. The medium is taken as locally
+homogeneous over a wavelength, the condition for ray optics.
 
 ## 1 Dielectric tensor
 
-Linearised electron momentum equation with static B₀ = |B₀| b̂ and drag:
+The linearised electron momentum equation, with static field
+$\mathbf{B}_0 = \lvert\mathbf{B}_0\rvert\hat{b}$ and collisional drag, is
 
-    m dv/dt = -e(E + v × B₀) - m ν v ,  e > 0
+$$
+m_e\frac{d\mathbf{v}}{dt} = -e\left(\mathbf{E} + \mathbf{v}\times\mathbf{B}_0\right) - m_e\nu\mathbf{v},
+\qquad e > 0 .
+$$
 
-With `exp(-iωt)`: `(ν - iω) v + Ω × v = -(e/m) E`, where `Ω = (e/m) B₀`,
-`Ω = |Ω| = ω_H`. In a frame with ẑ ∥ b̂, circular components
-`v± = v_x ± i v_y` decouple:
+With $e^{-i\omega t}$ and $\boldsymbol{\Omega} = (e/m_e)\mathbf{B}_0$, so that
+$\lvert\boldsymbol{\Omega}\rvert = \omega_H$, this becomes
 
-    (ν - iω ± iΩ) v± = -(e/m) E± ,  (ν - iω) v_z = -(e/m) E_z
+$$
+(\nu - i\omega)\,\mathbf{v} + \boldsymbol{\Omega}\times\mathbf{v} = -\frac{e}{m_e}\mathbf{E}.
+$$
 
-Current `J = -e Nₑ v`, permittivity `ε = 1 + iσ/(ε₀ω)` (see conventions.md),
-and `ν - iω ± iΩ = -iω(U ∓ Y)` give the principal values
+In a frame with $\hat{z}$ along $\hat{b}$ the circular components
+$v_\pm = v_x \pm i v_y$ decouple from each other and from $v_z$:
 
-    R := ε₊ = 1 - X/(U - Y) ,  L := ε₋ = 1 - X/(U + Y) ,  P := ε_z = 1 - X/U
+$$
+(\nu - i\omega \pm i\omega_H)\,v_\pm = -\frac{e}{m_e}E_\pm ,
+\qquad
+(\nu - i\omega)\,v_z = -\frac{e}{m_e}E_z .
+$$
 
-Check: R has the electron-gyroresonance denominator (`U - Y → 0` at ω = ω_H,
-Z = 0), as it must for electrons. Define S = (R+L)/2, D = (R-L)/2:
+The current is $\mathbf{J} = -eN_e\mathbf{v}$ and the permittivity follows as in
+[conventions.md §2](../conventions.md#2-time-convention-and-the-sign-of-losses).
+Since $\nu - i\omega \pm i\omega_H = -i\omega(U \mp Y)$, the principal values
+of the dielectric tensor are
 
-    S = (U(U-X) - Y²)/(U² - Y²) ,  D = -XY/(U² - Y²) ,  RL = ((U-X)² - Y²)/(U² - Y²)
+$$
+R \equiv \varepsilon_+ = 1 - \frac{X}{U - Y},
+\qquad
+L \equiv \varepsilon_- = 1 - \frac{X}{U + Y},
+\qquad
+P \equiv \varepsilon_z = 1 - \frac{X}{U}.
+$$
+
+$R$ carries the electron gyroresonance: its denominator $U - Y$ vanishes at
+$\omega = \omega_H$ when $Z = 0$. The Stix combinations
+$S = (R + L)/2$ and $D = (R - L)/2$ are
+
+$$
+S = \frac{U(U - X) - Y^2}{U^2 - Y^2},
+\qquad
+D = -\frac{XY}{U^2 - Y^2},
+\qquad
+RL = \frac{(U - X)^2 - Y^2}{U^2 - Y^2}.
+$$
 
 ## 2 Booker quartic and its discriminant
 
-`n×(n×E) + εE = 0` with n = ck/ω at angle θ to b̂ (c := cos θ, s := sin θ)
-has nontrivial solutions when (standard determinant expansion of the 3×3
-system in the frame with b̂ = ẑ, k in the x-z plane)
+A plane wave with $\mathbf{n} = c\mathbf{k}/\omega$ at angle $\Theta$ to
+$\hat{b}$ satisfies $\mathbf{n}\times(\mathbf{n}\times\mathbf{E}) + \varepsilon\mathbf{E} = 0$.
+Expanding the $3\times 3$ determinant in the frame with $\hat{b} = \hat{z}$ and
+$\mathbf{k}$ in the $x$–$z$ plane gives nontrivial solutions when
 
-    A n⁴ - B n² + C = 0
-    A = S s² + P c² ,  B = RL s² + PS(1 + c²) ,  C = P R L
+$$
+\begin{aligned}
+\mathcal{A}\,n^4 - \mathcal{B}\,n^2 + \mathcal{C} &= 0, \\
+\mathcal{A} &= S\sin^2\Theta + P\cos^2\Theta, \\
+\mathcal{B} &= RL\sin^2\Theta + PS\left(1 + \cos^2\Theta\right), \\
+\mathcal{C} &= PRL .
+\end{aligned}
+$$
 
-Discriminant identity, verified by expansion (needed for the stable root
-form): using `(1+c²)² = (2-s²)²` and `S² - RL = D²`,
+The stable root form of section 5 rests on a factorisation of the
+discriminant. With $S^2 - RL = D^2$,
 
-    B² - 4AC = (RL - PS)² s⁴ + 4 P² D² c²   ... (*)
+$$
+\mathcal{B}^2 - 4\mathcal{A}\mathcal{C} = (RL - PS)^2\sin^4\Theta + 4P^2D^2\cos^2\Theta .
+$$
 
-[Expansion check of (*): B² - 4AC = R²L²s⁴ + 2RLPSs²(1+c²) + P²S²(1+c²)²
-- 4PRLSs² - 4P²RLc²; the middle terms combine as 2PRLSs²(1+c²-2) = -2PRLSs⁴;
-P²S²(4-4s²+s⁴) - 4P²RLc² = P²S²s⁴ + 4P²c²(S²-RL); collecting gives
-s⁴(RL-PS)² + 4P²D²c².]
+<details><summary>Derivation of the discriminant</summary>
+
+Write $s = \sin\Theta$, $c = \cos\Theta$ and use $(1 + c^2)^2 = (2 - s^2)^2$.
+Expanding,
+
+$$
+\mathcal{B}^2 - 4\mathcal{A}\mathcal{C}
+= R^2L^2s^4 + 2RLPS\,s^2(1 + c^2) + P^2S^2(1 + c^2)^2 - 4PRLS\,s^2 - 4P^2RL\,c^2 .
+$$
+
+The two middle $RLPS$ terms combine to $2PRLS\,s^2(1 + c^2 - 2) = -2PRLS\,s^4$.
+The $P^2$ terms give
+$P^2S^2(4 - 4s^2 + s^4) - 4P^2RL\,c^2 = P^2S^2s^4 + 4P^2c^2(S^2 - RL)$.
+Collecting the $s^4$ terms into $(RL - PS)^2 s^4$ and using $S^2 - RL = D^2$
+gives the result.
+
+</details>
 
 ## 3 Reduction to Appleton–Hartree
 
-Substituting the section-1 values and clearing the common denominator
-`U(U² - Y²)` turns the quartic into `A' n⁴ - B' n² + C' = 0` with
+Substitute the section 1 values into the quartic and clear the common
+denominator $U(U^2 - Y^2)$. With $W = U - X$ the quartic becomes
+$\mathcal{A}'n^4 - \mathcal{B}'n^2 + \mathcal{C}' = 0$ with
 
-    A' = U[U(U-X) - Y²] s² + (U-X)(U² - Y²) c²
-    B' = U[(U-X)² - Y²] s² + (U-X)[U(U-X) - Y²](1 + c²)
-    C' = (U-X)[(U-X)² - Y²]
+$$
+\begin{aligned}
+\mathcal{A}' &= U\left[UW - Y^2\right]\sin^2\Theta + W\left(U^2 - Y^2\right)\cos^2\Theta, \\
+\mathcal{B}' &= U\left[W^2 - Y^2\right]\sin^2\Theta + W\left[UW - Y^2\right]\left(1 + \cos^2\Theta\right), \\
+\mathcal{C}' &= W\left[W^2 - Y^2\right].
+\end{aligned}
+$$
 
-Substituting `n² = 1 - ξ` (so ξ = X-proportional by construction) gives
-`A'ξ² - (2A' - B')ξ + (A' - B' + C') = 0`. Direct expansion, W := U - X:
+The substitution $n^2 = 1 - \xi$ makes $\xi$ proportional to $X$ and turns the
+quartic into $\mathcal{A}'\xi^2 - (2\mathcal{A}' - \mathcal{B}')\xi + (\mathcal{A}' - \mathcal{B}' + \mathcal{C}') = 0$.
+The two coefficients simplify to
 
-    A' - B' = UXs²W + W[UXc² - UW + Y²] = W[UX - UW + Y²] = W[2UX - U² + Y²]
-              (the s² and c² pieces of UX combine; UX - UW = U(2X - U))
-    A' - B' + C' = W[2UX - U² + Y²] + W[W² - Y²]
-                 = W[2UX - U² + (U-X)²] = W X²
-    2A' - B' = UW(U + X - W) - Y²(U s² + W c² - W)
-             = 2UWX - X Y² s²
-               (U + X - W = 2X;  U s² + W c² - W = (U - W)s² = X s²)
-             = X (2UW - Y² s²)
+$$
+\mathcal{A}' - \mathcal{B}' + \mathcal{C}' = WX^2,
+\qquad
+2\mathcal{A}' - \mathcal{B}' = X\left(2UW - Y^2\sin^2\Theta\right),
+$$
 
-so, dividing by X, the quadratic for ξ is
+so, after dividing by $X$, the quadratic for $\xi$ is
 
-    A' ξ² - X (2UW - Y²s²) ξ + X² W = 0
+$$
+\mathcal{A}'\xi^2 - X\left(2UW - Y^2\sin^2\Theta\right)\xi + X^2W = 0 .
+$$
 
-Its discriminant simplifies (expansion in the same way as (*)):
+<details><summary>Derivation of the two coefficients</summary>
 
-    X²[(2UW - Y²s²)² - 4A'W] = X²[ Y⁴s⁴ + 4W²Y²c² ]
+Write $s = \sin\Theta$, $c = \cos\Theta$. The $s^2$ and $c^2$ pieces of $UX$
+combine, and $UX - UW = U(2X - U)$, so
 
-Writing the root with the product-of-roots form ξ = 2X²W / (X[(2UW - Y²s²) ∓ √...])
-to avoid cancellation, and with `Y_T = Y s`, `Y_L = Y c`:
+$$
+\mathcal{A}' - \mathcal{B}' = UXs^2W + W\left[UXc^2 - UW + Y^2\right] = W\left[2UX - U^2 + Y^2\right].
+$$
 
-    n² = 1 - X (U - X) / [ U(U-X) - ½Y_T² ± √( ¼Y_T⁴ + Y_L²(U-X)² ) ]   (AH)
+Adding $\mathcal{C}' = W(W^2 - Y^2)$ gives
+$W\left[2UX - U^2 + (U - X)^2\right] = WX^2$.
 
-Dividing numerator and denominator by W (legitimate for real W > 0)
-recovers the classical textbook form
-`n² = 1 - X/[U - Y_T²/(2(U-X)) ± √(Y_T⁴/4(U-X)² + Y_L²)]`; (AH) is the
-form that remains meaningful at W = 0.
+For the linear coefficient, $U + X - W = 2X$ and
+$Us^2 + Wc^2 - W = (U - W)s^2 = Xs^2$, so
+
+$$
+2\mathcal{A}' - \mathcal{B}' = UW(U + X - W) - Y^2\left(Us^2 + Wc^2 - W\right) = 2UWX - XY^2s^2 .
+$$
+
+</details>
+
+Its discriminant factorises in the same way as in section 2:
+
+$$
+X^2\left[\left(2UW - Y^2\sin^2\Theta\right)^2 - 4\mathcal{A}'W\right]
+= X^2\left[Y^4\sin^4\Theta + 4W^2Y^2\cos^2\Theta\right].
+$$
+
+Take the root in product form,
+$\xi = 2X^2W\big/\left(X\left[(2UW - Y^2\sin^2\Theta) \mp \sqrt{\cdots}\,\right]\right)$,
+which avoids cancellation in the numerator. With $Y_T = Y\sin\Theta$ and
+$Y_L = Y\cos\Theta$ this is the Appleton–Hartree formula:
+
+$$
+n^2 = 1 - \frac{X(U - X)}{U(U - X) - \tfrac12 Y_T^2 \pm \sqrt{\tfrac14 Y_T^4 + Y_L^2(U - X)^2}} .
+$$
+
+Dividing numerator and denominator by $W$, which is legitimate for real
+$W > 0$, recovers the classical textbook form
+
+$$
+n^2 = 1 - \frac{X}{U - \dfrac{Y_T^2}{2(U - X)} \pm \sqrt{\dfrac{Y_T^4}{4(U - X)^2} + Y_L^2}} .
+$$
+
+The first form stays meaningful at $W = 0$ and is the one the code builds on.
+`agrees_with_classical_form` checks the two against each other away from
+$W = 0$.
 
 ## 4 Mode labels and branch conventions
 
-Square root: **principal branch** (Re ≥ 0; for a non-negative real argument
-this is the ordinary real root). For Z = 0 the argument `¼Y_T⁴ + Y_L²W²` is
-real and non-negative for **all** X (W² appears squared), so the collisionless
-index is real everywhere and no branch ambiguity exists.
+The square root is the **principal branch**, with non-negative real part. For a
+non-negative real argument this is the ordinary real root. When $Z = 0$ the
+argument $\tfrac14 Y_T^4 + Y_L^2W^2$ is real and non-negative for **every**
+$X$, because $W$ appears squared. The collisionless index is therefore real
+everywhere, with no branch ambiguity.
 
-Labels, anchored by limits (each is a unit test):
+The labels are anchored by limits, and each limit is a unit test:
 
-- `+` root = **ordinary (O)**: at exact transverse propagation (Y_L = 0) it
-  gives n² = 1 - X/U — the wave with E ∥ B₀ that does not feel the field;
-  collisionless it vanishes at X = 1 (reflection at the plasma frequency).
-- `-` root = **extraordinary (X)**: transverse collisionless
-  n² = 1 - X(1-X)/(1-X-Y²); zeros at X = 1-Y and X = 1+Y; gyroresonance
-  as Y → 1 in the longitudinal limit.
-- Longitudinal (Y_T = 0, W > 0): O → 1 - X/(U+|Y_L|), X → 1 - X/(U-|Y_L|),
-  the L/R circular waves.
+- The `+` root is the **ordinary (O)** mode. At exactly transverse propagation
+  ($Y_L = 0$) it gives $n^2 = 1 - X/U$: the wave with $\mathbf{E}$ along
+  $\mathbf{B}_0$, which does not feel the field. Without collisions it
+  vanishes at $X = 1$, reflection at the plasma frequency.
+- The `-` root is the **extraordinary (X)** mode. Transverse and collisionless,
+  $n^2 = 1 - X(1 - X)/(1 - X - Y^2)$, with zeros at $X = 1 - Y$ and
+  $X = 1 + Y$. In the longitudinal limit it has the gyroresonance as
+  $Y \to 1$.
+- In the longitudinal limit ($Y_T = 0$, $W > 0$) the O mode is
+  $1 - X/(U + \lvert Y_L\rvert)$ and the X mode is
+  $1 - X/(U - \lvert Y_L\rvert)$: the L and R circular waves.
 
 ## 5 Numerically stable evaluation forms
 
-Near O-mode reflection X → 1 (W → 0) the classical form suffers
-`Y_T²/(2W) → ∞` cancellation and (AH) becomes 0/0. Exact rewrite: with
-`S_m = √(¼Y_T⁴ + Y_L²W²)` and `G = S_m + ½Y_T²`,
+Near O-mode reflection $X \to 1$, so $W \to 0$. The classical form then
+suffers cancellation in $Y_T^2/(2W) \to \infty$, and the Appleton–Hartree form
+becomes $0/0$. An exact rewrite removes both problems. Let
 
-    -½Y_T² + S_m = (S_m² - ¼Y_T⁴)/G = Y_L²W²/G
+$$
+S_m = \sqrt{\tfrac14 Y_T^4 + Y_L^2W^2},
+\qquad
+G = S_m + \tfrac12 Y_T^2 .
+$$
 
-so the O denominator is `W[U + Y_L²W/G]` and
+Then $-\tfrac12 Y_T^2 + S_m = (S_m^2 - \tfrac14 Y_T^4)/G = Y_L^2W^2/G$, the O
+denominator becomes $W\left[U + Y_L^2W/G\right]$, and the two modes are
 
-    O:  n² = 1 - X / ( U + Y_L² W / G )        — no cancellation at W → 0
-    X:  n² = 1 - X W / ( UW - ½Y_T² - S_m )    — denominator → -Y_T² at W → 0
+$$
+\begin{aligned}
+\text{O:}\quad n^2 &= 1 - \frac{X}{U + Y_L^2W/G}, \\
+\text{X:}\quad n^2 &= 1 - \frac{XW}{UW - \tfrac12 Y_T^2 - S_m}.
+\end{aligned}
+$$
 
-Both are algebraically identical to (AH); the O form makes the X → 1
-behaviour manifest: n² → 1 - X/U, which vanishes at X = 1, Z = 0. This is
-the O reflection condition for every θ except the degenerate window below.
+The O form has no cancellation as $W \to 0$. The X denominator tends to
+$-Y_T^2$ there. Both are algebraically identical to the Appleton–Hartree form.
+The O form also makes the reflection behaviour plain: as $X \to 1$,
+$n^2 \to 1 - X/U$, which vanishes at $X = 1$ when $Z = 0$. That is the O-mode
+reflection condition for every $\Theta$ outside the degenerate window of
+section 6. `ordinary_stable_across_reflection` checks it.
 
 ## 6 Conditioning and known degeneracies
 
-- **X = 1, θ = 0 (Ellis window / critical coupling).** The limits X→1 and
-  θ→0 do not commute; the dispersion surfaces are degenerate and no global
-  continuous mode labelling exists (this is physics, not implementation:
-  Budden's coupling points). At exactly Y_L ≠ 0, Y_T = 0, W = 0 the stable
-  O form hits G = 0. The code returns the QT-limit value 1 - X/U there and
-  documents that within the sliver |W| ≲ (coupling scale) the O/X labels
-  can swap; full mode-conversion physics is out of scope. HF rays with
-  apex wave-normal not exactly field-aligned never enter the sliver.
-- **Root coalescence (S_m = 0 with Y_T > 0).** A branch point of the
-  dispersion surface, where dS_m is singular. A float-exact hit has measure
-  zero; the code returns the degenerate root and omits the singular dS_m term
-  rather than return NaN.
-- **Resonances** (denominator → 0, n² → ∞): upper-hybrid family for the X
-  mode; the gyroresonance Y = 1 sits below HF for F-region fields
-  (ω_H/2π ≈ 1.4 MHz) but the formula itself is exact there; the tracer's
-  step controller will fail loudly (step collapse) rather than integrate
-  through a resonance.
-- **Collisional branch of S_m**: with Z > 0 the argument of S_m is complex;
-  the principal branch is discontinuous only where the argument crosses the
-  negative real axis, which requires |1-X| ≲ Z with significant Y_T — a
-  sliver of the coupling region already documented above.
-- **Z = 0 exactness**: all quantities are real complex-parts-zero through
-  +,-,*,/ and √ of a non-negative real, so collisionless evaluation returns
-  Im = 0.0 exactly, making "zero collisions ⇒ zero absorption" bit-exact.
+- **$X = 1$, $\Theta = 0$ (the Ellis window, or critical coupling).** The
+  limits $X \to 1$ and $\Theta \to 0$ do not commute. The two dispersion
+  surfaces meet there, and no globally continuous mode labelling exists. This
+  is physics (Budden's coupling points), so the code cannot remove it. At
+  exactly $Y_L \ne 0$, $Y_T = 0$, $W = 0$ the stable O form hits $G = 0$. The
+  code returns the quasi-transverse value $1 - X/U$ there. Within the sliver
+  where $\lvert W\rvert$ is below the coupling scale the O and X labels can
+  swap, and full mode conversion is out of scope. HF rays whose apex wave
+  normal is not exactly field-aligned never enter the sliver.
+- **Root coalescence ($S_m = 0$ with $Y_T > 0$).** This is a branch point of
+  the dispersion surface, where $dS_m$ is singular. An exact floating-point hit
+  has measure zero. The code returns the degenerate root and drops the
+  singular $dS_m$ term, so the state never becomes NaN.
+- **Resonances.** Where a denominator vanishes, $n^2 \to \infty$: the
+  upper-hybrid family for the X mode. The gyroresonance $Y = 1$ lies below HF
+  for F-region fields ($\omega_H/2\pi \approx 1.4$ MHz), but the formula is
+  exact there too. The tracer's step controller fails with a typed step
+  collapse rather than integrate through a resonance.
+- **The collisional branch of $S_m$.** With $Z > 0$ the argument of $S_m$ is
+  complex. The principal branch is discontinuous only where the argument
+  crosses the negative real axis. That needs $\lvert 1 - X\rvert \lesssim Z$
+  with significant $Y_T$, a sliver inside the coupling region above.
+- **Exactness at $Z = 0$.** Every intermediate has zero imaginary part through
+  $+$, $-$, $\times$, $\div$ and the square root of a non-negative real, so a
+  collisionless evaluation returns $\operatorname{Im} = 0.0$ exactly. Zero
+  collisions therefore give zero absorption bit for bit, which
+  `absorption_sign_and_collisionless_reality` checks.
 
 ## 7 Analytic partial derivatives
 
-All ray-equation gradients come from the complex differentials of the forms
-in section 5, with a1 := Y_L², a2 := Y_T², W = U - X:
+The ray equations need $n^2$ differentiated with respect to $X$, $Y$,
+$\cos\Theta$ and $Z$. All of them come from complex differentials of the
+section 5 forms. Write $a_1 = Y_L^2$, $a_2 = Y_T^2$ and $W = U - X$. Then
 
-    dS_m = [ ½ a2 da2 + W² da1 + 2 a1 W dW ] / (2 S_m)     (S_m ≠ 0)
-    dG   = dS_m + ½ da2
+$$
+dS_m = \frac{\tfrac12 a_2\,da_2 + W^2\,da_1 + 2a_1W\,dW}{2S_m}\quad(S_m \ne 0),
+\qquad
+dG = dS_m + \tfrac12\,da_2 .
+$$
 
-    O:  F = U + a1 W / G
-        dF = dU + (W da1 + a1 dW)/G - (a1 W / G²) dG
-        d(n²) = -dX/F + (X/F²) dF
-    X:  F = U W - ½ a2 - S_m
-        dF = U dW + W dU - ½ da2 - dS_m
-        d(n²) = -(W dX + X dW)/F + (X W / F²) dF
+For the O mode, with $F = U + a_1W/G$,
 
-with `dW = dU - dX`, `dU = i dZ`, and the (X, Y, cosθ =: c) parametrisation
+$$
+\begin{aligned}
+dF &= dU + \frac{W\,da_1 + a_1\,dW}{G} - \frac{a_1W}{G^2}\,dG, \\
+d(n^2) &= -\frac{dX}{F} + \frac{X}{F^2}\,dF .
+\end{aligned}
+$$
 
-    da1 = 2Yc² dY + 2Y²c dc ,   da2 = 2Y(1-c²) dY - 2Y²c dc
+For the X mode, with $F = UW - \tfrac12 a_2 - S_m$,
 
-Special cases: Y = 0 → n² = 1 - X/U, ∂n²/∂X = -1/U, ∂n²/∂Z = iX/U²,
-∂n²/∂Y = ∂n²/∂c = 0 (the Y-dependence is quadratic near Y = 0). This branch
-is also what makes O and X bit-identical in zero field: both modes route
-through the same expression.
+$$
+\begin{aligned}
+dF &= U\,dW + W\,dU - \tfrac12\,da_2 - dS_m, \\
+d(n^2) &= -\frac{W\,dX + X\,dW}{F} + \frac{XW}{F^2}\,dF .
+\end{aligned}
+$$
 
-Validation: every partial is compared against central finite differences of
-the full complex evaluation at random interior points and near W ≈ 0 (tests);
-finite differences appear only as a test oracle, never in production code.
+The differentials of the inputs are $dW = dU - dX$ and $dU = i\,dZ$. In the
+$(X, Y, \cos\Theta)$ parametrisation, with $c = \cos\Theta$,
+
+$$
+da_1 = 2Yc^2\,dY + 2Y^2c\,dc,
+\qquad
+da_2 = 2Y(1 - c^2)\,dY - 2Y^2c\,dc .
+$$
+
+At $Y = 0$ the code uses the isotropic result directly:
+
+$$
+n^2 = 1 - \frac{X}{U},
+\qquad
+\frac{\partial n^2}{\partial X} = -\frac{1}{U},
+\qquad
+\frac{\partial n^2}{\partial Z} = \frac{iX}{U^2},
+\qquad
+\frac{\partial n^2}{\partial Y} = \frac{\partial n^2}{\partial\cos\Theta} = 0 .
+$$
+
+The $Y$ derivatives vanish because $n^2$ depends on $Y$ quadratically near
+$Y = 0$. Both modes route through this one expression, which is what makes O
+and X bit-identical in zero field
+(`zero_field_modes_bit_identical_and_isotropic`).
+
+`partials_match_finite_differences` compares every partial with central
+finite differences of the full complex evaluation, at random interior points
+and near $W = 0$. Finite differences appear only in that test, never in
+production code.

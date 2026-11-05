@@ -5,162 +5,238 @@
 - **Tested by:** `src/chapman.rs::tests::erfcx_reference_values`, `src/chapman.rs::tests::erfcx_deriv_matches_fd`, `src/chapman.rs::tests::chapman_grazing_limits`, `src/chapman.rs::tests::chapman_grazing_deriv_matches_fd`, `src/chapman.rs::tests::terminator_layer_is_finite_and_thinned`, `src/chapman.rs::tests::deep_night_is_vacuum`, `src/chapman.rs::tests::horizontal_partials_match_fd`
 - **Section anchors used by code:** §1, §2, §3, §4; equations (3), (4), (5), (7), (8)
 
-This is the ionosphere crate's derivation, not the engine's: the day/night-aware
-Chapman layer that `skipzone-iono` builds and hands to the unchanged engine
-tracer through its `ElectronDensity` trait. `skipzone-predict` builds its D, E
-and F2 layers from it. Notation and sign conventions follow
-[conventions.md](../conventions.md).
+Symbols and sign conventions: [conventions.md](../conventions.md#5-symbols),
+including the [symbols local to this file](../conventions.md#local-to-chapman-grazingmd).
+
+This is the ionosphere crate's derivation. `skipzone-iono` builds a
+day/night-aware Chapman layer and hands it to the unchanged engine tracer
+through the `ElectronDensity` trait, and `skipzone-predict` builds its D, E and
+F2 layers from it. Section 1 explains why the engine's own Chapman layer is not
+enough for a path that crosses the terminator. Section 2 introduces the
+Chapman grazing-incidence function that replaces it, section 3 the error
+function it needs, and section 4 the horizontal gradients the ray equations
+need. Sections 5 and 6 describe the night floor and the partial rise.
 
 ## 1 Why the plane-parallel layer is not enough
 
-The engine's `ChapmanLayer::with_zenith_angle` places an alpha-Chapman layer
+The engine's `ChapmanLayer::with_zenith_angle` places an $\alpha$-Chapman layer
 
-    Ne(z) = Nm exp( 1/2 ( 1 - z - sec(chi) e^{-z} ) ),   z = (r - r_m)/H     (1)
+$$
+N_e(z) = N_m\exp\left(\tfrac12\left(1 - z - \sec\chi\,e^{-z}\right)\right),
+\qquad z = \frac{r - r_m}{H},
+$$
 
-with `sec(chi)` the plane-parallel slant factor for the ionising flux. It
-correctly refuses `chi >= 85 deg` because `sec(chi)` is the flat-atmosphere
-optical-depth factor and diverges as `chi -> 90 deg`, which is unphysical: the
-real slant path through a *curved* atmosphere stays finite at the terminator
-and the layer keeps producing a few degrees past it.
+where $\sec\chi$ is the plane-parallel slant factor for the ionising flux. It
+refuses $\chi \ge 85°$ (`MAX_CHAPMAN_ZENITH_ANGLE`). $\sec\chi$ is the optical
+depth factor of a flat atmosphere and diverges as $\chi \to 90°$, which is
+unphysical. Through a *curved* atmosphere the slant path stays finite at the
+terminator, and the layer keeps producing ionisation a few degrees past it.
 
-For a point-to-point HF path that can straddle the terminator this has two
-consequences the midpoint-`sec(chi)` model cannot represent:
+A point-to-point HF path can straddle the terminator, and that has two
+consequences a single midpoint $\sec\chi$ cannot represent:
 
-  * near `chi = 90 deg` absorption must fade *smoothly*, not switch off at an
-    85 deg cliff (the observed "absorption = 0" bug);
-  * different points along the same ray see different solar zenith angles, so
-    the layer must be a function of horizontal position, not one global value.
+- Near $\chi = 90°$ absorption has to fade smoothly. A model that switches it
+  off at an 85° cliff predicts zero absorption on paths that have some.
+- Different points along one ray see different solar zenith angles, so the
+  layer has to depend on horizontal position.
 
-The fix replaces `sec(chi)` by the Chapman grazing-incidence function
-`Ch(X, chi)` and evaluates `chi` locally at each sampled point.
+The fix replaces $\sec\chi$ by the Chapman grazing-incidence function
+$\operatorname{Ch}(x, \chi)$ and evaluates $\chi$ locally at each sampled
+point.
 
 ## 2 The Chapman function
 
-`Ch(X, chi)` is the ratio of the slant optical depth to the vertical optical
-depth for an exponential atmosphere on a sphere, with
+$\operatorname{Ch}(x, \chi)$ is the ratio of slant to vertical optical depth for
+an exponential atmosphere on a sphere. Its argument is
 
-    X = (R0 + h) / H                                                          (2)
+$$
+x = \frac{R_0 + h}{H},
+$$
 
-the ratio of geocentric radius to neutral scale height (X ~ 1076 at 85 km with
-H = 6 km). We use the standard closed form (Smith & Smith, J. Geophys. Res.
-77, 1972), written with the *scaled* complementary error function
-`erfcx(t) = e^{t^2} erfc(t)` so nothing overflows:
+the geocentric radius over the neutral scale height, about 1076 at 85 km with
+$H = 6$ km. The code uses the standard closed form (Smith and Smith,
+J. Geophys. Res. 77, 1972), written with the scaled complementary error
+function $\operatorname{erfcx}(t) = e^{t^2}\operatorname{erfc}(t)$ so that
+nothing overflows:
 
-  chi <= 90 deg:
-    Ch(X, chi) = sqrt(pi X / 2) * erfcx( sqrt(X/2) cos chi )                  (3a)
+$$
+\operatorname{Ch}(x, \chi) = \sqrt{\frac{\pi x}{2}}\;\operatorname{erfcx}\left(\sqrt{\frac{x}{2}}\cos\chi\right),
+\qquad \chi \le 90°,
+\tag{3a}
+$$
 
-  chi > 90 deg:
-    Ch(X, chi) = sqrt(2 pi X) sqrt(sin chi) e^{ X(1 - sin chi) }
-                 - sqrt(pi X / 2) * erfcx( sqrt(X/2) |cos chi| )              (3b)
+$$
+\operatorname{Ch}(x, \chi) = \sqrt{2\pi x}\,\sqrt{\sin\chi}\;e^{x(1 - \sin\chi)} - \sqrt{\frac{\pi x}{2}}\;\operatorname{erfcx}\left(\sqrt{\frac{x}{2}}\,\lvert\cos\chi\rvert\right),
+\qquad \chi > 90°.
+\tag{3b}
+$$
 
-Checks:
+Three limits show that this is the right function. `chapman_grazing_limits`
+checks each of them.
 
-  * chi = 0: erfcx(sqrt(X/2)) ~ 1/(sqrt(X/2) sqrt(pi)) for large X, so
-    Ch -> 1 = sec(0). More generally Ch ~ sec(chi) for chi below ~75 deg,
-    reproducing (1) where the plane-parallel model is valid.
-  * chi = 90 deg: cos chi = 0, erfcx(0) = 1, so (3a) gives Ch = sqrt(pi X / 2)
-    (finite, ~41 at X = 1076) - not the divergent sec(90 deg). (3b) at
-    90 deg+ gives sqrt(2 pi X) - sqrt(pi X / 2) = sqrt(pi X / 2) as well, since
-    sqrt(2 pi X) = 2 sqrt(pi X / 2): the two branches agree, Ch is continuous.
-  * chi -> 180 deg: (3b) grows without bound (the e^{X(1-sin chi)} term), which
-    drives Ne -> 0 through the -1/2 Ch e^{-z} term in (1): deep night has no
-    D region, reached smoothly rather than by a threshold.
+- **Overhead sun.** For large $x$,
+  $\operatorname{erfcx}(\sqrt{x/2}) \approx 1/(\sqrt{x/2}\sqrt{\pi})$, so
+  $\operatorname{Ch} \to 1 = \sec 0$. More generally
+  $\operatorname{Ch} \approx \sec\chi$ below about 75°, which reproduces the
+  plane-parallel layer where that layer is valid.
+- **Terminator.** At $\chi = 90°$, $\cos\chi = 0$ and $\operatorname{erfcx}(0) = 1$,
+  so (3a) gives $\operatorname{Ch} = \sqrt{\pi x/2}$. This is finite, about 41
+  at $x = 1076$. Just past 90°, (3b) gives
+  $\sqrt{2\pi x} - \sqrt{\pi x/2} = \sqrt{\pi x/2}$, because
+  $\sqrt{2\pi x} = 2\sqrt{\pi x/2}$. The two branches agree and
+  $\operatorname{Ch}$ is continuous.
+- **Deep night.** As $\chi \to 180°$, (3b) grows without bound through
+  $e^{x(1 - \sin\chi)}$. That drives $N_e \to 0$ through the
+  $-\tfrac12\operatorname{Ch}\,e^{-z}$ term, so the D region disappears
+  smoothly at night with no threshold.
 
-The realised peak of (1) with sec -> Ch sits at z* = ln(Ch), height
-`r_m + H ln(Ch)`, with peak density `Nm Ch^{-1/2}`. At the terminator that is
-`Nm / sqrt(41) ~ 0.16 Nm` at `r_m + H ln(41)` - a real, thinned, raised layer,
-not an absent one.
+With $\sec\chi$ replaced by $\operatorname{Ch}$, the peak of the layer sits at
+$z^* = \ln\operatorname{Ch}$, height $r_m + H\ln\operatorname{Ch}$, with peak
+density $N_m\operatorname{Ch}^{-1/2}$. At the terminator that is
+$N_m/\sqrt{41} \approx 0.16\,N_m$ at $r_m + H\ln 41$: a thinner, raised layer
+that is still present (`terminator_layer_is_finite_and_thinned`).
 
-X is taken constant at `X = r_m / H` (the reference height); it varies by
-< 0.5 % across the layer, so `dCh/dr = 0` and Ch depends on position only
-through chi.
+The argument is held constant at $x = r_m/H$, the value at the reference
+height. It varies by less than 0.5 % across the layer, so
+$\partial\operatorname{Ch}/\partial r = 0$ and $\operatorname{Ch}$ depends on
+position only through $\chi$.
 
 ## 3 Scaled complementary error function
 
-`erfcx(t)`, t >= 0 (the argument in (3) is always non-negative), is computed
-without any external crate:
+$\operatorname{erfcx}(t)$ is needed only for $t \ge 0$, since the argument in
+(3) is never negative. The code computes it without any external crate.
 
-  * t < 3: erfcx(t) = e^{t^2} (1 - erf(t)) with erf from its Maclaurin series
-    erf(t) = (2/sqrt(pi)) sum_{n>=0} (-1)^n t^{2n+1} / (n! (2n+1)); e^{t^2} <=
-    e^9 here so no overflow.
-  * t >= 3: the classical continued fraction (Abramowitz & Stegun 7.1.14)
-        sqrt(pi) erfcx(t) = 1 / ( t + (1/2)/( t + (2/2)/( t + (3/2)/( t + ... ))))
-    evaluated to 48 levels by the forward continuant recurrence
-    A_k = t A_{k-1} + (k/2) A_{k-2} (B_k likewise), whose ratio is the k-th
-    convergent; `erfcx_forward_recurrence_matches_backward` checks it against
-    backward evaluation.
+- For $t < 3$ it uses $\operatorname{erfcx}(t) = e^{t^2}\left(1 - \operatorname{erf}(t)\right)$
+  with the Maclaurin series
 
-Both are exercised in `chapman.rs` tests against reference values
-erfcx(0)=1, erfcx(1)=0.427583..., erfcx(2)=0.255396..., erfcx(5)=0.110704....
+  $$
+  \operatorname{erf}(t) = \frac{2}{\sqrt{\pi}}\sum_{n \ge 0}\frac{(-1)^n\,t^{2n+1}}{n!\,(2n+1)} .
+  $$
 
-Derivative (needed for the horizontal density gradient, section 4):
+  Here $e^{t^2} \le e^9$, so nothing overflows, and the cancellation near
+  $t = 3$ still leaves more than 12 correct digits.
+- For $t \ge 3$ it uses the continued fraction of Abramowitz and Stegun 7.1.14,
 
-    erfcx'(t) = 2 t erfcx(t) - 2/sqrt(pi)                                     (4)
+  $$
+  \sqrt{\pi}\,\operatorname{erfcx}(t) = \cfrac{1}{t + \cfrac{1/2}{t + \cfrac{2/2}{t + \cfrac{3/2}{t + \cdots}}}} ,
+  $$
 
-from d/dt ( e^{t^2} erfc(t) ) = 2 t e^{t^2} erfc(t) - (2/sqrt(pi)).
+  evaluated to 48 levels by the forward continuant recurrence
+  $A_k = tA_{k-1} + \tfrac{k}{2}A_{k-2}$ (and the same for $B_k$), whose ratio
+  is the $k$-th convergent. Every term is positive, so there is no
+  cancellation. `erfcx_forward_recurrence_matches_backward` compares it with
+  backward evaluation.
+
+`erfcx_reference_values` checks both branches against
+$\operatorname{erfcx}(0) = 1$, $\operatorname{erfcx}(1) = 0.427583\ldots$,
+$\operatorname{erfcx}(2) = 0.255396\ldots$ and
+$\operatorname{erfcx}(5) = 0.110704\ldots$.
+
+The horizontal gradient of section 4 needs the derivative. From
+$\tfrac{d}{dt}\left(e^{t^2}\operatorname{erfc}t\right) = 2t\,e^{t^2}\operatorname{erfc}t - 2/\sqrt{\pi}$,
+
+$$
+\operatorname{erfcx}'(t) = 2t\,\operatorname{erfcx}(t) - \frac{2}{\sqrt{\pi}} .
+\tag{4}
+$$
 
 ## 4 Local zenith angle and density gradients
 
-The engine's density trait returns Ne plus its coordinate partials
-(d/dr, d/dtheta, d/dphi). Unlike the spherically-symmetric engine profiles this
-layer varies horizontally, so the theta/phi partials are non-zero and must be
-supplied for the ray equations to stay on-shell (a value that varies without a
-matching gradient would drive Hamiltonian drift).
+The engine's density trait returns $N_e$ with its coordinate partials in $r$,
+$\theta$ and $\varphi$. The engine's own profiles are spherically symmetric,
+but this layer varies horizontally, so the $\theta$ and $\varphi$ partials are
+nonzero. The ray equations need them to stay on shell: a density that varies
+without a matching gradient would make the Hamiltonian drift.
 
-Solar geometry (solar.rs): with geographic latitude `lat = pi/2 - theta`
-(theta the colatitude), declination `delta`, and hour angle
-`H = phi + (pi/12) t_utc - pi`,
+The solar geometry uses the latitude $\pi/2 - \theta$, the declination
+$\delta$ and the hour angle $\eta = \varphi + (\pi/12)\,t_\text{UTC} - \pi$.
+Since $\sin(\text{lat}) = \cos\theta$ and $\cos(\text{lat}) = \sin\theta$,
 
-    cos chi = cos theta sin delta + sin theta cos delta cos H                 (5)
+$$
+\cos\chi = \cos\theta\sin\delta + \sin\theta\cos\delta\cos\eta .
+\tag{5}
+$$
 
-(sin lat = cos theta, cos lat = sin theta). Then
+Its partials are
 
-    d(cos chi)/dtheta = -sin theta sin delta + cos theta cos delta cos H
-    d(cos chi)/dphi   = -sin theta cos delta sin H
-    dchi/dq = -(1/sin chi) d(cos chi)/dq                                      (6)
+$$
+\frac{\partial\cos\chi}{\partial\theta} = -\sin\theta\sin\delta + \cos\theta\cos\delta\cos\eta,
+\qquad
+\frac{\partial\cos\chi}{\partial\varphi} = -\sin\theta\cos\delta\sin\eta,
+\qquad
+\frac{\partial\chi}{\partial q} = -\frac{1}{\sin\chi}\frac{\partial\cos\chi}{\partial q} .
+$$
 
-with the sin chi -> 0 subsolar/antisolar points guarded (the horizontal
-gradient is zero there by symmetry, matching the code's pole guards).
+At the subsolar and antisolar points $\sin\chi \to 0$. The horizontal gradient
+is zero there by symmetry, and the code returns zero once $\sin\chi < 10^{-9}$.
 
-Writing `f = 1/2 (1 - z - Ch e^{-z})` so `Ne = Nm e^f`,
+Write $f = \tfrac12\left(1 - z - \operatorname{Ch}e^{-z}\right)$, so that
+$N_e = N_m e^f$. Then
 
-    dNe/dr     = Ne * 1/2 (Ch e^{-z} - 1) / H          (as in (1), sec -> Ch)
-    dNe/dchi   = Ne * ( -1/2 e^{-z} ) * dCh/dchi                              (7)
-    dNe/dtheta = dNe/dchi * dchi/dtheta
-    dNe/dphi   = dNe/dchi * dchi/dphi
+$$
+\frac{\partial N_e}{\partial r} = \frac{N_e}{2H}\left(\operatorname{Ch}e^{-z} - 1\right),
+\qquad
+\frac{\partial N_e}{\partial\chi} = -\frac12\,N_e\,e^{-z}\,\frac{\partial\operatorname{Ch}}{\partial\chi},
+\tag{7}
+$$
 
-with `dCh/dchi` obtained by differentiating (3a)/(3b) and using (4):
+and $\partial N_e/\partial\theta$ and $\partial N_e/\partial\varphi$ follow by
+the chain rule through $\partial\chi/\partial q$. When the peak density
+$N_m(\theta, \varphi)$ comes from a map, its own gradient adds the product-rule
+term $(\partial N_m/\partial q)\,e^f$.
 
-  chi <= 90 deg, t = sqrt(X/2) cos chi:
-    dCh/dchi = sqrt(pi X/2) * erfcx'(t) * ( -sqrt(X/2) sin chi )              (8a)
+Differentiating (3a) and (3b) with (4) gives
+$\partial\operatorname{Ch}/\partial\chi$. Below 90°, with
+$t = \sqrt{x/2}\cos\chi$,
 
-  chi > 90 deg, t = sqrt(X/2) |cos chi|:
-    dCh/dchi = sqrt(2 pi X) e^{X(1-sin chi)} cos chi
-                 * ( 1/(2 sqrt(sin chi)) - X sqrt(sin chi) )
-               - sqrt(pi X/2) * erfcx'(t) * ( sqrt(X/2) sin chi )            (8b)
+$$
+\frac{\partial\operatorname{Ch}}{\partial\chi} = \sqrt{\frac{\pi x}{2}}\;\operatorname{erfcx}'(t)\left(-\sqrt{\frac{x}{2}}\sin\chi\right),
+\qquad \chi \le 90°.
+\tag{8a}
+$$
 
-All partials are checked against central finite differences in the module
-tests, both modes of (3) and across the 90 deg branch.
+Above 90°, with $t = \sqrt{x/2}\,\lvert\cos\chi\rvert$,
 
-## 5 Numerical night guard
+$$
+\frac{\partial\operatorname{Ch}}{\partial\chi} = \sqrt{2\pi x}\;e^{x(1 - \sin\chi)}\cos\chi\left(\frac{1}{2\sqrt{\sin\chi}} - x\sqrt{\sin\chi}\right) - \sqrt{\frac{\pi x}{2}}\;\operatorname{erfcx}'(t)\left(\sqrt{\frac{x}{2}}\sin\chi\right),
+\qquad \chi > 90°.
+\tag{8b}
+$$
 
-For chi well past 90 deg the `e^{X(1-sin chi)}` term in (3b) overflows f64
-(argument exceeds ~709 near chi ~ 100 deg at X = 1076). By then `Ch e^{-z}`
-already dwarfs everything and the sunlit layer is 0 to machine precision, so
-`chapman_grazing` returns `Ch = +inf` once the exponent passes 700 and the
-layer drops its photochemical part once `f < -700`.
+`chapman_grazing_deriv_matches_fd` and `horizontal_partials_match_fd` compare
+these with central finite differences, on both branches of (3) and across
+90°.
 
-What remains is the night floor (`SolarChapmanLayer::with_night_floor`): a
-residual alpha-Chapman profile with the same peak height and no zenith
-dependence, standing in for the cosmic-ray and Lyman-alpha ionisation a
-Chapman layer does not describe. The layer returns the larger of the sunlit
-profile and the floor, so a fully sunlit layer is unchanged. With no floor set
-the deep-night layer is vacuum.
+## 5 Night guard and night floor
+
+Well past 90° the factor $e^{x(1 - \sin\chi)}$ in (3b) overflows `f64`. The
+exponent passes about 709 near $\chi \approx 100°$ at $x = 1076$. By then
+$\operatorname{Ch}e^{-z}$ dominates everything and the sunlit layer is zero to
+machine precision. `chapman_grazing` returns $\operatorname{Ch} = +\infty$ once
+the exponent passes 700, and the layer drops its photochemical part once
+$f < -700$.
+
+What remains is the night floor, set with
+`SolarChapmanLayer::with_night_floor`. It is a residual $\alpha$-Chapman
+profile with the same peak height and no zenith dependence. It stands in for
+the ionisation by cosmic rays and scattered Lyman-$\alpha$ that a Chapman layer
+does not describe. The layer returns the larger of the sunlit profile and the
+floor, so a fully sunlit layer is unchanged
+(`the_night_floor_replaces_an_exactly_zero_night`). With no floor set, the
+deep-night layer is vacuum (`deep_night_is_vacuum`).
 
 ## 6 Partial rise
 
-`SolarChapmanLayer::with_rise_fraction(f)` keeps only a fraction f of the
-upward translation `H ln Ch`, writing u = z - f ln Ch and
-Ne = Nm Ch^{-1/2} exp(1/2 (1 - u - e^{-u})). At f = 1 this is (1) with
-sec -> Ch. The reason, the absorption zenith law it implies and the derivative
-are in the rustdoc of `with_rise_fraction` and `sample_partial_rise`.
+`SolarChapmanLayer::with_rise_fraction(f)` keeps only a fraction $f$ of the
+upward translation $H\ln\operatorname{Ch}$. With $u = z - f\ln\operatorname{Ch}$
+the layer is
+
+$$
+N_e = N_m\operatorname{Ch}^{-1/2}\exp\left(\tfrac12\left(1 - u - e^{-u}\right)\right).
+$$
+
+At $f = 1$ the prefactor and the shift inside $u$ cancel, and this is the
+layer of section 2 (`partial_rise_reduces_to_the_textbook_layer_at_f_one`).
+The physical reason for $f < 1$, the absorption zenith law it implies and the
+derivative are in the rustdoc of `with_rise_fraction` and
+`sample_partial_rise`.

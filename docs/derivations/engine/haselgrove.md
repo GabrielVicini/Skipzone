@@ -1,151 +1,256 @@
-# Haselgrove ray equations in spherical coordinates, derived canonically
+# Haselgrove ray equations in spherical coordinates
 
 - **Crate:** `crates/skipzone`
 - **Implemented in:** `src/hamiltonian.rs::RayEquations::rhs`, `src/hamiltonian.rs::RayEquations::hamiltonian`, `src/hamiltonian.rs::RayEquations::initial_state`, `src/trace.rs::Tracer::trace`
 - **Tested by:** `tests/analytic_field_free.rs::bouguer_invariant_and_apex_condition_along_ray`, `tests/magnetoionic_3d.rs::reciprocity_forward_backward`, `tests/magnetoionic_3d.rs::spitze_meridian_ray_fails_typed`, `tests/absorption.rs::field_free_absorption_matches_quadrature`
 - **Section anchors used by code:** §1, §2, §3, §4, §5, §6
 
-Symbols and sign conventions: [conventions.md](../conventions.md).
+Symbols and sign conventions: [conventions.md](../conventions.md#5-symbols).
+
+This file derives the ray equations the tracer integrates. Section 1 obtains
+Hamilton's equations in spherical coordinates for any dispersion function.
+Section 2 picks the Hamiltonian and rescales the variables so every right-hand
+side is of order one. Sections 3 and 4 add the path integrals the tracer
+reports, section 5 puts the launch state on the dispersion shell, and
+section 6 explains why the equations stay well conditioned at reflection,
+except at one configuration where they cannot.
 
 ## 1 Canonical variables
 
-Ray phase psi = S(r) - omega t, wave vector k = grad S. In spherical
-coordinates dl = dr r_hat + r dtheta theta_hat + r sin(theta) dphi phi_hat, so
+Write the ray phase as $\psi = S(\mathbf{r}) - \omega t$ with wave vector
+$\mathbf{k} = \nabla S$. With the line element of
+[conventions.md §1](../conventions.md#1-coordinates),
 
-    k . dl = k_r dr + (r k_theta) dtheta + (r sin(theta) k_phi) dphi
+$$
+\mathbf{k}\cdot d\mathbf{l} = k_r\,dr + (r k_\theta)\,d\theta + (r\sin\theta\, k_\varphi)\,d\varphi ,
+$$
 
-and the momenta conjugate to q = (r, theta, phi) are
+so the momenta conjugate to $q = (r, \theta, \varphi)$ are
 
-    p = (p_r, p_th, p_ph) = (k_r, r k_theta, r sin(theta) k_phi)
+$$
+p = (p_r, p_\theta, p_\varphi) = (k_r,\; r k_\theta,\; r\sin\theta\, k_\varphi),
+$$
 
-with (k_r, k_theta, k_phi) the physical components on (r_hat, theta_hat,
-phi_hat). For any dispersion function D(q, k) = 0, Hamilton's equations in
-(q, p) with parameter tau are dq/dtau = dD/dp, dp/dtau = -dD/dq. Expressing D
-in physical components and transforming p -> k gives, by the chain rule alone
-(no covariant-derivative machinery is needed; the p <-> k map carries all
-basis rotation exactly):
+where $(k_r, k_\theta, k_\varphi)$ are the physical components on
+$(\hat{r}, \hat{\theta}, \hat{\varphi})$.
 
-    dr/dtau     = D_kr
-    dtheta/dtau = D_kth / r
-    dphi/dtau   = D_kph / (r sin th)
-    dk_r/dtau   = -D_r  + (k_th D_kth + k_ph D_kph)/r
-    dk_th/dtau  = [-D_th + k_ph D_kph cot th - k_th D_kr]/r
-    dk_ph/dtau  = [-D_ph / sin th - k_ph D_kr - k_ph D_kth cot th]/r
+For any dispersion function $D(q, \mathbf{k}) = 0$, Hamilton's equations in
+$(q, p)$ with parameter $\tau$ are $dq/d\tau = \partial D/\partial p$ and
+$dp/d\tau = -\partial D/\partial q$. Expressing $D$ in physical components and
+transforming $p \to \mathbf{k}$ needs only the chain rule. The map between $p$
+and $\mathbf{k}$ carries all of the basis rotation, so no covariant
+derivatives appear. The result is
 
-where D_q are coordinate partials at fixed *physical* k components and D_k
-partials at fixed position. (Derivation: substitute k_th = p_th/r,
-k_ph = p_ph/(r sin th) into D, differentiate, e.g. dp_th/dtau = -dD/dtheta|_p
-= -D_th + D_kph k_ph cot th, and dp_th/dtau = (dr/dtau) k_th + r dk_th/dtau.)
+$$
+\begin{aligned}
+\frac{dr}{d\tau} &= D_{k_r}, &
+\frac{dk_r}{d\tau} &= -D_r + \frac{k_\theta D_{k_\theta} + k_\varphi D_{k_\varphi}}{r}, \\
+\frac{d\theta}{d\tau} &= \frac{D_{k_\theta}}{r}, &
+\frac{dk_\theta}{d\tau} &= \frac{1}{r}\left[-D_\theta + k_\varphi D_{k_\varphi}\cot\theta - k_\theta D_{k_r}\right], \\
+\frac{d\varphi}{d\tau} &= \frac{D_{k_\varphi}}{r\sin\theta}, &
+\frac{dk_\varphi}{d\tau} &= \frac{1}{r}\left[-\frac{D_\varphi}{\sin\theta} - k_\varphi D_{k_r} - k_\varphi D_{k_\theta}\cot\theta\right].
+\end{aligned}
+$$
+
+Here $D_q$ are coordinate partials at fixed *physical* components of
+$\mathbf{k}$, and $D_{k}$ are partials at fixed position.
+
+<details><summary>Derivation of the momentum equations</summary>
+
+Substitute $k_\theta = p_\theta/r$ and $k_\varphi = p_\varphi/(r\sin\theta)$
+into $D$ and differentiate. For the $\theta$ equation,
+
+$$
+\frac{dp_\theta}{d\tau} = -\left.\frac{\partial D}{\partial\theta}\right|_p = -D_\theta + D_{k_\varphi} k_\varphi\cot\theta ,
+$$
+
+while differentiating $p_\theta = r k_\theta$ along the ray gives
+$dp_\theta/d\tau = (dr/d\tau)\,k_\theta + r\,dk_\theta/d\tau$. Equating the two
+and using $dr/d\tau = D_{k_r}$ gives the $k_\theta$ equation. The $k_r$ and
+$k_\varphi$ equations follow in the same way.
+
+</details>
 
 ## 2 The Hamiltonian and the working variables
 
-    H(q, m) = 1/2 [ m.m - Re n^2(q, m_hat) ] ,   m := (c/omega) k
+The tracer uses
 
-n^2 is the complex Appleton-Hartree index (appleton-hartree.md); the ray path
-uses its real part (real-ray approximation: collisions perturb the path at
-O(Z^2) but attenuate at O(Z); Jones-Stephenson practice). On shell |m| = n
-because n^2 depends only on the direction m_hat.
+$$
+\mathcal{H}(q, \mathbf{m}) = \frac12\left[\mathbf{m}\cdot\mathbf{m} - \operatorname{Re} n^2(q, \hat{\mathbf{m}})\right],
+\qquad
+\mathbf{m} = \frac{c}{\omega}\mathbf{k}.
+$$
 
-Scaling: with sigma := (c/omega) tau, the equations keep the section-1 form
-with k -> m and all right-hand sides O(1); sigma has units of metres and
-d(position)/d(sigma) = v with |v| = n in the isotropic case (so sigma is arc
-length divided by n there, and phase path accumulates as m.v, see section 4).
+$n^2$ is the complex Appleton–Hartree index of
+[appleton-hartree.md](appleton-hartree.md). The ray path uses its real part.
+This is the real-ray approximation of Jones and Stephenson: collisions perturb
+the path at $O(Z^2)$ but attenuate the wave at $O(Z)$. On shell
+$\lvert\mathbf{m}\rvert = n$, because $n^2$ depends on $\mathbf{m}$ only
+through its direction.
 
-    v_i := dH/dm_i = m_i - 1/2 (dn^2/dcos) (b_i - cos(Th) m_hat_i)/|m|
+With $\sigma = (c/\omega)\tau$ the equations of section 1 keep their form with
+$\mathbf{k} \to \mathbf{m}$, and every right-hand side is of order one.
+$\sigma$ has units of metres. The rate $d(\text{position})/d\sigma$ is
+$\mathbf{v}$, with $\lvert\mathbf{v}\rvert = n$ in an isotropic medium, so
+there $\sigma$ is arc length divided by $n$.
 
-using d cos(Th)/d m_i = (b_i - cos(Th) m_hat_i)/|m| for cos(Th) =
-(m.B)/(|m||B|); b = B/|B|. Position and momentum equations:
+The ray direction is
 
-    dr/ds     = v_r
-    dth/ds    = v_th / r
-    dph/ds    = v_ph / (r sin th)
-    dm_r/ds   = 1/2 G_r + (m_th v_th + m_ph v_ph)/r
-    dm_th/ds  = [1/2 G_th + m_ph v_ph cot th - m_th v_r]/r
-    dm_ph/ds  = [1/2 G_ph / sin th - m_ph v_r - m_ph v_th cot th]/r
+$$
+v_i = \frac{\partial\mathcal{H}}{\partial m_i}
+= m_i - \frac12\,\frac{\partial n^2}{\partial\cos\Theta}\,\frac{b_i - \cos\Theta\,\hat{m}_i}{\lvert\mathbf{m}\rvert},
+$$
 
-with G_q := d(Re n^2)/dq at fixed physical m:
+using $\partial\cos\Theta/\partial m_i = (b_i - \cos\Theta\,\hat{m}_i)/\lvert\mathbf{m}\rvert$
+for $\cos\Theta = \mathbf{m}\cdot\mathbf{B}/(\lvert\mathbf{m}\rvert\lvert\mathbf{B}\rvert)$
+and $\hat{b} = \mathbf{B}/\lvert\mathbf{B}\rvert$. The position and momentum
+equations are
 
-    G_q = Re[ d_x dX/dq + d_y dY/dq + d_z dZ/dq + d_cos dcos(Th)/dq ]
-    dX/dq   = (e^2/(eps0 m_e omega^2)) dNe/dq
-    dY/dq   = (e/(m_e omega)) b . dB/dq
-    dZ/dq   = (1/omega) dnu/dq
-    dcosTh/dq = (m_hat . dB/dq - cos(Th) b . dB/dq)/|B|
+$$
+\begin{aligned}
+\frac{dr}{d\sigma} &= v_r, &
+\frac{dm_r}{d\sigma} &= \tfrac12 G_r + \frac{m_\theta v_\theta + m_\varphi v_\varphi}{r}, \\
+\frac{d\theta}{d\sigma} &= \frac{v_\theta}{r}, &
+\frac{dm_\theta}{d\sigma} &= \frac{1}{r}\left[\tfrac12 G_\theta + m_\varphi v_\varphi\cot\theta - m_\theta v_r\right], \\
+\frac{d\varphi}{d\sigma} &= \frac{v_\varphi}{r\sin\theta}, &
+\frac{dm_\varphi}{d\sigma} &= \frac{1}{r}\left[\frac{G_\varphi}{2\sin\theta} - m_\varphi v_r - m_\varphi v_\theta\cot\theta\right],
+\end{aligned}
+$$
 
-dB/dq is column q of the field trait's component Jacobian; dNe/dq, dnu/dq the
-density/collision coordinate partials. Zero field: v = m exactly and G has
-only the d_x term - the field-free (2D) tracer is this system with Y = 0, not
-separate code.
+with $G_q = \partial(\operatorname{Re} n^2)/\partial q$ at fixed physical
+$\mathbf{m}$. The chain rule through the four magnetoionic parameters gives
+
+$$
+\begin{aligned}
+G_q &= \operatorname{Re}\left[
+\frac{\partial n^2}{\partial X}\frac{\partial X}{\partial q}
++ \frac{\partial n^2}{\partial Y}\frac{\partial Y}{\partial q}
++ \frac{\partial n^2}{\partial Z}\frac{\partial Z}{\partial q}
++ \frac{\partial n^2}{\partial\cos\Theta}\frac{\partial\cos\Theta}{\partial q}\right], \\
+\frac{\partial X}{\partial q} &= \frac{e^2}{\varepsilon_0 m_e\omega^2}\frac{\partial N_e}{\partial q}, \qquad
+\frac{\partial Y}{\partial q} = \frac{e}{m_e\omega}\,\hat{b}\cdot\frac{\partial\mathbf{B}}{\partial q}, \qquad
+\frac{\partial Z}{\partial q} = \frac{1}{\omega}\frac{\partial\nu}{\partial q}, \\
+\frac{\partial\cos\Theta}{\partial q} &= \frac{1}{\lvert\mathbf{B}\rvert}\left[\hat{\mathbf{m}}\cdot\frac{\partial\mathbf{B}}{\partial q} - \cos\Theta\;\hat{b}\cdot\frac{\partial\mathbf{B}}{\partial q}\right].
+\end{aligned}
+$$
+
+$\partial\mathbf{B}/\partial q$ is column $q$ of the field model's component
+Jacobian ([magnetic-field.md §2](magnetic-field.md#2-coordinate-jacobian)).
+$\partial N_e/\partial q$ and $\partial\nu/\partial q$ are the coordinate
+partials the density and collision models return.
+
+In zero field $\mathbf{v} = \mathbf{m}$ exactly and $G_q$ keeps only its $X$
+term. The field-free tracer is this same system with $Y = 0$, so it shares
+every line of code with the magnetised one.
 
 ## 3 Group delay from the extended phase space
 
-Treat (t, -omega) as a conjugate pair: dt/dtau = -dH/domega at fixed k.
-With H above (k fixed, so m = ck/omega varies as omega^-1):
+Group delay comes from treating $(t, -\omega)$ as one more conjugate pair:
+$dt/d\tau = -\partial\mathcal{H}/\partial\omega$ at fixed $\mathbf{k}$. At
+fixed $\mathbf{k}$ the scaled vector $\mathbf{m} = c\mathbf{k}/\omega$ varies
+as $\omega^{-1}$, so
 
-    dH/domega|_k = -(1/omega) [ m.m + (omega/2) d(Re n^2)/domega ]
+$$
+\left.\frac{\partial\mathcal{H}}{\partial\omega}\right|_{\mathbf{k}}
+= -\frac{1}{\omega}\left[\mathbf{m}\cdot\mathbf{m} + \frac{\omega}{2}\frac{\partial(\operatorname{Re} n^2)}{\partial\omega}\right].
+$$
 
-n^2 depends on omega through X ~ omega^-2, Y ~ omega^-1, Z ~ omega^-1, so
-(omega/2) dn^2/domega = -Re[ d_x X + 1/2 d_y Y + 1/2 d_z Z ] and, in sigma,
-group path P' = c t accumulates as
+$n^2$ depends on $\omega$ through $X \propto \omega^{-2}$,
+$Y \propto \omega^{-1}$ and $Z \propto \omega^{-1}$. Hence
 
-    dP'/ds = m.m - Re[ d_x X + (1/2) d_y Y + (1/2) d_z Z ]
+$$
+\frac{\omega}{2}\frac{\partial n^2}{\partial\omega}
+= -\left[\frac{\partial n^2}{\partial X}X + \frac12\frac{\partial n^2}{\partial Y}Y + \frac12\frac{\partial n^2}{\partial Z}Z\right],
+$$
 
-Checks: vacuum gives dP'/ds = 1; isotropic collisionless gives
-dP'/ds = n^2 + X = 1 (with ds arc length = n dsigma this is the classical
-group index mu' = 1/mu).
+and the group path $P' = ct$ accumulates in $\sigma$ as
+
+$$
+\frac{dP'}{d\sigma} = \mathbf{m}\cdot\mathbf{m} - \operatorname{Re}\left[\frac{\partial n^2}{\partial X}X + \frac12\frac{\partial n^2}{\partial Y}Y + \frac12\frac{\partial n^2}{\partial Z}Z\right].
+$$
+
+Two limits confirm the sign. In vacuum $dP'/d\sigma = 1$. In an isotropic
+collisionless plasma $dP'/d\sigma = n^2 + X = 1$. With
+$ds = n\,d\sigma$ this is the classical group index $\mu' = 1/\mu$.
 
 ## 4 Phase path, absorption, arc length
 
-    dP/ds = m . v          (phase path; = (c/omega) k . dr/dsigma)
-    dA/ds = (omega/c) Im(n) |v|   , n = principal sqrt of complex n^2;
-                                    exactly 0 when Z = 0 (see appleton-hartree.md)
-    d(arc)/ds = |v|
+The remaining integrands are
 
-Absorption in nepers; the field amplitude decays as exp(-A).
+$$
+\frac{dP}{d\sigma} = \mathbf{m}\cdot\mathbf{v},
+\qquad
+\frac{dA}{d\sigma} = \frac{\omega}{c}\,\operatorname{Im}(n)\,\lvert\mathbf{v}\rvert,
+\qquad
+\frac{ds}{d\sigma} = \lvert\mathbf{v}\rvert .
+$$
+
+The phase path is $(c/\omega)\,\mathbf{k}\cdot d\mathbf{r}/d\sigma$. In the
+absorption integrand $n$ is the principal square root of the complex $n^2$.
+With $Z = 0$ the code sets the absorption integrand to exactly zero, which
+[appleton-hartree.md §6](appleton-hartree.md#6-conditioning-and-known-degeneracies)
+shows is also what the arithmetic gives. Absorption is in nepers, and the field
+amplitude decays as $e^{-A}$.
 
 The tracer computes no Doppler shift. Every medium in the workspace is static,
-so the shift is zero; a caller that wants one differentiates the phase path P
-across model epochs.
+so the shift is zero. A caller that wants one differentiates the phase path
+$P$ across model epochs.
 
 ## 5 Initialization and termination
 
-Launch at point q0 with unit wave normal k_hat (from elevation/azimuth):
-cos(Th) from k_hat and b; n0^2 = Re AH; if n0^2 <= 0 the mode is evanescent
-at the source (typed error); else m = sqrt(n0^2) k_hat, which puts the state
-exactly on shell (n depends only on direction, so no iteration is needed).
-H = 0 is then a conserved diagnostic; its drift measures integrator error.
+The launch state is placed exactly on the dispersion shell, so that
+$\mathcal{H}$ starts at zero and its drift measures integrator error.
+
+At the launch point $q_0$ the elevation and azimuth give a unit wave normal
+$\hat{\mathbf{k}}$. With $\cos\Theta$ from $\hat{\mathbf{k}}$ and $\hat{b}$,
+evaluate $n_0^2 = \operatorname{Re} n^2$. If $n_0^2 \le 0$ the mode is
+evanescent at the source and the tracer returns the typed error
+`EvanescentLaunch`. Otherwise $\mathbf{m} = \sqrt{n_0^2}\,\hat{\mathbf{k}}$.
+This is on shell with no iteration, because $n$ depends only on the direction
+of $\mathbf{m}$.
+
+Within `SIN_COLAT_MIN` of a coordinate pole the $\cot\theta$ and
+$1/\sin\theta$ terms amplify rounding beyond any useful tolerance, and the
+tracer returns `PoleProximity`.
 
 ## 6 Conditioning near reflection
 
-At an O-mode apex n^2 -> 0: v -> m -> 0, so d(position)/dsigma -> 0 while
-dm/dsigma -> (1/2) grad n^2, finite. The trajectory is smooth in sigma; this
-is precisely why the tracer must not reparametrise by arc length (dk/darc
-diverges at the apex like 1/n). Consequences handled:
+At an O-mode apex $n^2 \to 0$, so $\mathbf{v} \to \mathbf{m} \to 0$. The
+position rate $d(\text{position})/d\sigma$ goes to zero while
+$d\mathbf{m}/d\sigma \to \tfrac12\nabla n^2$ stays finite. The trajectory is
+smooth in $\sigma$. This is why the tracer must not reparametrise by arc
+length: $d\mathbf{k}/ds$ diverges at the apex like $1/n$. Five consequences
+follow.
 
-- Absorption integrand: Im(n) ~ Im(n^2)/(2 Re n) diverges at the apex, but
-  dA/dsigma multiplies by |v| ~ Re n, so the product stays finite (deviative
-  absorption at reflection is finite - physics agrees).
-- Group integrand dP'/dsigma -> X = 1 at an isotropic apex: finite.
-- Step control near the apex tightens through the error norm on m, not
-  through any special-casing.
-- Evanescent overshoot: trial RK stages may evaluate slightly beyond the
-  turning point where Re n^2 < 0. All formulas remain smooth there
-  (collisionless n^2 is real and analytic through zero), so rejected/interior
-  stage evaluations are well-defined; the Hamiltonian pulls the ray back.
-- **The Spitze** (observed, and the sharpest conditioning limit): a
-  near-vertical O-mode ray propagating in the magnetic meridian plane has
-  its wave normal refracted toward the field direction as X -> 1, arriving
-  at exactly the (X = 1, theta = 0) Ellis-window degeneracy of
-  appleton-hartree.md section 6. The physical ray path there is a cusp
-  (direction reverses discontinuously); the dispersion surface is conical,
-  dn^2/dcos(theta) diverges, and smooth Hamiltonian integration is
-  impossible in principle, not just in practice. Diagnostic signature
-  (reproduced in a probe): position freezes while v_r runs away and the
-  step collapses. The tracer reports StepSizeCollapse (typed) rather than
-  stepping over the cusp; analytic Spitze continuation (mode-preserving ray
-  reversal) is a documented non-goal. The configuration requires the ray
-  plane to contain B at X ~ 1: off-meridian azimuths and the X mode (cutoff
-  X = 1 - Y, reached with W bounded away from 0) are unaffected.
-- Exactly-critical vertical incidence with a field is additionally
-  degenerate through |m| -> 0 with direction-dependent n^2 (m_hat
-  discontinuous at the apex); same typed-failure handling. Field-free
-  vertical reflection is unaffected (isotropic n^2 does not see m_hat).
+- **Absorption integrand.** $\operatorname{Im} n \approx \operatorname{Im} n^2/(2\operatorname{Re} n)$
+  diverges at the apex, but $dA/d\sigma$ multiplies it by
+  $\lvert\mathbf{v}\rvert \approx \operatorname{Re} n$. The product stays
+  finite, which matches the physics: deviative absorption at reflection is
+  finite.
+- **Group integrand.** $dP'/d\sigma \to X = 1$ at an isotropic apex, which is
+  finite.
+- **Step control.** The step tightens near the apex through the error norm on
+  $\mathbf{m}$. Nothing in the code special-cases the apex.
+- **Evanescent overshoot.** Trial Runge–Kutta stages may land slightly beyond
+  the turning point, where $\operatorname{Re} n^2 < 0$. The collisionless
+  $n^2$ is real and analytic through zero, so those stage evaluations are well
+  defined and the Hamiltonian flow pulls the ray back.
+- **The Spitze.** A near-vertical O-mode ray in the magnetic meridian plane has
+  its wave normal refracted toward the field as $X \to 1$. It arrives at the
+  $(X = 1, \Theta = 0)$ degeneracy of
+  [appleton-hartree.md §6](appleton-hartree.md#6-conditioning-and-known-degeneracies).
+  There the physical ray has a cusp, the dispersion surface is conical and
+  $\partial n^2/\partial\cos\Theta$ diverges, so no smooth integration can
+  pass. In a trace the position freezes while $v_r$ runs away and the step
+  collapses. The tracer reports `StepSizeCollapse`, and
+  `spitze_meridian_ray_fails_typed` checks that it does. Continuing the ray
+  analytically through the cusp is out of scope. Only rays whose plane
+  contains $\mathbf{B}$ near $X = 1$ reach this point. Off-meridian azimuths
+  and the X mode, whose cutoff $X = 1 - Y$ is reached with $W$ bounded away
+  from zero, are unaffected.
+
+Exactly critical vertical incidence with a field present is degenerate in a
+second way. $\lvert\mathbf{m}\rvert \to 0$ while $n^2$ depends on direction,
+so $\hat{\mathbf{m}}$ is discontinuous at the apex. The tracer handles it with
+the same typed failure. Field-free vertical reflection is unaffected, because
+an isotropic $n^2$ does not depend on $\hat{\mathbf{m}}$.
