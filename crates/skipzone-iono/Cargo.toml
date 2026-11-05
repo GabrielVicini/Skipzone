@@ -12,3 +12,9 @@ name = "skipzone_iono"
 
 [dependencies]
 skipzone = { path = "../skipzone" }
+# Only for the app's saved settings. Off by default.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+# Serialize and Deserialize on the foF2 backend choice.
+serde = ["dep:serde"]

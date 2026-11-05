@@ -163,6 +163,7 @@ pub enum PlaceMode {
 /// from the reflection point's position against the Natural Earth coastline
 /// data (see [`crate::coastline`]). It adds no electrical constants of its own.
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum GroundType {
     SeaWater,
     FreshWater,

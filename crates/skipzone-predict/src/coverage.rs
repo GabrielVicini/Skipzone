@@ -52,6 +52,7 @@ pub const LAT_LIMIT_DEG: f64 = 89.0;
 /// `points_per_deg` sets how many grid points are computed. Nothing
 /// interpolates between them, so a coarse setting looks blocky.
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CoverageConfig {
     /// Half-width of the lat/lon box centred on the transmitter, degrees.
     pub half_span_deg: f64,

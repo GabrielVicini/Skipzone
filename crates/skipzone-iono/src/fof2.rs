@@ -54,6 +54,7 @@ pub fn fof2_from_ssn(ssn: f64) -> f64 {
 
 /// Which foF2 model builds the F2 layer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Fof2Backend {
     /// [`fof2_from_ssn`], one value for the whole domain.
     ConstantSsn,

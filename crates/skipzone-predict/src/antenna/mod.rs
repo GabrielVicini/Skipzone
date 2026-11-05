@@ -196,6 +196,7 @@ pub const EFHW_UNUN_LOSS_DB: f64 = 0.5;
 /// loop) means adding a variant here and returning a [`TabulatedPattern`] from
 /// [`AntennaConfig::build`]. Nothing else in the app needs to change.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AntennaKind {
     Isotropic,
     HorizontalDipole,
@@ -241,6 +242,7 @@ impl AntennaKind {
 /// keeps the `(elevation, height, frequency)` interface uniform across
 /// closed-form and table-backed types.
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AntennaConfig {
     pub kind: AntennaKind,
     /// Height above ground (m). For the vertical this is the height of the

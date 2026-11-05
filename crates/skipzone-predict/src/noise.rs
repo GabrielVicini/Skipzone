@@ -80,6 +80,7 @@ pub fn noise_power_dbm(fa_db: f64, bandwidth_hz: f64) -> f64 {
 
 /// Man-made noise environment: the categories of P.372-9 Table 1.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NoiseEnvironment {
     City,
     Residential,
@@ -420,6 +421,7 @@ impl NoiseFloor {
 /// ~50 Hz occupied bandwidth that is
 ///   `-21 + 10 log10(2500 / 50) = -21 + 16.99 = -4.0 dB`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OperatingMode {
     Cw,
     Ssb,
