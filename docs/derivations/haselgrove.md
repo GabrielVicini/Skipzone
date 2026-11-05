@@ -1,6 +1,6 @@
 # Haselgrove ray equations in spherical coordinates, derived canonically
 
-Implements: `src/hamiltonian.rs`, `src/trace.rs`. Conventions: `conventions.md`.
+Implements: `crates/skipzone/src/hamiltonian.rs`, `crates/skipzone/src/trace.rs`. Conventions: `conventions.md`.
 
 ## 1. Canonical variables
 

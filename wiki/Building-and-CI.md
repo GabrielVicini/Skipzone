@@ -59,7 +59,7 @@ Both are clean and CI runs them with `RUSTFLAGS=-D warnings`.
 ### Lint policy
 
 The **engine** is `clippy::pedantic` at warn level, with four documented
-exceptions in the root `Cargo.toml`, each of which exists for a stated reason
+exceptions in `crates/skipzone/Cargo.toml`, each of which exists for a stated reason
 rather than to silence noise:
 
 | Allowed | Why |
@@ -95,10 +95,10 @@ backticks or put the block in a ` ```text ` fence.
 ## Benchmarks
 
 ```bash
-cargo bench
+cargo bench -p skipzone
 ```
 
-Criterion, two benchmarks in `benches/trace.rs`, both in the production shape: a
+Criterion, two benchmarks in `crates/skipzone/benches/trace.rs`, both in the production shape: a
 full magnetoionic ray through IGRF-14 plus a Chapman layer plus exponential
 collisions, landing after one hop.
 
@@ -129,7 +129,7 @@ build would pull the app's tree in and hide a leak.
 
 `cargo check --package skipzone --lib` on Rust 1.85.
 
-`rust-version = "1.85"` in the root `Cargo.toml` is a promise about the **engine**
+`rust-version = "1.85"` in `crates/skipzone/Cargo.toml` is a promise about the **engine**
 crate, which is the portable, embeddable one. The app is not held to it: eframe
 and its tree move their own minimums, and chasing those would mean
 either pinning the GUI or weakening the claim that actually matters.

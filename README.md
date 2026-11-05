@@ -7,9 +7,9 @@
 **3D ionospheric HF ray tracing** with Haselgrove equations and full Appleton-Hartree magnetoionic theory.
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
-[![edition](https://img.shields.io/badge/edition-2024-orange)](Cargo.toml)
+[![edition](https://img.shields.io/badge/edition-2024-orange)](crates/skipzone/Cargo.toml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-brightgreen)](Cargo.toml)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-brightgreen)](crates/skipzone/Cargo.toml)
 [![build](https://github.com/GabrielVicini/Skipzone/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/GabrielVicini/Skipzone/actions/workflows/ci.yml)
 [![docs](https://img.shields.io/badge/docs-derivations-1D76DB)](docs/derivations)
 
@@ -39,7 +39,7 @@ geomagnetic field, the full Appleton-Hartree magnetoionic dispersion relation
 (O and X modes), and a day/night-aware Chapman D-region model, solved via the
 Haselgrove ray equations in Hamiltonian form.
 
-- **Engine (`src/`):** no dependencies beyond `num-complex` and `thiserror`; no
+- **Engine (`crates/skipzone/`):** no dependencies beyond `num-complex` and `thiserror`; no
   system libraries; single-threaded; `unsafe` forbidden. Built to stay portable
   and embeddable. CI builds it on its own, outside the workspace default
   members, so a dependency leak from the app cannot hide.
@@ -58,7 +58,7 @@ Haselgrove ray equations in Hamiltonian form.
 ### Where the code actually is
 
 The engine is about 4,000 lines and the app is about 30,000. That split is
-deliberate but it is easy to misread, so to be explicit: `src/` is a ray tracer
+deliberate but it is easy to misread, so to be explicit: `crates/skipzone/` is a ray tracer
 and a magnetic field model. The ionosphere itself (Chapman layers, foF2
 climatology, sporadic E), the noise model, the link budget, the solver and the
 GUI all live in `app/`. Embedding `skipzone` alone gets you a tracer that you
@@ -68,9 +68,13 @@ must supply an electron-density model to.
 
 ```
 skipzone/
-├── Cargo.toml          # engine crate (workspace root)
-├── src/                # the engine: field model, magnetoionic theory, ray tracer
-│   └── bin/            # hfpredict, the headless engine CLI
+├── Cargo.toml          # virtual workspace root
+├── crates/skipzone/    # the engine: field model, magnetoionic theory, ray tracer
+│   ├── src/bin/        # hfpredict, the headless engine CLI
+│   ├── data/           # IGRF-14 coefficients
+│   ├── examples/       # nvis_probe, a high-angle diagnostic
+│   ├── benches/        # criterion baseline for one traced hop
+│   └── tests/          # analytic and invariant suites
 ├── app/                # skipzone-app: egui desktop application
 │   ├── Cargo.toml
 │   └── src/
@@ -78,10 +82,7 @@ skipzone/
 │       └── bin/        # validation and calibration harnesses
 ├── docs/derivations/   # the physics, derived before it was implemented
 ├── wiki/               # project wiki (GitHub wiki source)
-├── data/               # IGRF-14 coefficients; staged NeQuick reference data
-├── examples/           # nvis_probe, a high-angle diagnostic
-├── benches/            # criterion baseline for one traced hop
-└── tests/              # analytic and invariant suites
+└── data/               # staged NeQuick reference data
 ```
 
 The app is a separate workspace member so its `eframe`/`winit`/HTTP dependency
@@ -168,7 +169,7 @@ MIT, except `data/nequick/` (EUPL-1.2). See [LICENSE](LICENSE).
 The bundled NeQuick reference data under `data/nequick/` is EUPL v1.2 and
 carries its own notice; see [data/nequick/README.md](data/nequick/README.md).
 The other bundled data keeps its upstream terms: the IGRF-14 coefficients in
-`data/igrf14coeffs.txt` are published by IAGA and freely available, and the Natural
+`crates/skipzone/data/igrf14coeffs.txt` are published by IAGA and freely available, and the Natural
 Earth shapefiles in `app/src/assets/` are public domain.
 
 For any licensing concerns or questions, email `hello@vicini.io`.

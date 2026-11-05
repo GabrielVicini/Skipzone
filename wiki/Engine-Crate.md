@@ -1,4 +1,4 @@
-# Engine Crate (`skipzone`, `src/`)
+# Engine Crate (`skipzone`, `crates/skipzone/`)
 
 HF ionospheric ray tracing from first principles. Two dependencies
 (`num-complex`, `thiserror`), no system libraries, `unsafe` forbidden at the
@@ -161,16 +161,16 @@ controller driving the step below the configured minimum.
 
 ## Testing
 
-The engine's tests are integration tests in `tests/`, plus unit tests in the
+The engine's tests are integration tests in `crates/skipzone/tests/`, plus unit tests in the
 modules.
 
 | Suite | What it pins |
 |---|---|
-| `tests/analytic_field_free.rs` | Closed-form quasi-parabolic solutions, the Bouguer invariant along the ray, apex conditions, fifth-order convergence, straight rays in vacuum |
-| `tests/magnetoionic_3d.rs` | Full 3D magnetoionic behaviour against an Earth-like dipole, and the high-frequency geometric limit |
-| `tests/absorption.rs` | Absorption monotone and positive, and reciprocal |
-| `tests/homing.rs` | The two homing methods agree |
-| `tests/common/mod.rs` | Shared fixtures, including the Bouguer reference quadrature |
+| `crates/skipzone/tests/analytic_field_free.rs` | Closed-form quasi-parabolic solutions, the Bouguer invariant along the ray, apex conditions, fifth-order convergence, straight rays in vacuum |
+| `crates/skipzone/tests/magnetoionic_3d.rs` | Full 3D magnetoionic behaviour against an Earth-like dipole, and the high-frequency geometric limit |
+| `crates/skipzone/tests/absorption.rs` | Absorption monotone and positive, and reciprocal |
+| `crates/skipzone/tests/homing.rs` | The two homing methods agree |
+| `crates/skipzone/tests/common/mod.rs` | Shared fixtures, including the Bouguer reference quadrature |
 
 The pattern throughout is that analytic derivatives are the implementation and
 finite differences are the test oracle, never the other way round.
@@ -188,6 +188,6 @@ use skipzone::units::{Hertz, Meters, PerSecond, Radians};
 ```
 
 Supply your own `ElectronDensity`, `MagneticField` and `CollisionFrequency`
-implementations if the bundled ones do not fit. `examples/nvis_probe.rs` is the
+implementations if the bundled ones do not fit. `crates/skipzone/examples/nvis_probe.rs` is the
 smallest complete example: a field-free Chapman layer probed across the
 high-angle part of the elevation fan.

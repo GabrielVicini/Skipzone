@@ -1,48 +1,7 @@
-# The app is a separate workspace member so that its eframe/winit/HTTP
-# dependency tree never enters the engine crate, which must stay buildable with
-# no system libraries beyond std (see the portability requirements).
+# Virtual workspace. The engine lives in crates/skipzone and must stay
+# buildable with no system libraries beyond std; the app's eframe/winit/HTTP
+# dependency tree stays in its own member. `cargo run` launches the GUI.
 [workspace]
-members = ["app"]
+resolver = "3"
+members = ["crates/skipzone", "app"]
 default-members = ["app"]
-
-[package]
-name = "skipzone"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-license = "MIT"
-description = "3D ionospheric HF ray tracing: Haselgrove equations with full Appleton-Hartree magnetoionic theory"
-
-# The engine is single-threaded by design. It has no parallelism seam and no
-# thread-pool dependency; batching independent solves across cores is the app's
-# job, in `app/src/compute.rs`.
-[dependencies]
-num-complex = "0.4"
-thiserror = "2"
-
-[dev-dependencies]
-criterion = { version = "0.5", default-features = false }
-
-[[bench]]
-name = "trace"
-harness = false
-
-[lints.rust]
-# No unsafe anywhere until a measured benchmark justifies an isolated, documented exception.
-unsafe_code = "forbid"
-
-[lints.clippy]
-pedantic = { level = "warn", priority = -1 }
-# Physics notation (Y_L, Y_T, k_r, ...) follows the derivations in docs/derivations/;
-# renaming to satisfy the linter would break the correspondence between code and derivation.
-similar_names = "allow"
-many_single_char_names = "allow"
-# Module-qualified names like `mag::Dipole` read better than artificially shortened ones.
-module_name_repetitions = "allow"
-# Exact float comparisons back bit-identity invariants (zero field => O == X)
-# and exact-zero short-circuits (y == 0.0, z == 0.0) that the validation suite
-# requires; each site is commented.
-float_cmp = "allow"
-# Prose is formula-heavy (O mode, Appleton-Hartree, X = wp^2/w^2), and
-# backticks on physics notation only add noise.
-doc_markdown = "allow"

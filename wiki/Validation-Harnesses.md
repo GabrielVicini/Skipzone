@@ -6,7 +6,7 @@ because all of it needs data that is fetched rather than committed.
 
 | Harness | What it can see | What it cannot |
 |---|---|---|
-| Test suite (`tests/`) | Engine correctness against closed-form solutions and invariants | Anything about the real ionosphere |
+| Test suite (`crates/skipzone/tests/`) | Engine correctness against closed-form solutions and invariants | Anything about the real ionosphere |
 | Ionosonde (`iono_check`) | Absolute foF2 and foE error in MHz | Absorption, noise, antennas, the link budget |
 | WSPR (`wspr_*`) | How the received signal **varies** with frequency, path, zenith angle, hop count, layer | Any absolute level |
 

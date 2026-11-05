@@ -3,11 +3,12 @@
 ## Two crates, one workspace
 
 ```
-skipzone            (root Cargo.toml, src/)     the engine
+skipzone            (crates/skipzone/)          the engine
 skipzone-app        (app/Cargo.toml, app/src/)  everything else
 ```
 
-The root `Cargo.toml` declares `members = ["app"]` and
+The root `Cargo.toml` is a virtual workspace with
+`members = ["crates/skipzone", "app"]` and
 `default-members = ["app"]`, so a bare `cargo run` builds and launches the
 desktop application while `cargo build -p skipzone --lib` builds the engine
 alone.
@@ -24,12 +25,12 @@ outside the default members.
 
 | | Lines | What is in it |
 |---|---|---|
-| `src/` | ~4,200 | Ray tracer, magnetic field, dispersion relation, integrator, homing |
+| `crates/skipzone/src/` | ~4,200 | Ray tracer, magnetic field, dispersion relation, integrator, homing |
 | `app/src/` | ~30,000 | Ionosphere, noise, antennas, link budget, solver, GUI, harnesses |
-| `tests/` | ~1,300 | Analytic and invariant suites against the engine |
+| `crates/skipzone/tests/` | ~1,300 | Analytic and invariant suites against the engine |
 
 The engine is 12 percent of the codebase, and it is easy to read the naming and
-assume otherwise. Be explicit about it: `src/` is a ray tracer, not a
+assume otherwise. Be explicit about it: `crates/skipzone/` is a ray tracer, not a
 propagation predictor. It has no ionosphere. Everything that makes Skipzone
 answer "will this path work at 14 MHz at 0300Z" lives in `app/`.
 

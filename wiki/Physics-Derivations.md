@@ -24,11 +24,11 @@ produces plausible numbers that are quietly conjugated or mirrored.
 | Magnitudes and signs of X, Y, Z | The three magnetoionic parameters |
 | Units | SI throughout, `f64`, newtypes at public boundaries only |
 
-Implemented by: the whole engine. Enforced by: `src/units.rs`.
+Implemented by: the whole engine. Enforced by: `crates/skipzone/src/units.rs`.
 
 ## `magnetic-field.md`
 
-Implements `src/mag/`.
+Implements `crates/skipzone/src/mag/`.
 
 | Section | Contents |
 |---|---|
@@ -43,7 +43,7 @@ restricted rather than fudged.
 
 ## `appleton-hartree.md`
 
-Implements `src/magnetoionic.rs`. The longest and most delicate derivation.
+Implements `crates/skipzone/src/magnetoionic.rs`. The longest and most delicate derivation.
 
 | Section | Contents |
 |---|---|
@@ -61,7 +61,7 @@ HF codes lose the polarisation behaviour that makes O and X differ.
 
 ## `haselgrove.md`
 
-Implements `src/hamiltonian.rs` and `src/trace.rs`.
+Implements `crates/skipzone/src/hamiltonian.rs` and `crates/skipzone/src/trace.rs`.
 
 | Section | Contents |
 |---|---|
@@ -78,7 +78,7 @@ full magnetoionic evaluation and is why `O == X` bit-identically there.
 
 ## `analytic-solutions.md`
 
-Used by `tests/analytic_field_free.rs`. This is the derivation that makes the
+Used by `crates/skipzone/tests/analytic_field_free.rs`. This is the derivation that makes the
 engine testable at all: closed forms to compare a numerical tracer against.
 
 | Section | Contents |

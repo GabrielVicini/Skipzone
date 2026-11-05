@@ -1,6 +1,6 @@
 # Analytic reference solutions for the field-free tracer
 
-All derived here from scratch; used by `tests/analytic_field_free.rs`.
+All derived here from scratch; used by `crates/skipzone/tests/analytic_field_free.rs`.
 Setting: isotropic (Y = 0), collisionless (Z = 0), spherically stratified
 n = n(r); ground radius r0; launch elevation beta.
 

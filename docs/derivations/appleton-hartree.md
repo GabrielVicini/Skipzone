@@ -1,6 +1,6 @@
 # Appleton–Hartree dispersion relation, derived
 
-Implements: `src/magnetoionic.rs`. Conventions: `conventions.md`
+Implements: `crates/skipzone/src/magnetoionic.rs`. Conventions: `conventions.md`
 (`exp(-iωt)`, `U = 1 + iZ`, `Im(n) > 0` = loss).
 
 Assumptions, stated up front: cold electron plasma (no thermal corrections),

@@ -1,6 +1,6 @@
 # Geomagnetic field from a scalar potential
 
-Implements: `src/mag/`. Conventions: see `conventions.md`.
+Implements: `crates/skipzone/src/mag/`. Conventions: see `conventions.md`.
 
 ## 1. Potential and components
 

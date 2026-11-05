@@ -19,7 +19,7 @@ table, then uses the validated homing to decide whether a reflected ray path
 exists and reports its geometry.
 
 ```bash
-cargo run --release --bin hfpredict -- --help
+cargo run --release -p skipzone --bin hfpredict -- --help
 ```
 
 It states its own honesty boundaries in full, and they are worth repeating

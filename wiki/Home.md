@@ -32,7 +32,7 @@ are still being calibrated. Nothing here is a production propagation forecast.
 
 ## The one-paragraph version
 
-`src/` is the engine: a magnetic field model, a cold-plasma dispersion relation,
+`crates/skipzone/` is the engine: a magnetic field model, a cold-plasma dispersion relation,
 the Haselgrove ray equations, an adaptive integrator, and a homing search. It
 has two dependencies, forbids `unsafe`, is single-threaded, and knows nothing
 about the ionosphere beyond a trait you hand it. `app/` is everything else: the

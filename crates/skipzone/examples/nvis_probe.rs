@@ -21,10 +21,10 @@
 //!
 //! This is a diagnostic with no assertions, and nothing runs it
 //! automatically. The enforced invariants live in
-//! `tests/analytic_field_free.rs`.
+//! `crates/skipzone/tests/analytic_field_free.rs`.
 //!
 //! ```text
-//! cargo run --release --example nvis_probe
+//! cargo run --release -p skipzone --example nvis_probe
 //! ```
 
 use skipzone::collision::ZeroCollisions;
