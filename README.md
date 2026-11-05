@@ -6,7 +6,7 @@
 
 **3D ionospheric HF ray tracing** with Haselgrove equations and full Appleton-Hartree magnetoionic theory.
 
-[![Rust](https://img.shields.io/badge/rust-1.92%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![edition](https://img.shields.io/badge/edition-2024-orange)](crates/skipzone/Cargo.toml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-brightgreen)](crates/skipzone/Cargo.toml)
@@ -29,7 +29,7 @@ crate that can be embedded on its own.
 cargo run --release
 ```
 
-This builds and launches the desktop app. Building the app needs Rust 1.92+
+This builds and launches the desktop app. Building the app needs Rust 1.95+
 (the engine alone builds on 1.85). On Linux the app also needs the X11 or
 Wayland development headers that `eframe` uses.
 
