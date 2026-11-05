@@ -57,10 +57,10 @@ directly or through any dependency:
 | Crate | May use | Banned |
 |---|---|---|
 | `skipzone` | `num-complex` and `thiserror` only, as normal dependencies | GUI crates, the network crate, `rayon` |
-| `skipzone-iono` | the engine | GUI crates, the network crate, `rayon` |
-| `skipzone-predict` | the engine, iono, `rayon`, `num-complex`, `shapefile` | GUI crates, the network crate |
+| `skipzone-iono` | the engine, and `serde` behind its off-by-default `serde` feature | GUI crates, the network crate, `rayon` |
+| `skipzone-predict` | the engine, iono, `rayon`, `num-complex`, `shapefile`, and `serde` behind its off-by-default `serde` feature | GUI crates, the network crate |
 | `skipzone-lab` | everything below it, `ureq` for HTTPS | GUI crates |
-| `skipzone-app` | iono, predict, `eframe`, `egui` | the network crate |
+| `skipzone-app` | iono, predict, `eframe`, `egui`, `serde` and `ron` for the saved settings | the network crate |
 
 "GUI crates" means `egui`, `eframe` and `winit`. "The network crate" means
 `ureq`. Dev-dependencies are exempt, which is how the engine uses `criterion`
