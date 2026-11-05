@@ -195,7 +195,7 @@ pub const EFHW_UNUN_LOSS_DB: f64 = 0.5;
 /// Adding a table-backed type (Yagi, log-periodic, trap dipole, random wire,
 /// loop) means adding a variant here and returning a [`TabulatedPattern`] from
 /// [`AntennaConfig::build`]. Nothing else in the app needs to change.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AntennaKind {
     Isotropic,
     HorizontalDipole,
@@ -240,7 +240,7 @@ impl AntennaKind {
 /// Type-specific parameters live here rather than in the `gain_dbi` call, which
 /// keeps the `(elevation, height, frequency)` interface uniform across
 /// closed-form and table-backed types.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct AntennaConfig {
     pub kind: AntennaKind,
     /// Height above ground (m). For the vertical this is the height of the

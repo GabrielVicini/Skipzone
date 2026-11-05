@@ -162,7 +162,7 @@ pub enum PlaceMode {
 /// [`GroundType::AutoDetect`] instead picks one of the manual presets per hop
 /// from the reflection point's position against the Natural Earth coastline
 /// data (see [`crate::coastline`]). It adds no electrical constants of its own.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum GroundType {
     SeaWater,
     FreshWater,
@@ -237,7 +237,7 @@ impl GroundType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Inputs {
     pub tx_lat: f64,
     pub tx_lon: f64,

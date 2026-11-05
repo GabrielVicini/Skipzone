@@ -419,7 +419,7 @@ impl NoiseFloor {
 /// bandwidth. Referred to its own
 /// ~50 Hz occupied bandwidth that is
 ///   `-21 + 10 log10(2500 / 50) = -21 + 16.99 = -4.0 dB`.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OperatingMode {
     Cw,
     Ssb,

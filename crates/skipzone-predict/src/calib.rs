@@ -24,7 +24,7 @@
 //! results or definitions.
 
 /// One anchor: a current value and the range it is physically defensible over.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Bounded {
     pub value: f64,
     pub min: f64,
@@ -96,7 +96,7 @@ impl Bounded {
 /// * The E peak sits at 100-115 km with a scale height of 5-15 km.
 /// * Overhead quiet-sun foE spans 2.6-3.8 MHz. The textbook range starts at
 ///   3.0, but the anchor was measured at 2.99 against ionosonde soundings.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct IonosphereAnchors {
     /// Overhead-sun D-region peak electron density, m^-3.
     pub d_peak_ne_overhead: Bounded,
@@ -181,7 +181,7 @@ impl Default for IonosphereAnchors {
 /// Ranges are wide because the quantity is that uncertain: the
 /// P.372 atmospheric maps span roughly 40 dB of `Fa` at 1 MHz between a quiet
 /// polar winter night and an equatorial summer night.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct AtmosphericAnchors {
     /// `Fa` at 1 MHz, day, mid-latitude, equinox, dB above kT0b.
     pub f1_day_db: Bounded,
@@ -255,7 +255,7 @@ impl Default for AtmosphericAnchors {
 /// `Default` reproduces the module constants exactly
 /// (`tests::default_anchors_match_the_module_constants`), so the GUI can carry
 /// this without using it.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Anchors {
     pub ionosphere: IonosphereAnchors,
     pub atmospheric: AtmosphericAnchors,

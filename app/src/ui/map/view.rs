@@ -15,6 +15,7 @@ use egui::{CentralPanel, Color32, Frame, Mesh, Rect, Sense, TextureHandle, Ui, p
 
 use crate::state::{Session, UiState};
 use skipzone_iono::solar;
+use skipzone_predict::scenario::Inputs;
 
 use super::basemap;
 use super::layers;
@@ -90,7 +91,7 @@ impl MapView {
                 // fitting against it leaves the map zoomed somewhere arbitrary
                 // once the window opens for real.
                 if self.needs_fit && rect.width() > 200.0 && rect.height() > 200.0 {
-                    self.camera = fit(session, rect);
+                    self.camera = fit(&session.inputs, rect);
                     self.needs_fit = false;
                 }
                 self.apply_input(&response, rect, ui);
@@ -216,8 +217,7 @@ impl MapView {
 /// Both spans are measured the short way round the world, so a path over the
 /// Pacific frames across the antimeridian instead of zooming out to show the
 /// long way. The tighter of the two axes wins.
-fn fit(session: &Session, rect: Rect) -> Camera {
-    let inputs = &session.inputs;
+fn fit(inputs: &Inputs, rect: Rect) -> Camera {
     let dlon = super::projection::wrap_lon(inputs.rx_lon - inputs.tx_lon);
     let centre_lon = super::projection::wrap_lon(inputs.tx_lon + 0.5 * dlon);
     let centre_lat = f64::midpoint(inputs.tx_lat, inputs.rx_lat);
@@ -248,13 +248,15 @@ mod tests {
     /// crosses the antimeridian so it must not frame the long way round.
     #[test]
     fn fit_frames_both_stations_across_the_antimeridian() {
-        let mut session = Session::new(egui::Context::default());
-        session.inputs.tx_lat = 35.0;
-        session.inputs.tx_lon = 139.0; // Tokyo
-        session.inputs.rx_lat = 37.0;
-        session.inputs.rx_lon = -122.0; // San Francisco
+        let inputs = Inputs {
+            tx_lat: 35.0,
+            tx_lon: 139.0, // Tokyo
+            rx_lat: 37.0,
+            rx_lon: -122.0, // San Francisco
+            ..Inputs::default()
+        };
 
-        let cam = fit(&session, rect());
+        let cam = fit(&inputs, rect());
         let proj = Proj::new(rect(), cam);
         for (lat, lon) in [(35.0, 139.0), (37.0, -122.0)] {
             let p = proj.project(lat, lon);
@@ -266,17 +268,19 @@ mod tests {
     /// world-spanning one must not zoom out past the whole world.
     #[test]
     fn fit_stays_inside_the_camera_limits() {
-        let mut session = Session::new(egui::Context::default());
-        session.inputs.tx_lat = 51.5;
-        session.inputs.tx_lon = -0.13;
-        session.inputs.rx_lat = 51.6;
-        session.inputs.rx_lon = -0.12;
-        let cam = fit(&session, rect());
+        let mut inputs = Inputs {
+            tx_lat: 51.5,
+            tx_lon: -0.13,
+            rx_lat: 51.6,
+            rx_lon: -0.12,
+            ..Inputs::default()
+        };
+        let cam = fit(&inputs, rect());
         assert!(cam.ppd >= Camera::min_ppd(rect()));
 
-        session.inputs.rx_lat = -33.9;
-        session.inputs.rx_lon = 151.2;
-        let cam = fit(&session, rect());
+        inputs.rx_lat = -33.9;
+        inputs.rx_lon = 151.2;
+        let cam = fit(&inputs, rect());
         assert!(cam.ppd >= Camera::min_ppd(rect()));
         let world = Proj::new(rect(), cam).world_rect();
         assert!(world.width() >= rect().width() - 0.5);
