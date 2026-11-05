@@ -118,7 +118,7 @@ impl SweepPoint {
     }
 
     /// Full per-frequency readout: the existing link-budget numbers plus the
-    /// received power, noise floor and SNR that now decide the verdict. Used
+    /// received power, noise floor and SNR that decide the verdict. Used
     /// both for the sweep's stderr log and the chart's hover tooltip, so the
     /// two can never drift apart.
     #[must_use]
@@ -314,7 +314,7 @@ impl SolverService {
     }
 
     /// Queue a job. Any in-flight job is asked to stop first (the sweep checks
-    /// the flag between frequencies; a single main solve is atomic and simply
+    /// the flag between frequencies; a single main solve is atomic and
     /// finishes, its result then dropped by the epoch filter).
     pub fn dispatch(&mut self, job: Job) {
         if let Some(c) = self.current_cancel.take() {

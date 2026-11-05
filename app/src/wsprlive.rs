@@ -138,7 +138,7 @@ impl Default for Query {
 }
 
 impl Query {
-    /// The frequency ceiling actually applied, MHz.
+    /// The frequency ceiling applied, MHz.
     ///
     /// An explicit `--band` wins over the default ceiling: a band above it
     /// raises the ceiling to cover that band, and [`Self::describe_filter`]

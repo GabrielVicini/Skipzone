@@ -5,7 +5,7 @@
 //!
 //! Multi-hop handling: the engine's homing solves a single hop. For an N-hop
 //! path we home one hop of 1/N the great-circle arc (exact when the medium is
-//! height-only), then actually propagate N hops by specular ground reflection
+//! height-only), then propagate N hops by specular ground reflection
 //! and report where the ray lands. With a magnetic field the medium is not
 //! spherically symmetric, so the terminal miss measures the error of the
 //! equal-hop assumption.
@@ -1185,7 +1185,7 @@ mod tests {
         );
     }
 
-    /// Auto-detect must classify each bounce from where it actually lands, and
+    /// Auto-detect must classify each bounce from where it lands, and
     /// must leave every other manual selection alone. Denver -> London crosses
     /// North America and then the Atlantic, so a multi-hop path should pick up
     /// both land and sea bounces.

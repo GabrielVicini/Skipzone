@@ -37,7 +37,7 @@ impl LayerMode {
         }
     }
 
-    /// True for a layer that is simply there when the model says it is. Es is
+    /// True for a layer that is there when the model says it is. Es is
     /// the only one that is not, which is the whole reason this distinction
     /// exists.
     #[must_use]

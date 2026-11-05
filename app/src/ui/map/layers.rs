@@ -472,10 +472,9 @@ pub fn paths(
         let width = if selected == Some(i) { 3.5 } else { 2.0 };
 
         for hop in &sol.hop_details {
-            // Ground-track polyline. Unwrapped first, so a hop running east past
-            // the antimeridian carries on east instead of being cut - the old
-            // code simply dropped any segment that jumped, leaving a gap in the
-            // path exactly where it crossed the date line.
+            // Ground-track polyline, unwrapped first so a hop running east past
+            // the antimeridian carries on east instead of leaving a gap at the
+            // date line.
             unwrap_run(hop.polyline.iter().map(|&(_, lon)| lon), &mut lons);
             points.clear();
             points.extend(

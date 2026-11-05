@@ -261,7 +261,7 @@ impl StepTuning {
 }
 
 /// A tracer over one density stack. The density is passed in rather than read
-/// off `Models` because the solver now runs the same homing against two stacks
+/// off `Models` because the solver runs the same homing against two stacks
 /// (with and without a sporadic-E sheet) while the field and collision models
 /// are shared between them.
 pub(super) type DynTracer<'a> = Tracer<
@@ -549,7 +549,7 @@ pub(super) fn hop_elevation_window_deg(hop_arc_rad: f64) -> Option<(f64, f64)> {
     // target, no launch angle helps.
     let hi = elev_at(REFLECT_ALT_MAX_KM)?;
     // The floor comes from the lowest layer, and its absence is not a failure:
-    // it means only high reflections reach, so the band simply opens at zero.
+    // it means only high reflections reach, so the band opens at zero.
     let lo = elev_at(REFLECT_ALT_MIN_KM).unwrap_or(0.0);
     Some((lo - WINDOW_PAD_DEG, hi + WINDOW_PAD_DEG))
 }

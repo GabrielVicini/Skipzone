@@ -278,8 +278,7 @@ mod tests {
     }
 
     /// The projection must be linear in both axes: equal steps in degrees are
-    /// equal steps in pixels anywhere on the map. This is the whole reason the
-    /// projection was changed, so it is pinned.
+    /// equal steps in pixels anywhere on the map.
     #[test]
     fn scale_is_constant_everywhere() {
         let cam = Camera {

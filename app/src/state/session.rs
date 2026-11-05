@@ -132,7 +132,7 @@ impl SweepResults {
 ///
 /// `cells` is append-only while a run streams in, which is what makes the map
 /// fill in progressively: the plugin draws whatever is in here each frame. A
-/// cancelled run simply stops appending, so its cells stay put.
+/// cancelled run stops appending, so its cells stay put.
 #[derive(Default)]
 pub struct CoverageResults {
     pub cells: Vec<CoverageCell>,

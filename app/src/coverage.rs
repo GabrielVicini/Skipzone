@@ -88,7 +88,7 @@ impl CoverageConfig {
     ///
     /// [`half_steps`](Self::half_steps) clamps the lattice at 70 steps either
     /// way, so a fine resolution shrinks the box (180 degrees at 4 pts/deg is
-    /// really 17.5). Exposed so the control can show it.
+    /// 17.5). Exposed so the control can show it.
     #[must_use]
     pub fn effective_half_span_deg(self) -> f64 {
         f64::from(self.half_steps()) * self.step_deg()

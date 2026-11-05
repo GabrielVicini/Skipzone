@@ -78,7 +78,7 @@ impl LocationEntry {
     }
 
     /// Is the text currently on screen valid in the active notation? Drives the
-    /// red-text warning; an invalid buffer simply leaves the scenario alone.
+    /// red-text warning; an invalid buffer leaves the scenario alone.
     #[must_use]
     pub fn is_valid(&self) -> bool {
         match self.mode {

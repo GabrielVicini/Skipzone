@@ -507,13 +507,13 @@ mod tests {
         let full = es.barrier_opacity(es.height_km - es.semi_thickness_km);
         assert!((700.0..900.0).contains(&full), "opacity scale {full}");
 
-        // A ray turning where the tracer actually puts them - a good fraction of
+        // A ray turning where the tracer puts them - a good fraction of
         // a semi-thickness below the peak - loses nothing measurable.
         let typical = es.reflection_loss_db(98.6);
         assert!(typical < 1e-9, "{typical} dB at a typical Es apex");
 
         // The loss only reaches 1 dB when the turning point is within about
-        // 0.1 % of the peak DENSITY, i.e. ~5 % of a semi-thickness below the
+        // 0.1 % of the peak density, i.e. ~5 % of a semi-thickness below the
         // peak in height. That sharpness is the sheet thickness talking.
         let depth_for_1db = (1.58 / full).sqrt();
         let apex_1db = es.height_km - depth_for_1db * es.semi_thickness_km;

@@ -397,7 +397,7 @@ pub struct Assumptions {
     /// backend.
     pub fof2_tx_mhz: f64,
     pub fof2_rx_mhz: f64,
-    /// Which backend actually ran, after any fallback.
+    /// Which backend ran, after any fallback.
     pub fof2_backend: Fof2Backend,
     /// Overhead-sun foE for this solar activity, MHz. The realised foE at any
     /// point is this times `(cos chi)^(1/4)`, produced by the layer itself.
@@ -408,7 +408,7 @@ pub struct Assumptions {
     pub e_region_peak_alt_km: f64,
     /// Sporadic E: foEs, occurrence probability and provenance.
     pub sporadic_e: SporadicE,
-    /// Whether the probabilistic Es solve will actually be run.
+    /// Whether the probabilistic Es solve will be run.
     pub es_solved: bool,
     pub hmf2_km: f64,
     pub hmf2_source: String,
@@ -732,7 +732,7 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     }
 }
 
-/// Which foF2 backend will actually run, and a closure sampling it in degrees.
+/// Which foF2 backend will run, and a closure sampling it in degrees.
 ///
 /// If the operator asked for the grid and it could not be parsed, this returns
 /// `ConstantSsn`, and [`fof2_source_text`] says so in the panel.
@@ -992,7 +992,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     })
 }
 
-/// One sampled row of the vertical profile actually in use, for UI display.
+/// One sampled row of the vertical profile in use, for UI display.
 pub struct ProfileRow {
     pub alt_km: f64,
     pub ne_per_m3: f64,
@@ -1007,7 +1007,7 @@ pub struct ProfileRow {
 }
 
 /// Sample the profile along the vertical at the path midpoint. Uses the same
-/// model objects the tracer uses, so this is the profile actually in force.
+/// model objects the tracer uses, so this is the profile in force.
 pub fn sample_profile(models: &Models, a: &Assumptions) -> Vec<ProfileRow> {
     let omega = Hertz::new(a.freq_mhz * 1e6).angular();
     let colat = Radians::from_degrees(90.0 - a.midpoint_lat);

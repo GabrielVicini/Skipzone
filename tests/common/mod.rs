@@ -147,7 +147,7 @@ pub fn bouguer_reference(
                 let zv = z(r);
                 let re = 1.0 - xv / (1.0 + zv * zv);
                 let im = xv * zv / (1.0 + zv * zv);
-                // Principal sqrt imaginary part, STABLE branch: the naive
+                // Principal sqrt imaginary part, stable branch: the naive
                 // sqrt((hypot - re)/2) cancels catastrophically for
                 // im << re (chi rounds to 0 below ~1e-8) and silently
                 // under-counts D-region absorption by ~2e-5 Np in the

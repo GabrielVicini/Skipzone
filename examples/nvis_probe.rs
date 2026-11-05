@@ -1,5 +1,5 @@
 //! Near-vertical-incidence skywave (NVIS) probe: where does the high-angle
-//! part of the elevation fan actually land?
+//! part of the elevation fan land?
 //!
 //! # What it shows
 //!

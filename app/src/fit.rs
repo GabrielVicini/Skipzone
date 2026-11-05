@@ -1278,7 +1278,7 @@ mod tests {
             "{} vs {expected}",
             c.modelled_db(1.0, atm)
         );
-        // The noise floor really is the one the module composes, not a copy.
+        // The noise floor is the one the module composes, not a copy.
         let direct = noise_power_dbm(
             NoiseFloor::compute(
                 14.097,

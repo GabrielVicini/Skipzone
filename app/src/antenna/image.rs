@@ -20,7 +20,7 @@
 //! ```
 //!
 //! with `a` the azimuth. Gain is that pattern normalised by the power the
-//! antenna actually radiates:
+//! antenna radiates:
 //!
 //! ```text
 //!   G(d, a) = 4 pi U(d, a) / P_rad,

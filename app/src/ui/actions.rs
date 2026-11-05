@@ -37,7 +37,7 @@ pub enum Action {
 pub fn apply(action: Action, session: &mut Session, ui_state: &mut UiState, map: &mut MapView) {
     match action {
         Action::Calculate => {
-            // Re-running simply replaces what the panel is showing; the panel
+            // Re-running replaces what the panel is showing; the panel
             // itself stays where the operator sized it.
             session.calculate();
             ui_state.trace_open = true;

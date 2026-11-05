@@ -309,7 +309,7 @@ pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) ->
 /// than a percentage. Fixing it needs a corpus with a real class balance.
 pub const PREDICTIVE_SPREAD_DB: f64 = 7.3;
 
-/// Probability that a path with this median margin actually decodes.
+/// Probability that a path with this median margin decodes.
 ///
 /// # Why a probability at all
 ///
@@ -583,7 +583,7 @@ impl LinkBudget {
         }
     }
 
-    /// Probability that this path actually decodes, at the measured predictive
+    /// Probability that this path decodes, at the measured predictive
     /// spread [`PREDICTIVE_SPREAD_DB`].
     ///
     /// [`Self::state`] gives the hard-threshold answer, which suits a table.
