@@ -1,15 +1,15 @@
 use egui::{Context, RichText, Ui, vec2};
 
-use crate::state::UiState;
+use crate::state::AppState;
 use crate::ui::theme::MUTED;
 use crate::ui::widgets::hint;
 
-pub fn show(ctx: &Context, ui_state: &mut UiState) {
+pub fn show(ctx: &Context, state: &mut AppState) {
     super::chrome::dialog(
         ctx,
         "about_dialog",
         "About Skipzone",
-        &mut ui_state.modals.about,
+        &mut state.ui.modals.about,
         vec2(420.0, 380.0),
         body,
     );

@@ -19,7 +19,7 @@ fn calculate_from_the_menu_shows_the_modes_found() {
             SkipzoneApp::with_jobs(cc, Jobs::inline(move || ctx.request_repaint()))
         });
     // A fixed scenario: the app otherwise starts at today's date and time.
-    harness.state_mut().session_mut().inputs = Inputs::default();
+    harness.state_mut().state_mut().inputs.scenario = Inputs::default();
     harness.run();
 
     harness.get_by_label("Point-to-Point").hover();
@@ -37,11 +37,14 @@ fn calculate_from_the_menu_shows_the_modes_found() {
     // frames apply it and draw the panel.
     for _ in 0..10 {
         harness.run();
-        if harness.state().session().solve.outcome.is_some() {
+        if harness.state().state().results.main.outcome.is_some() {
             break;
         }
     }
-    assert!(!harness.state().session().is_busy(), "the solve finished");
+    assert!(
+        !harness.state().state().results.is_busy(),
+        "the solve finished"
+    );
     harness.run();
 
     let heading = harness.get_by_label_contains("Modes found (");
@@ -57,7 +60,7 @@ fn calculate_from_the_menu_shows_the_modes_found() {
     );
     assert_eq!(
         n,
-        harness.state().session().solve.solutions().len(),
+        harness.state().state().results.main.solutions().len(),
         "the panel shows the solve's mode count"
     );
 }

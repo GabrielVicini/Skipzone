@@ -12,36 +12,29 @@ mod time_date;
 
 use egui::{Align, Align2, Area, Context, Id, InnerResponse, Order, Rect, Ui, Vec2, pos2};
 
-use crate::state::{Session, UiState};
+use crate::state::AppState;
 use crate::ui::actions::Action;
-
-use super::map::MapView;
+use crate::ui::scratch::ViewScratch;
 
 /// Gap between a floating group and the window edge.
 const MARGIN: f32 = 12.0;
 
 /// Draw every floating group, pushing what they produced to `out`.
-pub fn draw(
-    ctx: &Context,
-    session: &mut Session,
-    ui_state: &mut UiState,
-    map: &MapView,
-    out: &mut Vec<Action>,
-) {
+pub fn draw(ctx: &Context, state: &mut AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
     // The map's visible area: the window minus the header and, when it is open,
     // the trace panel. Everything floats inside this, so opening the panel
     // slides the right-hand groups across instead of hiding them behind it.
     let over_map = {
         let screen = ctx.viewport_rect();
         Rect::from_min_max(
-            pos2(screen.left(), screen.top() + ui_state.header_height),
-            pos2(screen.right() - ui_state.right_inset, screen.bottom()),
+            pos2(screen.left(), screen.top() + scratch.header_height),
+            pos2(screen.right() - scratch.right_inset, screen.bottom()),
         )
     };
 
     // Right edge, starting just below the solid header.
     corner_area(ctx, "overlay_controls", over_map, Align2::RIGHT_TOP, |ui| {
-        controls::overlay(ui, session, ui_state, out);
+        controls::overlay(ui, state, out);
     });
 
     // Bottom left: time and date.
@@ -50,7 +43,7 @@ pub fn draw(
         "overlay_time_date",
         over_map,
         Align2::LEFT_BOTTOM,
-        |ui| time_date::overlay(ui, session, ui_state),
+        |ui| time_date::overlay(ui, state, scratch),
     );
 
     // Bottom right: map framing.
@@ -59,7 +52,7 @@ pub fn draw(
         "overlay_map_tools",
         over_map,
         Align2::RIGHT_BOTTOM,
-        |ui| map_tools::overlay(ui, ui_state, map.zoom(), out),
+        |ui| map_tools::overlay(ui, state, out),
     );
 }
 

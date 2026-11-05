@@ -3,8 +3,8 @@
 //! egui's own menus open on click; these open as soon as the pointer touches
 //! the button and, once one is open, sliding sideways moves straight to the
 //! next - the behaviour a desktop menu bar has. Which menu is open lives in the
-//! caller's state (see [`crate::state::Menu`]), so the widget stays stateless
-//! and any menu can be closed from anywhere.
+//! caller's view scratch (see [`crate::ui::scratch::Menu`]), so the widget
+//! stays stateless and any menu can be closed from anywhere.
 
 use egui::{Align, Button, Color32, Layout, Popup, RectAlign, RichText, Ui};
 

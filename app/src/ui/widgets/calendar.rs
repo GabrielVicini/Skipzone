@@ -4,7 +4,7 @@
 
 use egui::{Align, Button, Color32, Grid, Layout, RichText, Ui};
 
-use crate::state::CalendarState;
+use crate::ui::scratch::CalendarState;
 use crate::ui::theme::{ACCENT, MUTED};
 use skipzone_iono::clock::{self, CivilDate, MONTH_NAMES, WEEKDAY_INITIALS};
 

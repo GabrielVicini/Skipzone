@@ -3,11 +3,11 @@
 //!
 //! The map itself is the output - this dialog only says what to compute and
 //! reports how the run is going. Nothing here calculates anything; it reads
-//! `session.coverage` and emits an [`Action`].
+//! `state.results.coverage` and emits an [`Action`].
 
 use egui::{Button, Color32, Context, ProgressBar, RichText, Ui, vec2};
 
-use crate::state::{Busy, Session, UiState};
+use crate::state::{AppState, Busy};
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, ACCENT, MUTED, WARN};
 use crate::ui::widgets::{card, data_grid, hint, kv, section};
@@ -19,20 +19,20 @@ use skipzone_predict::solve::mode_label;
 /// CPU, so even across every core a grid this size runs for many minutes.
 const LARGE_GRID: usize = 600;
 
-pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
-    let mut open = ui_state.modals.coverage;
+pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+    let mut open = state.ui.modals.coverage;
     super::chrome::dialog(
         ctx,
         "coverage_dialog",
         "Area coverage",
         &mut open,
         vec2(460.0, 620.0),
-        |ui| body(ui, session, ui_state, out),
+        |ui| body(ui, state, out),
     );
-    ui_state.modals.coverage = open;
+    state.ui.modals.coverage = open;
 }
 
-fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
+fn body(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
     ui.label(
         RichText::new(
             "One transmitter, a grid of receiver positions. Every grid point is a full \
@@ -45,19 +45,21 @@ fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Ve
 
     ui.add_space(8.0);
     section(ui, "Grid");
-    let points = grid_controls(ui, session);
+    let points = grid_controls(ui, state);
 
     ui.add_space(8.0);
-    run_controls(ui, session, points, out);
+    run_controls(ui, state, points, out);
 
     ui.add_space(8.0);
-    progress(ui, session);
+    progress(ui, state);
 
     ui.add_space(8.0);
     section(ui, "Display");
     ui.horizontal(|ui| {
         ui.label(RichText::new("Tile opacity").small().color(MUTED));
-        ui.add(egui::Slider::new(&mut ui_state.coverage_alpha, 40..=255).show_value(false));
+        ui.add(
+            egui::Slider::new(&mut state.inputs.display.coverage_alpha, 40..=255).show_value(false),
+        );
     });
     hint(
         ui,
@@ -68,16 +70,16 @@ fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Ve
     ui.add_space(8.0);
     legend(ui);
 
-    if !session.coverage.cells.is_empty() {
+    if !state.results.coverage.cells.is_empty() {
         ui.add_space(8.0);
-        summary(ui, &session.coverage.cells);
+        summary(ui, &state.results.coverage.cells);
     }
 }
 
 /// The resolution and extent controls. Returns how many grid points the current
 /// settings would solve.
-fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
-    let cfg = &mut session.coverage_config;
+fn grid_controls(ui: &mut Ui, state: &mut AppState) -> usize {
+    let cfg = &mut state.inputs.coverage;
     ui.horizontal(|ui| {
         ui.label(RichText::new("Resolution").small().color(MUTED));
         ui.add(
@@ -104,8 +106,10 @@ fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
         .on_hover_text("Half-width of the box centred on the transmitter.");
     });
 
-    let cfg = session.coverage_config;
-    let points = cfg.grid(session.inputs.tx_lat, session.inputs.tx_lon).len();
+    let cfg = state.inputs.coverage;
+    let points = cfg
+        .grid(state.inputs.scenario.tx_lat, state.inputs.scenario.tx_lon)
+        .len();
     ui.horizontal_wrapped(|ui| {
         ui.label(
             RichText::new(format!(
@@ -152,9 +156,9 @@ fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
     points
 }
 
-fn run_controls(ui: &mut Ui, session: &Session, points: usize, out: &mut Vec<Action>) {
-    let running = matches!(session.busy, Busy::Covering { .. });
-    let busy_elsewhere = session.is_busy() && !running;
+fn run_controls(ui: &mut Ui, state: &AppState, points: usize, out: &mut Vec<Action>) {
+    let running = matches!(state.results.busy, Busy::Covering { .. });
+    let busy_elsewhere = state.results.is_busy() && !running;
 
     ui.horizontal(|ui| {
         if ui
@@ -179,7 +183,7 @@ fn run_controls(ui: &mut Ui, session: &Session, points: usize, out: &mut Vec<Act
         // run finished normally or was cancelled. Not offered mid-run, where
         // clearing would only be undone by the next point streaming in.
         if !running
-            && session.coverage.has_tiles()
+            && state.results.coverage.has_tiles()
             && ui
                 .button("Reset")
                 .on_hover_text("Clear the coverage tiles from the map.")
@@ -190,8 +194,8 @@ fn run_controls(ui: &mut Ui, session: &Session, points: usize, out: &mut Vec<Act
     });
 }
 
-fn progress(ui: &mut Ui, session: &Session) {
-    match session.busy {
+fn progress(ui: &mut Ui, state: &AppState) {
+    match state.results.busy {
         Busy::Covering {
             done,
             total,
@@ -217,21 +221,21 @@ fn progress(ui: &mut Ui, session: &Session) {
                 .color(MUTED),
             );
         }
-        _ if session.coverage.cancelled => {
+        _ if state.results.coverage.cancelled => {
             ui.label(
                 RichText::new(format!(
                     "Cancelled with {} point(s) computed. They stay on the map until Reset.",
-                    session.coverage.cells.len()
+                    state.results.coverage.cells.len()
                 ))
                 .small()
                 .color(WARN),
             );
         }
-        _ if session.coverage.has_tiles() => {
+        _ if state.results.coverage.has_tiles() => {
             ui.label(
                 RichText::new(format!(
                     "{} point(s) on the map.",
-                    session.coverage.cells.len()
+                    state.results.coverage.cells.len()
                 ))
                 .small()
                 .color(MUTED),

@@ -13,9 +13,10 @@
 
 use egui::{Align, Button, Layout, Panel, RichText, ScrollArea, Ui};
 
-use crate::state::{Session, SolveResults, UiState};
+use crate::state::AppState;
 use crate::ui::actions::Action;
 use crate::ui::panels;
+use crate::ui::scratch::ViewScratch;
 use crate::ui::theme::{self, BAD, MUTED};
 
 const DEFAULT_WIDTH: f32 = 430.0;
@@ -24,15 +25,12 @@ const MAX_WIDTH: f32 = 900.0;
 
 /// Draw the panel when it is open, and record the width it took so the floating
 /// overlays can inset by it. Pushes any action its buttons produced.
-pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
-    if !ui_state.trace_open {
-        ui_state.right_inset = 0.0;
+pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+    if !state.ui.trace_open {
+        scratch.right_inset = 0.0;
         return;
     }
 
-    let busy = session.is_busy();
-    let error = session.errors.main.clone();
-    let solve = &mut session.solve;
     let mut close = false;
 
     // The window's right edge, read before the panel takes its bite out of the
@@ -54,27 +52,24 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mu
             ui.separator();
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, |ui| body(ui, solve, busy, error.as_deref(), out));
+                .show(ui, |ui| body(ui, state, out));
         });
 
     // Measured from the panel's left edge to the window's right edge rather
     // than from the panel's reported width, which egui grows to cover
     // overflowing content and can run off the window. The overlays need the
     // strip the panel covers.
-    ui_state.right_inset = (right_edge - panel.response.rect.left()).clamp(0.0, right_edge);
+    scratch.right_inset = (right_edge - panel.response.rect.left()).clamp(0.0, right_edge);
     if close {
-        ui_state.trace_open = false;
-        ui_state.right_inset = 0.0;
+        state.ui.trace_open = false;
+        scratch.right_inset = 0.0;
     }
 }
 
-fn body(
-    ui: &mut Ui,
-    solve: &mut SolveResults,
-    busy: bool,
-    error: Option<&str>,
-    out: &mut Vec<Action>,
-) {
+fn body(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
+    let busy = state.results.is_busy();
+    let error = state.results.errors.main.as_deref();
+
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         if ui
@@ -82,12 +77,12 @@ fn body(
             .on_hover_text("Trace the path again at the current inputs")
             .clicked()
         {
-            out.push(Action::Calculate);
+            actions.push(Action::Calculate);
         }
         if busy {
             ui.add(egui::Spinner::new().size(14.0));
         }
-        if let Some(out) = &solve.outcome {
+        if let Some(out) = &state.results.main.outcome {
             ui.label(
                 RichText::new(format!("solved in {:.0} ms", out.elapsed_ms))
                     .small()
@@ -106,6 +101,7 @@ fn body(
         );
     }
 
+    let solve = &state.results.main;
     let Some(out) = &solve.outcome else {
         if error.is_none() {
             ui.label(RichText::new("Press Calculate to trace the path.").color(MUTED));
@@ -116,8 +112,9 @@ fn body(
     panels::verdict_chip(ui, out);
     ui.add_space(6.0);
     panels::reference_panel(ui, out);
-    panels::legend_panel(ui, out, &mut solve.visible, &mut solve.selected);
-    if let Some(sol) = solve.selected_solution() {
+    let selection = &mut state.ui.selection;
+    panels::legend_panel(ui, out, &mut selection.visible, &mut selection.selected);
+    if let Some(sol) = selection.selected.and_then(|i| out.solutions.get(i)) {
         panels::solution_panel(ui, sol);
     }
     panels::near_miss_panel(ui, out);

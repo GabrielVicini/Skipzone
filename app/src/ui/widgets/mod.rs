@@ -1,6 +1,6 @@
 //! Reusable UI pieces, none of which know anything about the scenario they are
-//! displaying. Every one takes plain data or a `&mut` to state owned by
-//! [`crate::state`], so the same control can appear in the header, in a
+//! displaying. Every one takes plain data or a `&mut` to view memory owned by
+//! [`crate::ui::scratch`], so the same control can appear in the header, in a
 //! floating overlay or inside a dialog without change.
 
 pub mod band;

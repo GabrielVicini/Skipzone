@@ -1,21 +1,22 @@
-//! The eframe application: owns the three pieces of state and hands them to
-//! the UI shell each frame. All layout lives in [`crate::ui::shell`].
+//! The eframe application: owns the state, the view scratch and the job
+//! service, and runs one frame as absorb, draw, update. All layout lives in
+//! [`crate::ui::shell`].
 
 use eframe::{App, CreationContext, Frame};
 use egui::Ui;
 
 use crate::jobs::Jobs;
-use crate::state::{Session, UiState};
-use crate::ui::map::MapView;
+use crate::state::AppState;
+use crate::ui::scratch::ViewScratch;
 use crate::ui::shell;
+use crate::update;
 
 pub struct SkipzoneApp {
-    /// The scenario, its results, and the background jobs.
-    session: Session,
-    /// What the interface remembers between frames.
-    ui_state: UiState,
-    /// Tile cache and pan/zoom memory for the map.
-    map: MapView,
+    /// Inputs, results and the model-side UI state.
+    state: AppState,
+    /// What the views remember between frames: buffers, layout, the basemap.
+    scratch: ViewScratch,
+    jobs: Jobs,
 }
 
 impl SkipzoneApp {
@@ -30,31 +31,39 @@ impl SkipzoneApp {
     /// [`Jobs::inline`].
     #[must_use]
     pub fn with_jobs(cc: &CreationContext<'_>, jobs: Jobs) -> Self {
-        let session = Session::new(jobs);
-        let ui_state = UiState::new(&session);
+        let state = AppState::new();
+        let scratch = ViewScratch::new(&cc.egui_ctx, &state);
         Self {
-            session,
-            ui_state,
-            map: MapView::new(&cc.egui_ctx),
+            state,
+            scratch,
+            jobs,
         }
     }
 
-    /// The scenario and its results, for tests to inspect.
+    /// The application state, for tests to inspect.
     #[must_use]
-    pub fn session(&self) -> &Session {
-        &self.session
+    pub fn state(&self) -> &AppState {
+        &self.state
     }
 
     /// Mutable access for tests, which pin the inputs to a fixed scenario
     /// instead of today's date and time.
-    pub fn session_mut(&mut self) -> &mut Session {
-        &mut self.session
+    pub fn state_mut(&mut self) -> &mut AppState {
+        &mut self.state
     }
 }
 
 impl App for SkipzoneApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
-        self.session.pump();
-        shell::draw(ui, &mut self.session, &mut self.ui_state, &mut self.map);
+        update::absorb_all(&mut self.state, &self.jobs);
+        let actions = shell::draw(ui, &mut self.state, &mut self.scratch);
+        if !actions.is_empty() {
+            // Applied after everything was drawn, so this frame showed the old
+            // state. Draw once more to show the new one.
+            ui.ctx().request_repaint();
+        }
+        for action in actions {
+            update::update(&mut self.state, action, &self.jobs);
+        }
     }
 }

@@ -10,6 +10,8 @@
 //! * [`widgets`]  - reusable pieces: charts, menus, the calendar, form bits.
 //! * [`theme`]    - colours, spacing and container chrome, defined once.
 //! * [`actions`]  - what the interface can be asked to do, in one enum.
+//! * [`scratch`]  - what the views remember between frames: text buffers,
+//!   the open menu, layout sizes, the basemap texture.
 //!
 //! The domain modules (`scenario`, `solve`, `sweep`, `noise`) have no egui
 //! dependency, and nothing here computes anything the solver could compute.
@@ -20,6 +22,7 @@ pub mod map;
 pub mod modals;
 pub mod overlays;
 pub mod panels;
+pub mod scratch;
 pub mod shell;
 pub mod theme;
 pub mod trace_panel;

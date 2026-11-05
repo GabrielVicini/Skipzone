@@ -2,13 +2,13 @@
 
 use egui::{ProgressBar, RichText, Spinner, Ui};
 
-use crate::state::Session;
+use crate::state::AppState;
 use crate::ui::theme::{ACCENT, FAIL, MUTED};
 
 /// Right-aligned status readout. Silent when idle and nothing has failed, so
 /// the corner of the map stays clear during normal work.
-pub fn status(ui: &mut Ui, session: &Session) {
-    let errors = &session.errors;
+pub fn status(ui: &mut Ui, state: &AppState) {
+    let errors = &state.results.errors;
     for (job, error) in [
         ("trace", &errors.main),
         ("sweep", &errors.sweep),
@@ -24,10 +24,10 @@ pub fn status(ui: &mut Ui, session: &Session) {
         }
     }
 
-    let Some(label) = session.busy.label() else {
+    let Some(label) = state.results.busy.label() else {
         return;
     };
-    if let Some(fraction) = session.busy.fraction() {
+    if let Some(fraction) = state.results.busy.fraction() {
         ui.add(
             ProgressBar::new(fraction)
                 .desired_width(180.0)

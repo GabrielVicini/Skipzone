@@ -2,15 +2,16 @@
 
 use egui::{RichText, Ui};
 
-use crate::state::UiState;
+use crate::state::AppState;
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, MUTED};
 
-pub fn overlay(ui: &mut Ui, ui_state: &mut UiState, zoom: f64, out: &mut Vec<Action>) {
+pub fn overlay(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
+    let zoom = state.ui.map.camera.zoom_level();
     theme::floating_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.checkbox(
-                &mut ui_state.show_terminator,
+                &mut state.inputs.display.show_terminator,
                 RichText::new("Night").small(),
             );
             ui.separator();

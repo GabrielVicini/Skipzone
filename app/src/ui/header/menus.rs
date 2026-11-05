@@ -2,12 +2,12 @@
 
 use egui::Ui;
 
-use crate::state::{Menu, UiState};
 use crate::ui::actions::Action;
+use crate::ui::scratch::{Menu, ViewScratch};
 use crate::ui::widgets::menu;
 
-pub fn menu_bar(ui: &mut Ui, ui_state: &mut UiState, out: &mut Vec<Action>) {
-    let open = &mut ui_state.menu;
+pub fn menu_bar(ui: &mut Ui, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+    let open = &mut scratch.menu;
 
     out.extend(menu::dropdown(
         ui,

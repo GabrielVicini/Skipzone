@@ -8,19 +8,19 @@
 
 use egui::{Color32, ComboBox, Context, DragValue, Grid, RichText, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::state::{Session, UiState};
+use crate::state::AppState;
 use crate::ui::theme::WARN;
 use crate::ui::widgets::{card, data_grid, hint, kv, labelled_drag, section};
 use skipzone_predict::antenna::{AntennaConfig, AntennaKind, GainCurve};
 use skipzone_predict::scenario::Inputs;
 
-pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) {
-    let inputs = &mut session.inputs;
+pub fn show(ctx: &Context, state: &mut AppState) {
+    let inputs = &mut state.inputs.scenario;
     super::chrome::dialog(
         ctx,
         "antennas_dialog",
         "Antennas",
-        &mut ui_state.modals.antennas,
+        &mut state.ui.modals.antennas,
         vec2(560.0, 640.0),
         |ui| body(ui, inputs),
     );

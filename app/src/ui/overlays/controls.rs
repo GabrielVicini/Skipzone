@@ -6,7 +6,7 @@
 
 use egui::{ComboBox, DragValue, RichText, Ui};
 
-use crate::state::{Session, UiState};
+use crate::state::AppState;
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, MUTED};
 use skipzone_predict::noise::{OperatingMode, dbm_from_watts};
@@ -18,17 +18,17 @@ const POWER_LEVELS_W: [f64; 10] = [
 
 const CONTROL_WIDTH: f32 = 176.0;
 
-pub fn overlay(ui: &mut Ui, session: &mut Session, _ui_state: &mut UiState, out: &mut Vec<Action>) {
+pub fn overlay(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
     ui.vertical(|ui| {
         ui.set_width(CONTROL_WIDTH);
 
         theme::floating_frame().show(ui, |ui| {
             ui.set_width(CONTROL_WIDTH - 20.0);
-            frequency(ui, session);
+            frequency(ui, state);
             ui.add_space(6.0);
-            mode(ui, session);
+            mode(ui, state);
             ui.add_space(6.0);
-            power(ui, session);
+            power(ui, state);
         });
 
         ui.add_space(6.0);
@@ -51,47 +51,51 @@ pub fn overlay(ui: &mut Ui, session: &mut Session, _ui_state: &mut UiState, out:
     });
 }
 
-fn frequency(ui: &mut Ui, session: &mut Session) {
+fn frequency(ui: &mut Ui, state: &mut AppState) {
     ui.label(RichText::new("Frequency").small().color(MUTED));
     ui.add_sized(
         [ui.available_width(), 20.0],
-        DragValue::new(&mut session.inputs.freq_mhz)
+        DragValue::new(&mut state.inputs.scenario.freq_mhz)
             .speed(0.05)
             .range(0.5..=60.0)
             .suffix(" MHz"),
     );
 }
 
-fn mode(ui: &mut Ui, session: &mut Session) {
+fn mode(ui: &mut Ui, state: &mut AppState) {
     ui.label(RichText::new("Mode").small().color(MUTED));
     ComboBox::from_id_salt("mode_select")
         .width(ui.available_width())
-        .selected_text(session.inputs.op_mode.label())
+        .selected_text(state.inputs.scenario.op_mode.label())
         .show_ui(ui, |ui| {
             for m in OperatingMode::ALL {
                 // The preset seeds the bandwidth and threshold; both stay
                 // editable in Settings, so the verdict is never decided by a
                 // constant baked into the code.
                 if ui
-                    .selectable_value(&mut session.inputs.op_mode, m, m.label())
+                    .selectable_value(&mut state.inputs.scenario.op_mode, m, m.label())
                     .clicked()
                 {
                     let (bandwidth_hz, threshold_db) = m.defaults();
-                    session.inputs.bandwidth_hz = bandwidth_hz;
-                    session.inputs.snr_threshold_db = threshold_db;
+                    state.inputs.scenario.bandwidth_hz = bandwidth_hz;
+                    state.inputs.scenario.snr_threshold_db = threshold_db;
                 }
             }
         });
 }
 
-fn power(ui: &mut Ui, session: &mut Session) {
+fn power(ui: &mut Ui, state: &mut AppState) {
     ui.label(RichText::new("Power").small().color(MUTED));
     ComboBox::from_id_salt("power_select")
         .width(ui.available_width())
-        .selected_text(format_power(session.inputs.tx_power_w))
+        .selected_text(format_power(state.inputs.scenario.tx_power_w))
         .show_ui(ui, |ui| {
             for watts in POWER_LEVELS_W {
-                ui.selectable_value(&mut session.inputs.tx_power_w, watts, format_power(watts));
+                ui.selectable_value(
+                    &mut state.inputs.scenario.tx_power_w,
+                    watts,
+                    format_power(watts),
+                );
             }
         });
 }

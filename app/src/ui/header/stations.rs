@@ -8,39 +8,40 @@
 
 use egui::{Color32, RichText, Ui};
 
-use crate::state::{LocationEntry, LocationMode, Session, UiState};
+use crate::state::AppState;
+use crate::ui::scratch::{LocationEntry, LocationMode, ViewScratch};
 use crate::ui::theme::MUTED;
 use crate::ui::widgets::fields;
 use skipzone_predict::scenario::PlaceMode;
 
 /// TX above RX, both on the solid header background.
-pub fn rows(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) {
-    let tx = (session.inputs.tx_lat, session.inputs.tx_lon);
+pub fn rows(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
+    let tx = (state.inputs.scenario.tx_lat, state.inputs.scenario.tx_lon);
     if let Some((lat, lon)) = row(
         ui,
         "TX",
         Color32::from_rgb(0xD0, 0x21, 0x1C),
         PlaceMode::Tx,
-        &mut ui_state.place,
-        &mut ui_state.tx,
+        &mut state.ui.place,
+        &mut scratch.tx,
         tx,
     ) {
-        session.inputs.tx_lat = lat;
-        session.inputs.tx_lon = lon;
+        state.inputs.scenario.tx_lat = lat;
+        state.inputs.scenario.tx_lon = lon;
     }
 
-    let rx = (session.inputs.rx_lat, session.inputs.rx_lon);
+    let rx = (state.inputs.scenario.rx_lat, state.inputs.scenario.rx_lon);
     if let Some((lat, lon)) = row(
         ui,
         "RX",
         Color32::from_rgb(0x14, 0x65, 0xC0),
         PlaceMode::Rx,
-        &mut ui_state.place,
-        &mut ui_state.rx,
+        &mut state.ui.place,
+        &mut scratch.rx,
         rx,
     ) {
-        session.inputs.rx_lat = lat;
-        session.inputs.rx_lon = lon;
+        state.inputs.scenario.rx_lat = lat;
+        state.inputs.scenario.rx_lon = lon;
     }
 }
 

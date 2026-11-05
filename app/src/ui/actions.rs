@@ -4,13 +4,10 @@
 //! rather than mutating state where they are drawn. That keeps a command's
 //! meaning in one place - "Calculate" always means *dispatch a solve and show
 //! the trace* whether it was invoked from the menu or from the dialog - and
-//! leaves the widgets themselves free of side effects.
+//! leaves the widgets themselves free of side effects. [`crate::update`]
+//! applies them.
 
-use crate::state::{Session, UiState};
-
-use super::map::MapView;
-
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Action {
     /// Run the point-to-point solve and show the trace readout.
     Calculate,
@@ -32,70 +29,4 @@ pub enum Action {
     ShowSettings,
     ShowAntennas,
     ShowAbout,
-}
-
-/// Apply every action a frame produced, in the order they were emitted.
-pub fn apply_all(
-    actions: Vec<Action>,
-    session: &mut Session,
-    ui_state: &mut UiState,
-    map: &mut MapView,
-) {
-    for action in actions {
-        apply(action, session, ui_state, map);
-    }
-}
-
-pub fn apply(action: Action, session: &mut Session, ui_state: &mut UiState, map: &mut MapView) {
-    match action {
-        Action::Calculate => {
-            // Re-running replaces what the panel is showing; the panel
-            // itself stays where the operator sized it.
-            session.calculate();
-            ui_state.trace_open = true;
-        }
-        Action::BestFrequency => {
-            session.find_best_frequency();
-            ui_state.modals.best_freq = true;
-        }
-        Action::FitPath => map.request_fit(),
-        Action::ZoomIn => map.zoom_in(),
-        Action::ZoomOut => map.zoom_out(),
-        Action::TuneTo(freq_mhz) => session.inputs.freq_mhz = freq_mhz,
-        Action::RunCoverage => {
-            session.run_coverage();
-            ui_state.modals.coverage = true;
-        }
-        Action::CancelCoverage => session.cancel_coverage(),
-        Action::ResetCoverage => session.reset_coverage(),
-        Action::ShowCoverage => ui_state.modals.coverage = true,
-        Action::ShowSettings => ui_state.modals.settings = true,
-        Action::ShowAntennas => ui_state.modals.antennas = true,
-        Action::ShowAbout => ui_state.modals.about = true,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::jobs::Jobs;
-
-    /// Every action of a frame is applied, not just the first one.
-    #[test]
-    fn every_action_in_a_frame_is_applied() {
-        let mut session = Session::new(Jobs::inline(|| {}));
-        let mut ui_state = UiState::new(&session);
-        let mut map = MapView::new(&egui::Context::default());
-
-        apply_all(
-            vec![Action::ShowSettings, Action::TuneTo(7.1), Action::ShowAbout],
-            &mut session,
-            &mut ui_state,
-            &mut map,
-        );
-
-        assert!(ui_state.modals.settings);
-        assert!((session.inputs.freq_mhz - 7.1).abs() < 1e-12);
-        assert!(ui_state.modals.about);
-    }
 }

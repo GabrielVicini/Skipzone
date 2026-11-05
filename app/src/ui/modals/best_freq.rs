@@ -9,7 +9,7 @@
 
 use egui::{Button, Color32, Context, RichText, Ui, vec2};
 
-use crate::state::{Session, UiState};
+use crate::state::AppState;
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, ACCENT, MUTED};
 use crate::ui::widgets::chart::{Chart, Series};
@@ -25,18 +25,18 @@ const NOISE_COLOR: Color32 = Color32::from_rgb(0xF2, 0x9A, 0x76);
 const LOSS_COLOR: Color32 = Color32::from_rgb(0xC0, 0xA6, 0xF0);
 const ABSORPTION_COLOR: Color32 = Color32::from_rgb(0xF2, 0xD3, 0x5C);
 
-pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
-    let busy = session.is_busy();
-    let tuned_mhz = session.inputs.freq_mhz;
-    let threshold_db = session.inputs.snr_threshold_db;
-    let points = session.sweep.sorted();
-    let best = session.sweep.best;
+pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+    let busy = state.results.is_busy();
+    let tuned_mhz = state.inputs.scenario.freq_mhz;
+    let threshold_db = state.inputs.scenario.snr_threshold_db;
+    let points = state.results.sweep.sorted();
+    let best = state.results.sweep.best;
 
     super::chrome::dialog(
         ctx,
         "best_freq_dialog",
         "Best frequency",
-        &mut ui_state.modals.best_freq,
+        &mut state.ui.modals.best_freq,
         // Roomy by default: three stacked charts plus the readout only tell
         // their story when they are wide enough to separate the samples.
         vec2(1000.0, 820.0),

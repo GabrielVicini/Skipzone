@@ -6,10 +6,13 @@
 //! never depends on `skipzone-lab`. The entry type is [`app::SkipzoneApp`],
 //! which `main.rs` hands to eframe.
 //!
-//! Nothing in `ui` computes a physical quantity, and nothing in `state`
-//! mentions egui.
+//! Each frame the app absorbs job responses into [`state::AppState`], draws
+//! it with [`ui::shell`], and applies the actions the draw emitted through
+//! [`update::update`]. Nothing in `ui` computes a physical quantity, and
+//! nothing in `state` mentions egui.
 
 pub mod app;
 pub mod jobs;
 pub mod state;
 pub mod ui;
+pub mod update;
