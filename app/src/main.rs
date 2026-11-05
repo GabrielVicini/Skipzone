@@ -1,7 +1,5 @@
 //! Binary entry point for the Skipzone point-to-point application. Everything
-//! it drives lives in the library root next to it (`lib.rs`), so that the same
-//! modules can also be driven headlessly by the validation harnesses in
-//! `src/bin/`.
+//! it drives lives in the library root next to it (`lib.rs`).
 
 use skipzone_app::app;
 
