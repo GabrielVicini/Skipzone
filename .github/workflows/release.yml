@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          - { os: macos-14, target: aarch64-apple-darwin }
+          # macos-14 is arm64; x86_64 is cross-compiled on the same runner.
+          - { os: macos-14, target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libxcb1-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libx11-dev libgl1-mesa-dev
+      - name: Build
+        run: cargo build --release --locked -p skipzone-app --bin skipzone-app-bin --target ${{ matrix.target }}
+      # The binary embeds data/nequick/ (EUPL-1.2), so its licence notice ships too.
+      - name: Package
+        shell: bash
+        run: |
+          name="skipzone-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          exe=skipzone-app-bin
+          if [ "$RUNNER_OS" = Windows ]; then exe="$exe.exe"; fi
+          mkdir -p "release/$name"
+          cp "target/${{ matrix.target }}/release/$exe" LICENSE README.md "release/$name/"
+          cp data/nequick/_SOURCE_AND_LICENSE.txt "release/$name/NEQUICK-DATA-LICENSE.txt"
+          cd release
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Checksums
+        working-directory: release
+        run: sha256sum -- *.zip *.tar.gz | tee SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.zip
+            release/*.tar.gz
+            release/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true
