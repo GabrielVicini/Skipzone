@@ -43,11 +43,17 @@ Haselgrove ray equations in Hamiltonian form.
   system libraries; single-threaded; `unsafe` forbidden. Built to stay portable
   and embeddable. CI builds it on its own, outside the workspace default
   members, so a dependency leak from the app cannot hide.
+- **Ionosphere (`crates/skipzone-iono/`):** Chapman layers, the CCIR foF2 and
+  M(3000)F2 maps, sporadic E and solar geometry, feeding the engine through its
+  `ElectronDensity` trait.
+- **Prediction (`crates/skipzone-predict/`):** the headless link-prediction
+  library: scenarios, the solve, link budget, noise, antennas, ground
+  reflection, frequency sweep and area coverage. Hosts the `hfpredict` CLI.
+- **Lab (`crates/skipzone-lab/`):** validation and calibration against WSPR
+  measurements, and every harness binary. The only crate with network access.
 - **App (`app/`):** an `egui` desktop map application for
   point-to-point HF path prediction. Useful for amateur radio propagation
-  planning, but general enough for any HF ray-tracing use case. It also holds
-  the ionosphere model layer, the solver, the link budget and every validation
-  harness.
+  planning, but general enough for any HF ray-tracing use case.
 - **Docs (`docs/derivations/`):** every piece of physics derived from first
   principles and cross-checked against known analytic limits, before it was
   implemented.
