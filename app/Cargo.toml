@@ -14,7 +14,7 @@ path = "src/main.rs"
 skipzone-iono = { path = "../crates/skipzone-iono" }
 skipzone-predict = { path = "../crates/skipzone-predict" }
 eframe = "0.35"
-egui = "0.35"
+egui = "0.36"
 
 # Not clippy-pedantic, unlike the engine crate: pedantic lints on egui layout
 # code add churn without catching bugs.
