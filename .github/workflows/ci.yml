@@ -139,7 +139,7 @@ jobs:
         run: cargo doc --workspace --no-deps
 
   boundaries:
-    name: crate boundaries
+    name: crate boundaries and docs links
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +148,10 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       # Uses cargo metadata only, so nothing is compiled.
       - run: python3 scripts/check-boundaries.py
+      # Every derivation is cited by code, every citation resolves, and no
+      # markdown lives outside the documented places. Pure Python, no build.
+      - name: docs links
+        run: python3 scripts/check-docs.py
 
   deny:
     name: cargo deny (${{ matrix.checks }})

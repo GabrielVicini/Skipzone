@@ -19,7 +19,8 @@
 //!
 //! Every equation is derived in `docs/derivations/` before implementation;
 //! code comments cite the derivation file and section, for example
-//! docs/derivations/engine/haselgrove.md §2.
+//! docs/derivations/engine/haselgrove.md §2. `scripts/check-docs.py` checks
+//! that every such citation resolves.
 
 pub mod collision;
 pub mod constants;
