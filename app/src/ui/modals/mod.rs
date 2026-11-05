@@ -17,7 +17,7 @@ use crate::state::AppState;
 use crate::ui::actions::Action;
 
 /// Draw whichever dialogs are open, pushing what they produced to `out`.
-pub fn draw(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+pub fn draw(ctx: &Context, state: &AppState, out: &mut Vec<Action>) {
     best_freq::show(ctx, state, out);
     coverage::show(ctx, state, out);
     settings::show(ctx, state, out);

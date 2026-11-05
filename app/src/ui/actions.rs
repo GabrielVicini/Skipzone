@@ -20,6 +20,7 @@ use skipzone_predict::noise::{NoiseEnvironment, OperatingMode};
 use skipzone_predict::scenario::GroundType;
 
 use crate::state::{AppInputs, Modal, Station};
+use crate::ui::map::projection::Camera;
 
 /// Let `edit` change a copy of `value`, and return the copy if it changed.
 pub fn edited<T: Copy + PartialEq>(value: T, edit: impl FnOnce(&mut T)) -> Option<T> {
@@ -155,6 +156,12 @@ pub enum Action {
     Calculate,
     /// Run the frequency sweep and show its charts.
     BestFrequency,
+    /// The camera the map settled on this frame after pan, zoom or fit.
+    /// Consumes the pending zoom, and the pending fit when `fitted`.
+    SetCamera {
+        camera: Camera,
+        fitted: bool,
+    },
     /// Re-frame the map on the current path.
     FitPath,
     ZoomIn,

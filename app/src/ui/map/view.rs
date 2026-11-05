@@ -2,9 +2,9 @@
 //!
 //! The camera lives in [`crate::state::MapState`] and the rasterised basemap in
 //! [`crate::ui::scratch::ViewScratch`]; everything else is read from the
-//! state. A click is reported back as a position and the caller decides what it
-//! means, so the "which station does a click move?" rule lives with the rest of
-//! the UI state rather than in the drawing code.
+//! state. Pan, zoom and fit come back as [`Action::SetCamera`], and a click as
+//! [`Action::PlaceStation`], so the "which station does a click move?" rule
+//! lives in the update rather than in the drawing code.
 //!
 //! Nothing here is fetched. The basemap is built once from the bundled coastline
 //! polygons (see [`super::basemap`]) and everything else is painted from values
@@ -13,7 +13,8 @@
 
 use egui::{CentralPanel, Color32, Frame, Mesh, Rect, Sense, TextureHandle, Ui, pos2};
 
-use crate::state::{AppState, MapState};
+use crate::state::AppState;
+use crate::ui::actions::Action;
 use crate::ui::scratch::ViewScratch;
 use skipzone_iono::solar;
 use skipzone_predict::scenario::Inputs;
@@ -28,55 +29,66 @@ pub const ZOOM_STEP: f64 = 1.6;
 /// the floating controls in the corners.
 const FIT_MARGIN: f64 = 0.62;
 
-/// Draw the map filling the central panel. Returns the `(lat, lon)` of a click
-/// on it, if there was one.
-pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &ViewScratch) -> Option<(f64, f64)> {
-    CentralPanel::default()
-        .frame(Frame::NONE)
-        .show(ui, |ui| {
-            let (rect, response) =
-                ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-            if rect.width() < 2.0 || rect.height() < 2.0 {
-                return None;
-            }
+/// Draw the map filling the central panel. Pushes the camera this frame
+/// settled on when it moved, and a click as [`Action::PlaceStation`].
+pub fn draw(ui: &mut Ui, state: &AppState, scratch: &ViewScratch, out: &mut Vec<Action>) {
+    CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        if rect.width() < 2.0 || rect.height() < 2.0 {
+            return;
+        }
 
-            let map = &mut state.ui.map;
-            // Hold the fit until there is a real viewport to fit into. A
-            // window that is minimised, or in its first frames, reports a
-            // rect small enough that the computed scale is meaningless, and
-            // fitting against it leaves the map zoomed somewhere arbitrary
-            // once the window opens for real.
-            if map.needs_fit && rect.width() > 200.0 && rect.height() > 200.0 {
-                map.camera = fit(&state.inputs.scenario, rect);
-                map.needs_fit = false;
-            }
-            apply_input(map, &response, rect, ui);
-            map.camera = map.camera.clamped(rect);
+        let map = &state.ui.map;
+        // Hold the fit until there is a real viewport to fit into. A window
+        // that is minimised, or in its first frames, reports a rect small
+        // enough that the computed scale is meaningless, and fitting against
+        // it leaves the map zoomed somewhere arbitrary once the window opens
+        // for real.
+        let fitted = map.needs_fit && rect.width() > 200.0 && rect.height() > 200.0;
+        let mut camera = if fitted {
+            fit(&state.inputs.scenario, rect)
+        } else {
+            map.camera
+        };
+        camera = apply_input(camera, map.pending_zoom, &response, rect, ui).clamped(rect);
+        // Painted with the new camera now; the state catches up after the
+        // frame. A still map emits nothing.
+        if fitted || camera != map.camera || map.pending_zoom != 1.0 {
+            out.push(Action::SetCamera { camera, fitted });
+        }
 
-            let proj = Proj::new(rect, map.camera);
-            paint(ui, &proj, state, scratch.basemap.as_ref());
+        let proj = Proj::new(rect, camera);
+        paint(ui, &proj, state, scratch.basemap.as_ref());
 
-            if !response.clicked() {
-                return None;
-            }
-            let pointer = response.interact_pointer_pos()?;
-            let (lat, lon) = proj.unproject(pointer);
-            // A click above the north pole or below the south one is not a
-            // click on the map, and must not move a station. Longitude
-            // cannot miss: it wraps, so every column of pixels inside the
-            // world is a real meridian.
-            (lat.is_finite() && lat.abs() <= 90.0).then_some((lat, lon))
-        })
-        .inner
+        if !response.clicked() {
+            return;
+        }
+        let Some(pointer) = response.interact_pointer_pos() else {
+            return;
+        };
+        let (lat, lon) = proj.unproject(pointer);
+        // A click above the north pole or below the south one is not a click
+        // on the map, and must not move a station. Longitude cannot miss: it
+        // wraps, so every column of pixels inside the world is a real
+        // meridian.
+        if lat.is_finite() && lat.abs() <= 90.0 {
+            out.push(Action::PlaceStation { lat, lon });
+        }
+    });
 }
 
 /// Pan by dragging, zoom by wheel or pinch about the pointer, plus whatever
 /// the zoom buttons asked for since the last frame.
-fn apply_input(map: &mut MapState, response: &egui::Response, rect: Rect, ui: &Ui) {
-    let proj = Proj::new(rect, map.camera);
-
+fn apply_input(
+    camera: Camera,
+    pending_zoom: f64,
+    response: &egui::Response,
+    rect: Rect,
+    ui: &Ui,
+) -> Camera {
+    let mut camera = camera;
     if response.dragged() {
-        map.camera = proj.panned(response.drag_delta());
+        camera = Proj::new(rect, camera).panned(response.drag_delta());
     }
 
     let (scroll, pinch, pointer) = ui.input(|i| {
@@ -91,12 +103,11 @@ fn apply_input(map: &mut MapState, response: &egui::Response, rect: Rect, ui: &U
     if response.hovered() && scroll.abs() > 0.0 {
         factor *= ZOOM_STEP.powf(f64::from(scroll) / 120.0);
     }
-    factor *= map.pending_zoom;
-    map.pending_zoom = 1.0;
+    factor *= pending_zoom;
     if (factor - 1.0).abs() > 1e-6 {
-        let proj = Proj::new(rect, map.camera);
-        map.camera = proj.zoomed_about(factor, anchor);
+        camera = Proj::new(rect, camera).zoomed_about(factor, anchor);
     }
+    camera
 }
 
 /// One frame of map, bottom to top. The order is the argument: shading under

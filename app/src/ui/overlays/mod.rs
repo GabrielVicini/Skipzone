@@ -20,7 +20,7 @@ use crate::ui::scratch::ViewScratch;
 const MARGIN: f32 = 12.0;
 
 /// Draw every floating group, pushing what they produced to `out`.
-pub fn draw(ctx: &Context, state: &mut AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+pub fn draw(ctx: &Context, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
     // The map's visible area: the window minus the header and, when it is open,
     // the trace panel. Everything floats inside this, so opening the panel
     // slides the right-hand groups across instead of hiding them behind it.

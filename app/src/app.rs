@@ -56,7 +56,7 @@ impl SkipzoneApp {
 impl App for SkipzoneApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut Frame) {
         update::absorb_all(&mut self.state, &self.jobs);
-        let actions = shell::draw(ui, &mut self.state, &mut self.scratch);
+        let actions = shell::draw(ui, &self.state, &mut self.scratch);
         if !actions.is_empty() {
             // Applied after everything was drawn, so this frame showed the old
             // state. Draw once more to show the new one.

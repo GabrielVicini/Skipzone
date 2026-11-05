@@ -25,7 +25,7 @@ const NOISE_COLOR: Color32 = Color32::from_rgb(0xF2, 0x9A, 0x76);
 const LOSS_COLOR: Color32 = Color32::from_rgb(0xC0, 0xA6, 0xF0);
 const ABSORPTION_COLOR: Color32 = Color32::from_rgb(0xF2, 0xD3, 0x5C);
 
-pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+pub fn show(ctx: &Context, state: &AppState, out: &mut Vec<Action>) {
     let busy = state.results.is_busy();
     let tuned_mhz = state.inputs.scenario.freq_mhz;
     let threshold_db = state.inputs.scenario.snr_threshold_db;

@@ -15,7 +15,7 @@ use crate::ui::theme;
 
 /// Draw the header and push any menu selection to `out`. Records the bar's height in
 /// `scratch` so the floating overlays can start just below it.
-pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+pub fn draw(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
     let panel = Panel::top("header")
         .resizable(false)
         .frame(theme::header_frame())

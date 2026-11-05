@@ -72,6 +72,14 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
             }
             state.ui.modals.best_freq = true;
         }
+        Action::SetCamera { camera, fitted } => {
+            let map = &mut state.ui.map;
+            map.camera = camera;
+            map.pending_zoom = 1.0;
+            if fitted {
+                map.needs_fit = false;
+            }
+        }
         Action::FitPath => state.ui.map.needs_fit = true,
         Action::ZoomIn => state.ui.map.pending_zoom *= ZOOM_STEP,
         Action::ZoomOut => state.ui.map.pending_zoom /= ZOOM_STEP,
@@ -303,23 +311,60 @@ mod tests {
         assert_eq!(s.results.coverage.generation, jobs.generation());
     }
 
-    /// Every action of a frame is applied, in order, not just the first.
+    /// Every action of a frame is applied, in order, not just the first. The
+    /// old sink kept only the first action a frame produced.
     #[test]
     fn every_action_in_a_frame_is_applied() {
         let (mut s, jobs) = setup();
+        let frame = vec![
+            Action::SetInput(InputChange::Freq(7.1)),
+            Action::OpenModal(Modal::Settings),
+            Action::SetInput(InputChange::Freq(10.1)),
+        ];
+        update_all(&mut s, frame, &jobs);
+        assert!(s.ui.modals.settings, "the second action was applied");
+        assert!(
+            (s.inputs.scenario.freq_mhz - 10.1).abs() < 1e-12,
+            "the last change wins"
+        );
+    }
+
+    /// The camera the map reports is kept, and it consumes the pending zoom
+    /// and, when it says so, the pending fit.
+    #[test]
+    fn the_map_camera_is_set_through_actions() {
+        use crate::ui::map::projection::Camera;
+
+        let (mut s, jobs) = setup();
+        assert!(s.ui.map.needs_fit, "fits on the first frame");
+        apply(&mut s, &jobs, [Action::ZoomIn]);
+        assert!(s.ui.map.pending_zoom > 1.0);
+
+        let camera = Camera {
+            lat: 10.0,
+            lon: 20.0,
+            ppd: 5.0,
+        };
+        let not_fitted = Action::SetCamera {
+            camera,
+            fitted: false,
+        };
+        apply(&mut s, &jobs, [not_fitted]);
+        assert_eq!(s.ui.map.camera, camera);
+        assert!((s.ui.map.pending_zoom - 1.0).abs() < f64::EPSILON);
+        assert!(s.ui.map.needs_fit, "a fit is still owed");
+
         apply(
             &mut s,
             &jobs,
-            [
-                Action::OpenModal(Modal::Settings),
-                Action::SetInput(InputChange::Freq(7.1)),
-                Action::OpenModal(Modal::About),
-                Action::SetInput(InputChange::Freq(10.1)),
-            ],
+            [Action::SetCamera {
+                camera,
+                fitted: true,
+            }],
         );
-        assert!(s.ui.modals.settings);
-        assert!(s.ui.modals.about);
-        assert!((s.inputs.scenario.freq_mhz - 10.1).abs() < 1e-12);
+        assert!(!s.ui.map.needs_fit);
+        apply(&mut s, &jobs, [Action::FitPath]);
+        assert!(s.ui.map.needs_fit);
     }
 
     /// A map click moves whichever station is being placed, and only that one.

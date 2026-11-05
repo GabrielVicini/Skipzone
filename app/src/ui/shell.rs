@@ -13,7 +13,7 @@ use crate::ui::scratch::ViewScratch;
 
 use super::{header, map, modals, overlays, theme, trace_panel};
 
-pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) -> Vec<Action> {
+pub fn draw(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch) -> Vec<Action> {
     theme::apply_scale(ui, &mut scratch.styled_for_width);
     let ctx = ui.ctx().clone();
 
@@ -27,9 +27,7 @@ pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) -> Vec
 
     // The map is the centrepiece: it takes every pixel the header and the
     // trace panel left.
-    if let Some((lat, lon)) = map::view::draw(ui, state, scratch) {
-        actions.push(Action::PlaceStation { lat, lon });
-    }
+    map::view::draw(ui, state, scratch, &mut actions);
 
     overlays::draw(&ctx, state, scratch, &mut actions);
     modals::draw(&ctx, state, &mut actions);
