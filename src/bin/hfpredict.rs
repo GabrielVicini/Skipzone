@@ -1,36 +1,25 @@
-//! `hfpredict` — a first-order HF path predictor that WIRES TOGETHER the
-//! already-validated Skipzone engine (Chapman electron-density layer, the
-//! Haselgrove ray tracer, and the shooting/Newton homing). It adds no new
-//! physics: every propagation number comes from library code that is covered
-//! by the analytic-solution and invariant test suites.
+//! `hfpredict`: a first-order HF path predictor built from the engine's
+//! Chapman layer, ray tracer and homing. It adds no physics of its own.
 //!
-//! What this tool does: given a transmitter, a receiver, an operating
-//! frequency, and a time of day, it assumes a single Chapman F2 layer whose
-//! peak frequency (foF2) and height (hmF2) are looked up from a COARSE,
-//! explicitly-representative midlatitude climatology table (not live data,
-//! not a path-specific prediction), then uses the validated homing to decide
-//! whether a reflected ray path exists and reports its geometry.
+//! Given a transmitter, receiver, frequency and time, it assumes a single
+//! Chapman F2 layer with foF2 and hmF2 from a coarse midlatitude climatology
+//! table, then homes rays to decide whether a reflected path exists.
 //!
-//! Honesty boundaries, stated plainly because the engine's whole purpose is
-//! defensible numbers:
-//!   * The foF2/hmF2 table is order-of-magnitude climatology. It is consistent
-//!     with published midlatitude ranges (e.g. Davies, "Ionospheric Radio",
-//!     1990; the diurnal/seasonal/solar behaviour and the winter anomaly are
-//!     standard), but it is NOT a measured or forecast value for the specific
-//!     path and time. The assumed numbers are printed so they can be checked,
-//!     and `--fof2`/`--hmf2` override them with real ionosonde or prediction
-//!     data — that is the defensible path for real work.
+//! Limits:
+//!   * The foF2/hmF2 table is order-of-magnitude climatology, consistent with
+//!     published midlatitude ranges (e.g. Davies, "Ionospheric Radio", 1990),
+//!     but not a forecast for the path. The assumed values are printed, and
+//!     `--fof2`/`--hmf2` override them with ionosonde or prediction data.
 //!   * A single Chapman F2 layer only. No E/F1 layers, no horizontal gradients,
 //!     no sporadic-E, no tilts.
-//!   * Field-free O-mode by default (the most heavily validated path; O and X
-//!     are bit-identical without a field). No magnetoionic splitting.
-//!   * "Connects" here means a ray reflects and reaches the receiver
-//!     geometrically. Absorption/signal strength is NOT modelled, so this is a
-//!     Maximum-Usable-Frequency-style reachability check, not a link budget.
-//!   * Multi-hop uses the equal-hop assumption: because the assumed ionosphere
-//!     depends only on height, every hop is geometrically identical, so an
-//!     N-hop path exists exactly when a single hop of 1/N the ground distance
-//!     reflects. This reuses the single-hop homing unchanged.
+//!   * Field-free O-mode by default (O and X are bit-identical without a
+//!     field). No magnetoionic splitting.
+//!   * "Connects" means a ray reflects and reaches the receiver geometrically.
+//!     Absorption is not modelled, so this is a MUF-style reachability check
+//!     rather than a link budget.
+//!   * Multi-hop assumes equal hops: the ionosphere depends only on height, so
+//!     an N-hop path exists exactly when a single hop of 1/N the ground
+//!     distance reflects.
 
 use std::process::ExitCode;
 
@@ -45,8 +34,7 @@ use skipzone::units::{Hertz, Meters, Radians};
 
 /// Spherical Earth radius used consistently across the engine's test suites.
 const EARTH_RADIUS_M: f64 = 6_371_000.0;
-/// Speed of light, m/s, for group-path -> time-of-flight (exact SI value; the
-/// same constant the library uses internally).
+/// Speed of light, m/s, for group-path -> time-of-flight (exact SI value).
 const C_M_PER_S: f64 = 299_792_458.0;
 /// Domain top for the tracer: well above any assumed hmF2 plus several scale
 /// heights, so a penetrating ray cleanly escapes rather than being clipped.
@@ -286,8 +274,8 @@ fn is_daytime(lst_hours: f64) -> bool {
 /// These are order-of-magnitude values consistent with standard published
 /// climatology (diurnal drop at night, solar-cycle scaling, and the
 /// midlatitude winter anomaly where noon foF2 is higher in winter than
-/// summer). They are NOT a prediction for a specific path/time; the tool
-/// prints them and they are overridable via `--fof2`.
+/// summer). They are not a prediction for a specific path or time; the tool
+/// prints them and `--fof2` overrides them.
 fn representative_fof2_mhz(day: bool, season: Season, solar: Solar) -> f64 {
     match (day, solar) {
         (true, Solar::High) => match season {
@@ -528,8 +516,8 @@ fn search_and_report(
                 return Ok(());
             }
             Ok(_) | Err(HomingError::NoBracket { .. }) => {}
-            // A convergence failure or trace error is a genuine numerical
-            // problem, not a "no path" answer: surface it rather than hide it.
+            // A convergence failure or trace error is a numerical problem,
+            // so report it instead of answering "no path".
             Err(e) => return Err(format!("homing failed for {n}-hop attempt: {e}")),
         }
     }

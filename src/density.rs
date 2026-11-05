@@ -52,13 +52,11 @@ pub fn critical_frequency(ne: PerCubicMeter) -> Hertz {
     Hertz::new((ne.get() * OMEGA_P_SQ_PER_DENSITY).sqrt() / (2.0 * std::f64::consts::PI))
 }
 
-/// Hard upper limit on the solar zenith angle accepted by
+/// Upper limit on the solar zenith angle accepted by
 /// `ChapmanLayer::with_zenith_angle`. At 85 deg the plane-parallel slant
 /// factor sec(chi) is already ~11.5 and the flat-atmosphere assumption behind
-/// it has broken down (the proper treatment is the Chapman grazing-incidence
-/// function, not implemented here). Rejecting past this point keeps the code
-/// from extrapolating a formula outside its domain; the consequence of raising
-/// it would be silently wrong twilight densities.
+/// it has broken down. Raising it would give silently wrong twilight
+/// densities.
 pub const MAX_CHAPMAN_ZENITH_ANGLE: Radians = Radians::from_degrees(85.0);
 
 /// Free space.
@@ -254,16 +252,13 @@ impl ElectronDensity for QuasiParabolicLayer {
 /// sqrt(cos chi) and rises by H ln(sec chi) as the sun sets. Both are the
 /// standard Chapman results.
 ///
-/// `new` fixes sec(chi) = 1 (overhead sun) and is bit-identical to the
-/// original two-parameter layer.
+/// `new` fixes sec(chi) = 1 (overhead sun).
 ///
-/// Known limitation: `sec(chi)` is the *plane-parallel* slant-path factor. It
-/// assumes the ionising ray traverses a flat stratified atmosphere, which
-/// degrades as the path lengthens near the terminator; the standard fix is the
-/// Chapman grazing-incidence function `Ch(x, chi)`, which is NOT implemented
-/// here. Treat results beyond chi ~ 75 deg as indicative only, and refuse them
-/// entirely past `MAX_CHAPMAN_ZENITH_ANGLE` rather than extrapolating a
-/// formula outside its domain.
+/// Known limitation: `sec(chi)` is the plane-parallel slant-path factor,
+/// which degrades near the terminator. The standard fix, the Chapman
+/// grazing-incidence function `Ch(x, chi)`, is not implemented. Results
+/// beyond chi ~ 75 deg are indicative only, and angles past
+/// `MAX_CHAPMAN_ZENITH_ANGLE` are refused.
 pub struct ChapmanLayer {
     nm: f64,
     r_peak: f64,
@@ -290,10 +285,9 @@ impl ChapmanLayer {
     /// `r_peak + H ln(sec chi)` (see the type docs).
     ///
     /// # Errors
-    /// As `new`, plus `chi` must be below `MAX_CHAPMAN_ZENITH_ANGLE`. Note
-    /// that `cos(90 deg)` is 6.1e-17 rather than 0 in floating point, so a
-    /// bare `cos > 0` test would happily accept sec(chi) ~ 1e16; the limit is
-    /// enforced on the angle itself.
+    /// As `new`, plus `chi` must be below `MAX_CHAPMAN_ZENITH_ANGLE`. The
+    /// limit is checked on the angle because `cos(90 deg)` is 6.1e-17 in
+    /// floating point, so a `cos > 0` test would accept sec(chi) ~ 1e16.
     pub fn with_zenith_angle(
         nm: PerCubicMeter,
         r_peak: Meters,
@@ -500,9 +494,8 @@ mod tests {
         fd_check(&m, R0 + 100e3, R0 + 600e3, 1e-7);
     }
 
-    /// The zenith-angle constructor at chi = 0 must reproduce the original
-    /// overhead-sun layer exactly, bit for bit: the added parameter must not
-    /// perturb any previously validated result.
+    /// The zenith-angle constructor at chi = 0 must match the overhead-sun
+    /// layer bit for bit.
     #[test]
     fn chapman_zenith_zero_is_bit_identical_to_overhead() {
         let nm = PerCubicMeter::new(1e12);
@@ -523,8 +516,7 @@ mod tests {
     }
 
     /// The derived Chapman relations: peak density Nm sqrt(cos chi) at height
-    /// r_peak + H ln(sec chi). Verified against a scan of the actual profile,
-    /// not just against the accessors.
+    /// r_peak + H ln(sec chi), checked against a scan of the sampled profile.
     #[test]
     fn chapman_zenith_peak_relations() {
         let nm_val = 1e12;
@@ -576,13 +568,10 @@ mod tests {
             Radians::from_degrees(70.0),
         )
         .unwrap();
-        // Looser than the F2 gradient tests (1e-7) for an oracle reason, not a
-        // physics one: a 7 km scale height at sec(chi) ~ 2.9 varies on a ~435 m
-        // length, so fd_check's fixed h = 0.5 m carries ~2e-7 relative
-        // central-difference truncation - larger than its 1e3 absolute floor
-        // allows. The analytic gradient was confirmed correct separately by
-        // halving h and observing the discrepancy fall at order 2.000. A real
-        // term or sign error would show up at O(1) relative, far above 1e-5.
+        // Looser than the F2 gradient tests (1e-7) because of the oracle: a
+        // 7 km scale height at sec(chi) ~ 2.9 varies on a ~435 m length, so
+        // fd_check's fixed h = 0.5 m carries ~2e-7 relative truncation. A real
+        // term or sign error would show up at O(1) relative.
         fd_check(&layer, R0 + 60e3, R0 + 200e3, 1e-5);
 
         // Just inside the domain must still be accepted.

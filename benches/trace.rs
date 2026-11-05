@@ -1,5 +1,5 @@
-//! Criterion baseline (build-order step 10). Scenarios chosen to be the
-//! production shape: full magnetoionic ray through IGRF-14 + Chapman +
+//! Criterion baseline. The scenarios match production use: a full
+//! magnetoionic ray through IGRF-14 + Chapman +
 //! exponential collisions, landing after one hop.
 
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -55,10 +55,9 @@ fn bench_trace(c: &mut Criterion) {
         });
     });
 
-    // A fan of launches, traced one after another. The engine is deliberately
-    // single-threaded: parallelism is the app's `compute` layer, which fans
-    // whole solves out rather than individual rays. This measures the serial
-    // cost that layer is dividing up.
+    // A fan of launches traced serially. The engine is single-threaded and
+    // the app's `compute` layer parallelises whole solves, so this measures
+    // the serial cost that layer divides up.
     let fan: Vec<_> = (0..64)
         .map(|i| {
             (

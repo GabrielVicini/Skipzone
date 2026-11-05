@@ -1,4 +1,4 @@
-//! Validation B for the full 3D magnetoionic tracer: physical invariants
+//! Validation of the full 3D magnetoionic tracer: physical invariants
 //! with a magnetic field present. References: docs/derivations/
 //! appleton-hartree.md (mode structure, reciprocity basis) and
 //! haselgrove.md (equations of motion).
@@ -75,8 +75,7 @@ fn zero_field_makes_modes_bit_identical() {
         t.trace(&launch_point(), elev, az).unwrap()
     };
     let (o, x) = (run(Mode::Ordinary), run(Mode::Extraordinary));
-    // Bit-identical, not merely close: the zero-field code path must be
-    // exactly shared (validation invariant from the task spec).
+    // Bit-identical: O and X share the zero-field code path exactly.
     assert_eq!(o.end.r.get().to_bits(), x.end.r.get().to_bits());
     assert_eq!(o.end.colat.get().to_bits(), x.end.colat.get().to_bits());
     assert_eq!(o.end.lon.get().to_bits(), x.end.lon.get().to_bits());
@@ -215,7 +214,7 @@ fn modes_split_with_field() {
 }
 
 /// Near-vertical incidence: the mode cutoffs are the classic X = 1 (O) and
-/// X = 1 - Y (X mode). Launched 0.5 deg off vertical and due EAST, i.e.
+/// X = 1 - Y (X mode). Launched 0.5 deg off vertical and due east, i.e.
 /// out of the magnetic meridian: a meridian-plane near-vertical O-mode ray
 /// runs into the Spitze cusp (wave normal driven into field alignment at
 /// X -> 1, the Ellis-window degeneracy) where the tracer correctly reports
@@ -270,7 +269,7 @@ fn vertical_reflection_conditions_with_field() {
 /// its wave normal into field alignment at X -> 1 (the Ellis-window
 /// degeneracy, appleton-hartree.md section 6); the physical ray has a cusp
 /// and smooth integration is impossible there. Contract: the tracer fails
-/// with the typed step-collapse error - never a silently wrong path
+/// with the typed step-collapse error instead of returning a wrong path
 /// (haselgrove.md section 7).
 #[test]
 fn spitze_meridian_ray_fails_typed() {

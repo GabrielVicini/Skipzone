@@ -1,8 +1,8 @@
 //! Magnetic field models behind one trait. Conventions: components on the
 //! local (r_hat, theta_hat, phi_hat) basis in tesla; Jacobian entries are
-//! plain coordinate partials of those component functions (NOT covariant
-//! derivatives - the basis-rotation terms are handled once, exactly, in the
-//! canonical Haselgrove derivation, docs/derivations/haselgrove.md).
+//! plain coordinate partials of those component functions. The basis-rotation
+//! terms are handled once, in the Haselgrove derivation
+//! (docs/derivations/haselgrove.md).
 
 mod dipole;
 mod igrf;

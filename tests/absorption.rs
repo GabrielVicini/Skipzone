@@ -1,4 +1,4 @@
-//! Validation for absorption (build-order step 8): the integral of
+//! Validation for absorption, the integral of
 //! (omega/c) Im(n) along the ray. References: docs/derivations/
 //! haselgrove.md section 4 and the collisional sign conventions in
 //! conventions.md. Collision magnitudes in these scenarios are

@@ -7,13 +7,11 @@
 //!    Slow, derivative-free, robust.
 //! 2. `home_newton`: 2D Newton on (elevation, azimuth) -> (along, cross)
 //!    from a scan seed, Jacobian by finite differences of full traces.
-//!    FD is used here deliberately (documented exception to the
-//!    analytic-gradients rule): the analytic alternative is integrating
-//!    6x6 variational equations along each ray; the landing map is smooth
-//!    away from caustics, an FD Jacobian at 1e-4 rad resolves it to ~1e-6
-//!    relative, and Newton tolerates approximate Jacobians. Near caustics
-//!    (skip-zone edge) Newton legitimately fails and reports; it never
-//!    silently accepts a bad miss.
+//!    FD is an exception to the analytic-gradients rule: the alternative is
+//!    integrating 6x6 variational equations along each ray, while an FD
+//!    Jacobian at 1e-4 rad resolves the smooth landing map to ~1e-6 relative
+//!    and Newton tolerates approximate Jacobians. Near caustics (skip-zone
+//!    edge) Newton fails and reports it instead of accepting a bad miss.
 //!
 //! Multipath is first-class: a reachable target inside the maximum range
 //! generally has a low and a high ray; all brackets found are refined and

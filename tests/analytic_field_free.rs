@@ -1,4 +1,4 @@
-//! Validation A-C for the field-free tracer against solutions derived in
+//! Validation of the field-free tracer against solutions derived in
 //! docs/derivations/analytic-solutions.md. Every reference here is computed
 //! from that document's formulas, independently of the tracer.
 

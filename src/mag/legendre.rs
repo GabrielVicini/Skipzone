@@ -31,24 +31,17 @@ pub struct SchmidtTable {
 
 /// Recurrence coefficients, which depend only on the degree and order.
 ///
-/// These used to be recomputed inside [`schmidt`] on every call: 12 square
-/// roots on the diagonal and two more for each of the 91 (n, m) pairs of the
-/// vertical recurrence, 194 in all. `schmidt` runs once per field evaluation
-/// and the field is evaluated ~7 times per accepted integrator step, so that
-/// was 194 square roots of compile-time constants per step of every ray in
-/// every trace. Hoisting them changes no arithmetic - `sqrt` is exactly
-/// rounded, so a value computed once is the same f64 the loop was recomputing -
-/// and `schmidt_matches_recomputed_coefficients` pins that to the last bit.
+/// Computed once so [`schmidt`] avoids 194 square roots per field
+/// evaluation. `sqrt` is exactly rounded, so the cached values are the same
+/// f64 a per-call computation gives; `schmidt_matches_recomputed_coefficients`
+/// checks that to the last bit.
 struct Coefficients {
     /// `alpha_m` of the diagonal recurrence, indexed by m.
     alpha: [f64; NMAX + 1],
-    /// `(2n-1)`, `beta` and the RECIPROCAL of `gamma` for the vertical
-    /// recurrence, at `idx(n, m)`. The reciprocal is stored rather than
-    /// `gamma` itself so the recurrence multiplies where it used to divide:
-    /// three divisions per (n, m) pair, 273 per call, on the critical path of
-    /// every field evaluation. This is the one place in the hoist that is not
-    /// bit-identical - `v * (1/gamma)` carries two roundings where `v / gamma`
-    /// carries one, so results move by at most an ulp per term.
+    /// `(2n-1)`, `beta` and the reciprocal of `gamma` for the vertical
+    /// recurrence, at `idx(n, m)`. Storing `1/gamma` turns 273 divisions per
+    /// call into multiplications. `v * (1/gamma)` rounds twice where
+    /// `v / gamma` rounds once, so terms can differ from division by an ulp.
     a: [f64; TABLE_LEN],
     beta: [f64; TABLE_LEN],
     inv_gamma: [f64; TABLE_LEN],
@@ -80,11 +73,9 @@ fn coefficients() -> Coefficients {
     c
 }
 
-/// Built on first use rather than as a `const`, deliberately: the values must
-/// be the ones `f64::sqrt` returns, and a `const`-evaluable Newton iteration
-/// lands a ulp away from correctly-rounded on at least one of them (alpha_10).
-/// One relaxed atomic load per `schmidt` call is nothing against the ~190
-/// square roots it removes.
+/// Built on first use because the values must be the ones `f64::sqrt`
+/// returns; a `const`-evaluable Newton iteration lands an ulp away on at
+/// least one of them (alpha_10).
 static COEFFS: LazyLock<Coefficients> = LazyLock::new(coefficients);
 
 #[must_use]
@@ -135,11 +126,8 @@ pub fn schmidt(theta: f64) -> SchmidtTable {
 mod tests {
     use super::*;
 
-    /// The hoisted recurrence coefficients are the SAME f64 the hot loop used
-    /// to recompute. `sqrt` is exactly rounded, so this is an identity rather
-    /// than an approximation - but it is the identity the whole optimisation
-    /// rests on, so it is checked rather than assumed, `const_sqrt` against
-    /// `f64::sqrt` for every coefficient the table holds.
+    /// Every cached recurrence coefficient must equal a fresh `f64::sqrt`
+    /// computation bit for bit.
     #[test]
     #[allow(clippy::cast_precision_loss)]
     fn schmidt_matches_recomputed_coefficients() {

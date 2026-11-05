@@ -19,8 +19,8 @@
 //! almost exactly at the vertical and the apex refinement has the least to
 //! bracket.
 //!
-//! This is a diagnostic, not a test: it has no assertions and nothing runs it
-//! automatically. The equivalent invariants that ARE enforced live in
+//! This is a diagnostic with no assertions, and nothing runs it
+//! automatically. The enforced invariants live in
 //! `tests/analytic_field_free.rs`.
 //!
 //! ```text

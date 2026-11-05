@@ -51,9 +51,8 @@ pub fn central_angle(a: &SphericalPoint, b: &SphericalPoint) -> Radians {
     let dt = 0.5 * (a.colat.get() - b.colat.get());
     let dp = 0.5 * (a.lon.get() - b.lon.get());
     let h = dt.sin().powi(2) + a.colat.get().sin() * b.colat.get().sin() * dp.sin().powi(2);
-    // Clamp antipodal roundoff (h marginally above 1) without using min(),
-    // which would silently map a NaN from out-of-convention input to pi;
-    // this form propagates NaN honestly.
+    // Clamp antipodal roundoff (h slightly above 1) without `min()`, which
+    // would turn a NaN from bad input into pi instead of propagating it.
     let root = h.sqrt();
     let root = if root > 1.0 { 1.0 } else { root };
     Radians::new(2.0 * root.asin())

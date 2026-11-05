@@ -39,10 +39,10 @@ similar_names = "allow"
 many_single_char_names = "allow"
 # Module-qualified names like `mag::Dipole` read better than artificially shortened ones.
 module_name_repetitions = "allow"
-# Exact float comparisons here are deliberate and load-bearing: bit-identity
-# invariants (zero field => O == X) and exact-zero short-circuits (y == 0.0,
-# z == 0.0) that the validation suite requires; each site is commented.
+# Exact float comparisons back bit-identity invariants (zero field => O == X)
+# and exact-zero short-circuits (y == 0.0, z == 0.0) that the validation suite
+# requires; each site is commented.
 float_cmp = "allow"
-# Prose is formula-heavy (O mode, Appleton-Hartree, X = wp^2/w^2); policing
-# backticks on physics notation produces noise, not clarity.
+# Prose is formula-heavy (O mode, Appleton-Hartree, X = wp^2/w^2), and
+# backticks on physics notation only add noise.
 doc_markdown = "allow"

@@ -1,4 +1,4 @@
-//! Validation for homing (build-order step 9): both methods must agree
+//! Validation for homing: both methods must agree
 //! within stated tolerances, and against the QP closed form where it exists.
 
 mod common;
