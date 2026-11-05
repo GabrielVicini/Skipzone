@@ -18,8 +18,7 @@ const POWER_LEVELS_W: [f64; 10] = [
 
 const CONTROL_WIDTH: f32 = 176.0;
 
-pub fn overlay(ui: &mut Ui, session: &mut Session, _ui_state: &mut UiState) -> Option<Action> {
-    let mut action = None;
+pub fn overlay(ui: &mut Ui, session: &mut Session, _ui_state: &mut UiState, out: &mut Vec<Action>) {
     ui.vertical(|ui| {
         ui.set_width(CONTROL_WIDTH);
 
@@ -39,18 +38,17 @@ pub fn overlay(ui: &mut Ui, session: &mut Session, _ui_state: &mut UiState) -> O
                 .add_sized([ui.available_width(), 24.0], egui::Button::new("Antennas"))
                 .clicked()
             {
-                action = Some(Action::ShowAntennas);
+                out.push(Action::ShowAntennas);
             }
             ui.add_space(4.0);
             if ui
                 .add_sized([ui.available_width(), 24.0], egui::Button::new("Settings"))
                 .clicked()
             {
-                action = Some(Action::ShowSettings);
+                out.push(Action::ShowSettings);
             }
         });
     });
-    action
 }
 
 fn frequency(ui: &mut Ui, session: &mut Session) {

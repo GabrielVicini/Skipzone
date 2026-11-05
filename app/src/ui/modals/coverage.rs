@@ -19,23 +19,20 @@ use skipzone_predict::solve::mode_label;
 /// CPU, so even across every core a grid this size runs for many minutes.
 const LARGE_GRID: usize = 600;
 
-pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
+pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
     let mut open = ui_state.modals.coverage;
-    let result = super::chrome::dialog(
+    super::chrome::dialog(
         ctx,
         "coverage_dialog",
         "Area coverage",
         &mut open,
         vec2(460.0, 620.0),
-        |ui| body(ui, session, ui_state),
+        |ui| body(ui, session, ui_state, out),
     );
     ui_state.modals.coverage = open;
-    result.flatten()
 }
 
-fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
-    let mut action = None;
-
+fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
     ui.label(
         RichText::new(
             "One transmitter, a grid of receiver positions. Every grid point is a full \
@@ -51,7 +48,7 @@ fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Option<Ac
     let points = grid_controls(ui, session);
 
     ui.add_space(8.0);
-    action = action.or(run_controls(ui, session, points));
+    run_controls(ui, session, points, out);
 
     ui.add_space(8.0);
     progress(ui, session);
@@ -75,8 +72,6 @@ fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Option<Ac
         ui.add_space(8.0);
         summary(ui, &session.coverage.cells);
     }
-
-    action
 }
 
 /// The resolution and extent controls. Returns how many grid points the current
@@ -157,8 +152,7 @@ fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
     points
 }
 
-fn run_controls(ui: &mut Ui, session: &Session, points: usize) -> Option<Action> {
-    let mut action = None;
+fn run_controls(ui: &mut Ui, session: &Session, points: usize, out: &mut Vec<Action>) {
     let running = matches!(session.busy, Busy::Covering { .. });
     let busy_elsewhere = session.is_busy() && !running;
 
@@ -171,7 +165,7 @@ fn run_controls(ui: &mut Ui, session: &Session, points: usize) -> Option<Action>
             .on_hover_text("Runs off the UI thread; the map fills in as each point finishes.")
             .clicked()
         {
-            action = Some(Action::RunCoverage);
+            out.push(Action::RunCoverage);
         }
         if running
             && ui
@@ -179,7 +173,7 @@ fn run_controls(ui: &mut Ui, session: &Session, points: usize) -> Option<Action>
                 .on_hover_text("Stop the remaining calculations. Everything already drawn stays.")
                 .clicked()
         {
-            action = Some(Action::CancelCoverage);
+            out.push(Action::CancelCoverage);
         }
         // Available whenever there is anything on the map to clear, whether the
         // run finished normally or was cancelled. Not offered mid-run, where
@@ -191,10 +185,9 @@ fn run_controls(ui: &mut Ui, session: &Session, points: usize) -> Option<Action>
                 .on_hover_text("Clear the coverage tiles from the map.")
                 .clicked()
         {
-            action = Some(Action::ResetCoverage);
+            out.push(Action::ResetCoverage);
         }
     });
-    action
 }
 
 fn progress(ui: &mut Ui, session: &Session) {

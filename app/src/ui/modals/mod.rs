@@ -16,13 +16,11 @@ use egui::Context;
 use crate::state::{Session, UiState};
 use crate::ui::actions::Action;
 
-/// Draw whichever dialogs are open. Returns the first action any of them
-/// produced.
-pub fn draw(ctx: &Context, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
-    let best = best_freq::show(ctx, session, ui_state);
-    let cover = coverage::show(ctx, session, ui_state);
+/// Draw whichever dialogs are open, pushing what they produced to `out`.
+pub fn draw(ctx: &Context, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
+    best_freq::show(ctx, session, ui_state, out);
+    coverage::show(ctx, session, ui_state, out);
     settings::show(ctx, session, ui_state);
     antennas::show(ctx, session, ui_state);
     about::show(ctx, ui_state);
-    best.or(cover)
 }

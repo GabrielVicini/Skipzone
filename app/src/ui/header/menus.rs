@@ -6,11 +6,10 @@ use crate::state::{Menu, UiState};
 use crate::ui::actions::Action;
 use crate::ui::widgets::menu;
 
-pub fn menu_bar(ui: &mut Ui, ui_state: &mut UiState) -> Option<Action> {
+pub fn menu_bar(ui: &mut Ui, ui_state: &mut UiState, out: &mut Vec<Action>) {
     let open = &mut ui_state.menu;
-    let mut action = None;
 
-    action = action.or(menu::dropdown(
+    out.extend(menu::dropdown(
         ui,
         open,
         Menu::PointToPoint,
@@ -26,7 +25,7 @@ pub fn menu_bar(ui: &mut Ui, ui_state: &mut UiState) -> Option<Action> {
         },
     ));
 
-    action = action.or(menu::dropdown(
+    out.extend(menu::dropdown(
         ui,
         open,
         Menu::CoverageMaps,
@@ -34,7 +33,7 @@ pub fn menu_bar(ui: &mut Ui, ui_state: &mut UiState) -> Option<Action> {
         |ui| menu::item(ui, "Area coverage").then_some(Action::ShowCoverage),
     ));
 
-    action.or(menu::dropdown(ui, open, Menu::Help, "Help", |ui| {
+    out.extend(menu::dropdown(ui, open, Menu::Help, "Help", |ui| {
         menu::item(ui, "About").then_some(Action::ShowAbout)
-    }))
+    }));
 }

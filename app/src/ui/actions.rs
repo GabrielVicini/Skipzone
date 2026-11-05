@@ -34,6 +34,18 @@ pub enum Action {
     ShowAbout,
 }
 
+/// Apply every action a frame produced, in the order they were emitted.
+pub fn apply_all(
+    actions: Vec<Action>,
+    session: &mut Session,
+    ui_state: &mut UiState,
+    map: &mut MapView,
+) {
+    for action in actions {
+        apply(action, session, ui_state, map);
+    }
+}
+
 pub fn apply(action: Action, session: &mut Session, ui_state: &mut UiState, map: &mut MapView) {
     match action {
         Action::Calculate => {
@@ -60,5 +72,30 @@ pub fn apply(action: Action, session: &mut Session, ui_state: &mut UiState, map:
         Action::ShowSettings => ui_state.modals.settings = true,
         Action::ShowAntennas => ui_state.modals.antennas = true,
         Action::ShowAbout => ui_state.modals.about = true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jobs::Jobs;
+
+    /// Every action of a frame is applied, not just the first one.
+    #[test]
+    fn every_action_in_a_frame_is_applied() {
+        let mut session = Session::new(Jobs::inline(|| {}));
+        let mut ui_state = UiState::new(&session);
+        let mut map = MapView::new(&egui::Context::default());
+
+        apply_all(
+            vec![Action::ShowSettings, Action::TuneTo(7.1), Action::ShowAbout],
+            &mut session,
+            &mut ui_state,
+            &mut map,
+        );
+
+        assert!(ui_state.modals.settings);
+        assert!((session.inputs.freq_mhz - 7.1).abs() < 1e-12);
+        assert!(ui_state.modals.about);
     }
 }

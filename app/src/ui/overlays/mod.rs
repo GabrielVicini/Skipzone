@@ -20,13 +20,14 @@ use super::map::MapView;
 /// Gap between a floating group and the window edge.
 const MARGIN: f32 = 12.0;
 
-/// Draw every floating group. Returns the first action any of them produced.
+/// Draw every floating group, pushing what they produced to `out`.
 pub fn draw(
     ctx: &Context,
     session: &mut Session,
     ui_state: &mut UiState,
     map: &MapView,
-) -> Option<Action> {
+    out: &mut Vec<Action>,
+) {
     // The map's visible area: the window minus the header and, when it is open,
     // the trace panel. Everything floats inside this, so opening the panel
     // slides the right-hand groups across instead of hiding them behind it.
@@ -39,8 +40,8 @@ pub fn draw(
     };
 
     // Right edge, starting just below the solid header.
-    let controls = corner_area(ctx, "overlay_controls", over_map, Align2::RIGHT_TOP, |ui| {
-        controls::overlay(ui, session, ui_state)
+    corner_area(ctx, "overlay_controls", over_map, Align2::RIGHT_TOP, |ui| {
+        controls::overlay(ui, session, ui_state, out);
     });
 
     // Bottom left: time and date.
@@ -53,15 +54,13 @@ pub fn draw(
     );
 
     // Bottom right: map framing.
-    let tools = corner_area(
+    corner_area(
         ctx,
         "overlay_map_tools",
         over_map,
         Align2::RIGHT_BOTTOM,
-        |ui| map_tools::overlay(ui, ui_state, map.zoom()),
+        |ui| map_tools::overlay(ui, ui_state, map.zoom(), out),
     );
-
-    controls.inner.or(tools.inner)
 }
 
 /// An `Area` pinned to one corner of `bounds`, inset by [`MARGIN`].

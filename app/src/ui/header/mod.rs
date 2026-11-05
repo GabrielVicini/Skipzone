@@ -12,27 +12,22 @@ use crate::state::{Session, UiState};
 use crate::ui::actions::Action;
 use crate::ui::theme;
 
-/// Draw the header and report any menu selection. Records the bar's height in
+/// Draw the header and push any menu selection to `out`. Records the bar's height in
 /// `ui_state` so the floating overlays can start just below it.
-pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
+pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
     let panel = Panel::top("header")
         .resizable(false)
         .frame(theme::header_frame())
         .show(ui, |ui| {
-            let action = ui
-                .horizontal(|ui| {
-                    let action = menus::menu_bar(ui, ui_state);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        status::status(ui, session);
-                    });
-                    action
-                })
-                .inner;
+            ui.horizontal(|ui| {
+                menus::menu_bar(ui, ui_state, out);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    status::status(ui, session);
+                });
+            });
             ui.add_space(2.0);
             stations::rows(ui, session, ui_state);
-            action
         });
 
     ui_state.header_height = panel.response.rect.height();
-    panel.inner
 }

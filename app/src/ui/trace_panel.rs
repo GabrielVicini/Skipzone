@@ -23,11 +23,11 @@ const MIN_WIDTH: f32 = 320.0;
 const MAX_WIDTH: f32 = 900.0;
 
 /// Draw the panel when it is open, and record the width it took so the floating
-/// overlays can inset by it. Returns any action its buttons produced.
-pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
+/// overlays can inset by it. Pushes any action its buttons produced.
+pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
     if !ui_state.trace_open {
         ui_state.right_inset = 0.0;
-        return None;
+        return;
     }
 
     let busy = session.is_busy();
@@ -54,8 +54,7 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
             ui.separator();
             ScrollArea::vertical()
                 .auto_shrink([false, false])
-                .show(ui, |ui| body(ui, solve, busy, error.as_deref()))
-                .inner
+                .show(ui, |ui| body(ui, solve, busy, error.as_deref(), out));
         });
 
     // Measured from the panel's left edge to the window's right edge rather
@@ -67,12 +66,15 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
         ui_state.trace_open = false;
         ui_state.right_inset = 0.0;
     }
-    panel.inner
 }
 
-fn body(ui: &mut Ui, solve: &mut SolveResults, busy: bool, error: Option<&str>) -> Option<Action> {
-    let mut action = None;
-
+fn body(
+    ui: &mut Ui,
+    solve: &mut SolveResults,
+    busy: bool,
+    error: Option<&str>,
+    out: &mut Vec<Action>,
+) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         if ui
@@ -80,7 +82,7 @@ fn body(ui: &mut Ui, solve: &mut SolveResults, busy: bool, error: Option<&str>) 
             .on_hover_text("Trace the path again at the current inputs")
             .clicked()
         {
-            action = Some(Action::Calculate);
+            out.push(Action::Calculate);
         }
         if busy {
             ui.add(egui::Spinner::new().size(14.0));
@@ -108,7 +110,7 @@ fn body(ui: &mut Ui, solve: &mut SolveResults, busy: bool, error: Option<&str>) 
         if error.is_none() {
             ui.label(RichText::new("Press Calculate to trace the path.").color(MUTED));
         }
-        return action;
+        return;
     };
 
     panels::verdict_chip(ui, out);
@@ -128,6 +130,4 @@ fn body(ui: &mut Ui, solve: &mut SolveResults, busy: bool, error: Option<&str>) 
         panels::profile_panel(ui, &solve.profile);
     }
     ui.add_space(6.0);
-
-    action
 }

@@ -25,7 +25,7 @@ const NOISE_COLOR: Color32 = Color32::from_rgb(0xF2, 0x9A, 0x76);
 const LOSS_COLOR: Color32 = Color32::from_rgb(0xC0, 0xA6, 0xF0);
 const ABSORPTION_COLOR: Color32 = Color32::from_rgb(0xF2, 0xD3, 0x5C);
 
-pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) -> Option<Action> {
+pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState, out: &mut Vec<Action>) {
     let busy = session.is_busy();
     let tuned_mhz = session.inputs.freq_mhz;
     let threshold_db = session.inputs.snr_threshold_db;
@@ -50,10 +50,10 @@ pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) -> Opt
                     tuned_mhz,
                     threshold_db,
                 },
-            )
+                out,
+            );
         },
-    )
-    .flatten()
+    );
 }
 
 /// Scalars the charts need that are not part of the sweep result.
@@ -69,8 +69,9 @@ fn body(
     points: &[SweepPoint],
     best: Option<SweepBest>,
     params: Params,
-) -> Option<Action> {
-    let mut action = controls(ui, best, params);
+    out: &mut Vec<Action>,
+) {
+    controls(ui, best, params, out);
 
     if points.is_empty() {
         ui.add_space(8.0);
@@ -82,7 +83,7 @@ fn body(
             )
             .color(MUTED),
         );
-        return action;
+        return;
     }
 
     if let Some(best) = best {
@@ -98,20 +99,16 @@ fn body(
     let hovered = charts(ui, points, best, params);
     readout(ui, points, hovered, params);
 
-    if action.is_none()
-        && let Some(freq) = hovered
+    if let Some(freq) = hovered
         && ui
             .button(format!("Tune to {:.2} MHz", nearest(points, freq).freq_mhz))
             .clicked()
     {
-        action = Some(Action::TuneTo(nearest(points, freq).freq_mhz));
+        out.push(Action::TuneTo(nearest(points, freq).freq_mhz));
     }
-
-    action
 }
 
-fn controls(ui: &mut Ui, best: Option<SweepBest>, params: Params) -> Option<Action> {
-    let mut action = None;
+fn controls(ui: &mut Ui, best: Option<SweepBest>, params: Params, out: &mut Vec<Action>) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         if ui
@@ -125,7 +122,7 @@ fn controls(ui: &mut Ui, best: Option<SweepBest>, params: Params) -> Option<Acti
             )
             .clicked()
         {
-            action = Some(Action::BestFrequency);
+            out.push(Action::BestFrequency);
         }
         if params.busy {
             ui.add(egui::Spinner::new().size(14.0));
@@ -135,10 +132,9 @@ fn controls(ui: &mut Ui, best: Option<SweepBest>, params: Params) -> Option<Acti
                 .button(format!("Tune to best ({:.2} MHz)", best.point.freq_mhz))
                 .clicked()
         {
-            action = Some(Action::TuneTo(best.point.freq_mhz));
+            out.push(Action::TuneTo(best.point.freq_mhz));
         }
     });
-    action
 }
 
 /// The three charts. Returns the frequency under the pointer, if any.

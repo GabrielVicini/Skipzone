@@ -6,8 +6,7 @@ use crate::state::UiState;
 use crate::ui::actions::Action;
 use crate::ui::theme::{self, MUTED};
 
-pub fn overlay(ui: &mut Ui, ui_state: &mut UiState, zoom: f64) -> Option<Action> {
-    let mut action = None;
+pub fn overlay(ui: &mut Ui, ui_state: &mut UiState, zoom: f64, out: &mut Vec<Action>) {
     theme::floating_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.checkbox(
@@ -20,13 +19,13 @@ pub fn overlay(ui: &mut Ui, ui_state: &mut UiState, zoom: f64) -> Option<Action>
                 .on_hover_text("Frame TX and RX")
                 .clicked()
             {
-                action = Some(Action::FitPath);
+                out.push(Action::FitPath);
             }
             if ui.button("\u{2212}").clicked() {
-                action = Some(Action::ZoomOut);
+                out.push(Action::ZoomOut);
             }
             if ui.button("+").clicked() {
-                action = Some(Action::ZoomIn);
+                out.push(Action::ZoomIn);
             }
             ui.label(
                 RichText::new(format!("z{zoom:.1}"))
@@ -36,5 +35,4 @@ pub fn overlay(ui: &mut Ui, ui_state: &mut UiState, zoom: f64) -> Option<Action>
             );
         });
     });
-    action
 }
