@@ -1,10 +1,10 @@
 //! Shared dialog chrome: a draggable, resizable window with a scrolling body.
 //!
-//! These are deliberately NOT modal. An operator reads the sweep charts while
-//! moving TX on the map, or keeps Settings open while re-running - so the rest
-//! of the interface stays live and clickable behind an open dialog, and several
-//! can be open at once. The window's own title bar carries the ✕ and the drag
-//! handle; the bottom-right corner resizes it.
+//! These are not modal: an operator reads the sweep charts while moving TX on
+//! the map, or keeps Settings open while re-running, so the rest of the
+//! interface stays live and several dialogs can be open at once. The title bar
+//! carries the close button and the drag handle; the bottom-right corner
+//! resizes it.
 
 use egui::{Context, Id, ScrollArea, Ui, Vec2, Window};
 

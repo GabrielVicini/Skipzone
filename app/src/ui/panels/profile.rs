@@ -1,5 +1,5 @@
 //! The vertical-profile panel: the electron density, collision, and field
-//! quantities actually sampled along the vertical at the path midpoint.
+//! quantities sampled along the vertical at the path midpoint.
 
 use egui::{CollapsingHeader, Ui};
 

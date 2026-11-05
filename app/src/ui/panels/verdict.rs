@@ -1,16 +1,14 @@
 //! The headline verdict chip, and the per-layer breakdown under it.
 //!
-//! This is the label the whole judgment layer exists to get right. It reports
-//! three separate facts rather than one, because they really are separate:
+//! It reports three separate facts:
 //!
 //! 1. whether the geometry closes,
 //! 2. whether the signal clears the threshold,
 //! 3. whether the layer carrying it is reliably there at all.
 //!
-//! The third is why the deterministic verdict and the sporadic-E one are drawn
-//! apart. A path that needs an Es sheet is not "usable" in the same sense as an
-//! F2 path; folding the two into one yes/no is what let a position inside the F2
-//! skip zone read as though nothing could ever reach it.
+//! The third is why the deterministic and sporadic-E verdicts are drawn apart:
+//! a path that needs an Es sheet is not usable in the same sense as an F2 path,
+//! and one yes/no would make the F2 skip zone look unreachable.
 
 use egui::{CornerRadius, Margin, RichText, Stroke, Ui};
 
@@ -55,14 +53,11 @@ pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
         None => match best_es {
             Some(s) => (
                 WARN,
-                // TWO different probabilities, and they must not be conflated.
-                // `s.probability` is how often the Es sheet EXISTS - a climatological
-                // occurrence rate, and the one number here with a defensible level.
-                // `confidence_label` is whether the signal clears the threshold GIVEN
-                // that it does, and only its ORDERING is validated (see
-                // `noise::PREDICTIVE_SPREAD_DB`), so it is stated as a word.
-                // Multiplying the two would produce a joint percentage that looks
-                // far more precise than either input supports.
+                // Two different probabilities. `s.probability` is how often the Es
+                // sheet exists, a climatological occurrence rate. `confidence_label`
+                // is whether the signal clears the threshold given that it does;
+                // only its ordering is validated (see `noise::PREDICTIVE_SPREAD_DB`),
+                // so it is a word. Multiplying them would suggest false precision.
                 format!(
                     "SPORADIC E ONLY - no F2 or E path at this range. Es gives SNR {:.1} dB, \
                      {} if the sheet is there - and the sheet is present about {:.0} % of \
@@ -88,8 +83,8 @@ pub fn verdict_chip(ui: &mut Ui, out: &SolveOutcome) {
     mode_breakdown(ui, out);
 }
 
-/// When nothing at all connected, say WHY in the headline rather than leaving
-/// "NO PATH" to mean four different things.
+/// When nothing connected, say why in the headline, since "NO PATH" can mean
+/// four different things.
 fn no_path_headline(out: &SolveOutcome) -> String {
     let f2 = out.mode_reports.first();
     match f2.map(|r| r.status) {

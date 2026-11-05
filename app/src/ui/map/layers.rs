@@ -1,18 +1,13 @@
 //! Everything drawn on top of the basemap, in the order it is drawn.
 //!
-//! These were `walkers` plugins. They are now plain functions over a painter and
-//! a [`Proj`], which is the whole of what they ever needed: none of them made
-//! engine calls, and none of them wanted anything from the tile layer except a
-//! way to turn degrees into pixels.
+//! Plain functions over a painter and a [`Proj`]; none of them call the engine.
 //!
-//! # The world is finite and these functions know it
+//! # Clipping
 //!
-//! Every layer here clips to [`Proj::world_rect`]. That is the fix for shading
-//! and tiles running off the edge of the map into the void: the void is not a
-//! place, so nothing is painted there. Longitude, by contrast, is *not* clipped -
-//! it wraps, and each layer offers the world at -360, 0 and +360 degrees so a
-//! feature straddling the antimeridian is drawn whole from both sides instead of
-//! being dropped (which is what left a hole in a full-extent coverage run).
+//! Every layer clips to [`Proj::world_rect`], so nothing is painted beyond the
+//! poles. Longitude is not clipped but wraps: each layer draws the world at
+//! -360, 0 and +360 degrees so a feature straddling the antimeridian is drawn
+//! whole.
 
 use egui::epaint::{Vertex, WHITE_UV};
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
@@ -29,7 +24,7 @@ use super::projection::{Proj, unwrap_run};
 /// most two of these and the rest are culled on their bounding box.
 const WORLD_SHIFTS: [f64; 3] = [-360.0, 0.0, 360.0];
 
-// --- Graticule -----------------------------------------------------------
+// Graticule
 
 const GRATICULE: Color32 = Color32::from_rgba_premultiplied(0x3A, 0x46, 0x50, 0x90);
 const GRATICULE_MAJOR: Color32 = Color32::from_rgba_premultiplied(0x54, 0x64, 0x72, 0xB0);
@@ -43,10 +38,8 @@ const MIN_GRID_PX: f64 = 70.0;
 
 /// The lat/lon lattice, with degree labels down the left edge and along the top.
 ///
-/// This is the part of the redesign that actually answers "why does it bend at
-/// the top and bottom?" - under this projection it does not. The graticule is a
-/// square grid at every latitude, so the shape of a path on screen is the shape
-/// of the path, and the eye has a ruler to read it against.
+/// Under this projection the graticule is a square grid at every latitude, so
+/// it gives the eye a ruler for a path's shape.
 pub fn graticule(painter: &Painter, proj: &Proj) {
     let step = GRID_STEPS
         .iter()
@@ -128,7 +121,7 @@ fn format_lon(lon: f64) -> String {
     }
 }
 
-// --- Day/night -----------------------------------------------------------
+// Day/night
 
 /// Width of the twilight ramp, degrees of solar elevation below the horizon
 /// (astronomical twilight). Peak night tint alpha (0-255); kept light so the
@@ -152,10 +145,8 @@ fn night_alpha(elev_deg: f64) -> u8 {
 /// the UTC/date inputs and makes no engine calls, so it moves live as the time
 /// control changes.
 ///
-/// The mesh is built over the intersection of the viewport with the world, and
-/// nowhere else. It used to be built over the whole viewport, which is why the
-/// shading carried on past the top and bottom of the map into empty space - it
-/// was evaluating a solar elevation at latitudes that do not exist.
+/// The mesh is built only over the intersection of the viewport with the
+/// world, so no shading is drawn at latitudes beyond the poles.
 pub fn terminator(painter: &Painter, proj: &Proj, decl_deg: f64, sub_lon_deg: f64) {
     let area = proj.rect().intersect(proj.world_rect());
     if area.width() < 1.0 || area.height() < 1.0 {
@@ -229,7 +220,7 @@ pub fn terminator(painter: &Painter, proj: &Proj, decl_deg: f64, sub_lon_deg: f6
     }
 }
 
-// --- Coastline -----------------------------------------------------------
+// Coastline
 
 /// Colours for the debug overlay's two layers: land outlines and lake outlines.
 /// Chosen to read over both the basemap and the night shading without competing
@@ -308,17 +299,10 @@ fn draw_rings(
             continue;
         }
 
-        // The ring's longitude span, put on the continuous scale by moving its
-        // WEST edge to the copy nearest the camera and adding the span - not by
-        // unwrapping the two edges independently.
-        //
-        // Unwrapping them independently is what made whole continents vanish.
-        // Natural Earth's land layer holds Africa, Europe and Asia as a single
-        // ring, joined at Suez, so its bounds run the full -180 to 180. The east
-        // edge relative to the west is then `wrap_lon(360)`, which is zero: the
-        // bounding box collapsed to a line with no width, missed the viewport as
-        // soon as the map was zoomed in far enough, and the entire landmass was
-        // culled before a single segment of it was drawn.
+        // The ring's longitude span on the continuous scale near the camera
+        // (see `Proj::span_near_camera`). Unwrapping the two edges separately
+        // would collapse a full-width ring such as Africa-Eurasia, whose bounds
+        // run -180 to 180, to zero width and cull it.
         let (west, east) = proj.span_near_camera(min_lon, max_lon);
         let bbox = Rect::from_two_pos(
             proj.project_unwrapped(min_lat, west),
@@ -367,8 +351,8 @@ fn draw_rings(
 /// A continent's ring is thousands of segments long and, zoomed in, three of
 /// them are visible. Handing the whole ring to the tessellator makes it walk and
 /// feather every one of those segments each frame. This walks the ring once,
-/// cheaply, and hands over only the runs that survive - which is most of the
-/// difference between the map feeling immediate and feeling like treacle.
+/// cheaply and hands over only the visible runs, which keeps the map
+/// responsive.
 fn stroke_clipped(
     painter: &Painter,
     view: Rect,
@@ -396,20 +380,16 @@ fn stroke_clipped(
     }
 }
 
-// --- Area coverage -------------------------------------------------------
+// Area coverage
 
 /// Area coverage tiles: one filled rectangle per *computed* grid point.
 ///
-/// There is no interpolation, no smoothing and no fill between points. Each
-/// rectangle covers exactly the grid cell its solve stands for, so at a coarse
-/// resolution the map is visibly blocky - which is the truth about how much was
-/// computed. The cure for blockiness is raising the resolution setting, which
-/// runs more solves.
+/// No interpolation or smoothing: each rectangle covers the grid cell its solve
+/// stands for, so a coarse resolution looks blocky.
 ///
-/// Under this projection a cell is a rectangle of the same size wherever it sits,
-/// because that is what a lat/lon box is. It draws as one whole rectangle even
-/// when it straddles the antimeridian, because the run is offered at all three
-/// world positions and whichever ones overlap the view are painted.
+/// Under this projection a cell is the same size everywhere. It draws whole
+/// even across the antimeridian, because it is offered at all three world
+/// positions.
 pub fn coverage(painter: &Painter, proj: &Proj, cells: &[CoverageCell], alpha: u8) {
     if cells.is_empty() {
         return;
@@ -423,8 +403,8 @@ pub fn coverage(painter: &Painter, proj: &Proj, cells: &[CoverageCell], alpha: u
         let half = 0.5 * cell.step_deg;
         // A row is only computed if its centre is inside the latitude limit, so
         // the outermost rows still reach half a step past it. Clamp the drawn
-        // edge to the pole: the tile was genuinely computed and must be shown,
-        // but it cannot extend past the world.
+        // edge to the pole: the tile was computed and is shown, but not past
+        // the world.
         let (lat_s, lat_n) = (
             (cell.lat - half).max(-LAT_LIMIT_DEG),
             (cell.lat + half).min(LAT_LIMIT_DEG),
@@ -435,8 +415,6 @@ pub fn coverage(painter: &Painter, proj: &Proj, cells: &[CoverageCell], alpha: u
         // Three answers, three hues. A deterministic path takes the SNR ramp at
         // full saturation; a position only sporadic E can reach takes the Es
         // hue, faded by how likely that opening is; nothing at all stays grey.
-        // Painting the second as the third is what made the dead zone look hard
-        // when it was not.
         let base = if cell.found_path() {
             if cell.es_only() {
                 theme::coverage_es_color(cell.snr_db, cell.probability)
@@ -467,7 +445,7 @@ pub fn coverage(painter: &Painter, proj: &Proj, cells: &[CoverageCell], alpha: u
     }
 }
 
-// --- Ray paths -----------------------------------------------------------
+// Ray paths
 
 /// Every hop of every visible solution, then the two stations on top.
 pub fn paths(

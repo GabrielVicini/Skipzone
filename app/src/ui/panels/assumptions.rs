@@ -11,24 +11,15 @@ pub fn assumptions_panel(ui: &mut Ui, a: &Assumptions) {
         .default_open(false)
         .show(ui, |ui| {
             // Inside its own horizontal scroll, like every other wide readout.
-            //
-            // This grid is the widest thing in the trace panel: several of its
-            // values are whole sentences ("night at midpoint (still active on
-            // any sunlit part)") set in monospace, and a grid cell does not
-            // wrap them. Without this the grid grew the panel's content past
-            // the panel, and egui reports an over-wide panel by sliding its
-            // *left* edge right to the width cap - so the central panel, which
-            // is laid out from that edge and drawn afterwards, was handed a
-            // rectangle overlapping the trace panel and painted the map over
-            // the top of it. Opening this section made the panel disappear
-            // behind the map. A scroll area clips instead of growing, so the
-            // content can no longer move the panel's edge at all.
+            // Some values are whole sentences in monospace that a grid cell
+            // does not wrap. If the content outgrew the panel, egui would slide
+            // the panel's left edge and the map would be painted over it; a
+            // scroll area clips instead.
             wide_table(ui, "assume_scroll", |ui| {
                 data_grid(ui, "assume", 2, |ui| {
                     kv(ui, "foF2 (midpoint)", format!("{:.2} MHz", a.fof2_mhz));
-                    // Shown as three samples of ONE field, not as three numbers: if
-                    // they differ, the F2 layer really does vary along the path,
-                    // which is the thing the gridded backend exists to do.
+                    // Three samples of one field: if they differ, the F2 layer
+                    // varies along the path.
                     kv(
                         ui,
                         "  at TX / RX",

@@ -1,37 +1,19 @@
 //! The basemap: land and water, rasterised once from the bundled Natural Earth
 //! polygons into a single equirectangular image.
 //!
-//! # Why this replaced fetched tiles
+//! Built from local data rather than fetched tiles, so the map is never blank
+//! waiting for the network, is not tied to Web Mercator, and works offline. It
+//! uses the same coastline geometry the solver classifies ground reflections
+//! against, so a reflection drawn in the sea is in the sea the model uses. It
+//! costs one rasterisation at startup.
 //!
-//! The map used to be an OpenStreetMap slippy-tile layer. Three things were
-//! wrong with that and none of them was fixable inside it:
+//! # Resolution
 //!
-//! * **It was black until it arrived.** Every tile is an HTTP request. On the
-//!   first frame, and again after every zoom step, the whole map is unpainted -
-//!   which reads as the application flashing black, because it is.
-//! * **It forced Web Mercator.** Tiles exist on one projection. That projection
-//!   has no poles, distorts every coverage cell by `1/cos(lat)`, and is the
-//!   reason the polar grid rows had to be discarded before they could be drawn.
-//! * **It made a ray tracer depend on a web service.** The engine crate is
-//!   deliberately buildable with nothing but `std` and two crates; having the
-//!   application that drives it go dark without a network was the wrong shape.
-//!
-//! The bundled coastline data was already there, already parsed, and already
-//! trusted enough that per-hop ground constants are decided from it. Drawing the
-//! map from it costs one rasterisation at startup and nothing afterwards, and
-//! the picture on screen is then the *same* geometry the solver classified
-//! against - so a reflection dot sitting in the sea is sitting in the sea the
-//! model agrees is there.
-//!
-//! # Resolution, and being honest about it
-//!
-//! [`TEX_W`]x[`TEX_H`] gives about 0.18 degrees per texel, roughly 20 km. That
-//! is the same order as the generalisation already present in the 1:50m source,
-//! so the raster throws away very little that the data contained. Zoomed in
-//! past that it goes soft, and the full-detail coastline stroke drawn over it
-//! (see [`super::layers::coastline`]) is what keeps the shoreline crisp. This is
-//! a propagation map: a hop lands hundreds of kilometres from the last one, and
-//! nothing in the model resolves a bay.
+//! [`TEX_W`]x[`TEX_H`] gives about 0.18 degrees per texel, roughly 20 km, the
+//! same order as the generalisation of the 1:50m source. Zoomed in further the
+//! raster goes soft, and the coastline stroke drawn over it (see
+//! [`super::layers::coastline`]) keeps the shoreline crisp. Hops land hundreds
+//! of kilometres apart, so nothing in the model resolves a bay.
 
 use egui::{Color32, ColorImage, Context, TextureHandle, TextureOptions, TextureWrapMode};
 
@@ -44,9 +26,8 @@ pub const TEX_H: usize = 1024;
 
 /// Deep water, and the colour of anything the land layer does not cover.
 pub const OCEAN: Color32 = Color32::from_rgb(0x0E, 0x1C, 0x28);
-/// Land. Deliberately a low-saturation grey a little lighter than the water:
-/// the map is a backdrop for the coverage ramp and the ray paths, and every
-/// colour it spends is one those cannot use.
+/// Land: a low-saturation grey a little lighter than the water, leaving the
+/// colours for the coverage ramp and the ray paths.
 pub const LAND: Color32 = Color32::from_rgb(0x27, 0x2E, 0x33);
 /// Lakes read as water, because to the ground-reflection model they are water.
 pub const LAKE: Color32 = Color32::from_rgb(0x11, 0x24, 0x33);
@@ -72,11 +53,9 @@ pub fn load(ctx: &Context) -> Option<TextureHandle> {
         fill_shape(&mut pixels, shape, LAKE);
     }
     let image = ColorImage::new([TEX_W, TEX_H], pixels);
-    // Repeating in `u` is what lets the whole world be drawn as ONE quad at any
-    // camera longitude: the quad's left edge sits at whatever longitude the
-    // camera put it, and the texture coordinate for that longitude is simply
-    // allowed to run past 1 and wrap. Clamping instead would smear the edge
-    // column of the raster across the antimeridian.
+    // Repeating in `u` lets the whole world be drawn as one quad at any camera
+    // longitude: the texture coordinate for the quad's left edge runs past 1
+    // and wraps. Clamping would smear the edge column across the antimeridian.
     let options = TextureOptions {
         wrap_mode: TextureWrapMode::Repeat,
         ..TextureOptions::LINEAR
@@ -87,11 +66,8 @@ pub fn load(ctx: &Context) -> Option<TextureHandle> {
 /// Texture `u` coordinate of a longitude, on the raster's own absolute scale
 /// where `u = 0` is exactly 180 degrees west.
 ///
-/// This is the alignment the basemap lives or dies by. Drawing the quad with
-/// `u` running 0 to 1 regardless of where the camera is put column zero of the
-/// raster at the camera's left edge instead of at 180 W, which slid the whole
-/// painted world sideways underneath the coastline vectors by exactly the
-/// camera longitude.
+/// Using this, rather than `u` from 0 to 1 at the camera's edges, keeps the
+/// raster aligned with the coastline vectors at any camera longitude.
 #[must_use]
 pub fn u_of_lon(lon: f64) -> f32 {
     #[allow(clippy::cast_possible_truncation)]
@@ -115,11 +91,10 @@ fn lon_col(lon: f64) -> f64 {
 
 /// Scanline fill of one shape - all its rings at once, under the even-odd rule.
 ///
-/// Taking the rings as a group is what handles holes: a row crossing a
-/// continent, then a lake carved out of it, then an island in that lake,
-/// accumulates four crossings and fills the two spans that are really land.
-/// This is the same rule [`coastline::Coastline::classify`] applies point by
-/// point, so the picture and the classification cannot disagree.
+/// Taking the rings as a group handles holes: a row crossing a continent, a
+/// lake in it and an island in the lake accumulates four crossings and fills
+/// the two land spans. [`coastline::Coastline::classify`] applies the same rule
+/// point by point, so the picture matches the classification.
 fn fill_shape(pixels: &mut [Color32], rings: &[Outline], color: Color32) {
     let (mut min_lat, mut max_lat) = (f64::MAX, f64::MIN);
     for ring in rings {
@@ -131,8 +106,8 @@ fn fill_shape(pixels: &mut [Color32], rings: &[Outline], color: Color32) {
     }
 
     // Rows whose centre lies inside the shape's latitude span, clamped to the
-    // raster. A sliver thinner than one row simply does not survive at this
-    // resolution, which is the honest outcome for a 20 km grid.
+    // raster. A sliver thinner than one row does not survive at this
+    // resolution.
     let row_of = |lat: f64| {
         #[allow(clippy::cast_precision_loss)]
         let h = TEX_H as f64;
@@ -219,8 +194,7 @@ mod tests {
         assert_eq!(at(-25.0, 134.0), LAND, "central Australia");
     }
 
-    /// Every texel must be written to something. An unpainted raster is the
-    /// black flash the tile layer used to produce, in a new costume.
+    /// Every texel must be written; an unpainted texel would show as black.
     #[test]
     fn the_whole_world_is_painted() {
         let pixels = vec![OCEAN; TEX_W * TEX_H];

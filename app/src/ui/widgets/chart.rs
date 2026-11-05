@@ -2,7 +2,7 @@
 //!
 //! Written rather than pulled in as a dependency because what the sweep needs
 //! is specific: series that legitimately contain non-finite values (no path
-//! means an SNR of negative infinity, which must be a GAP in the line, not a
+//! means an SNR of negative infinity, drawn as a gap in the line rather than a
 //! spike to the bottom of the axis), horizontal reference rules for thresholds,
 //! and vertical markers for the tuned and best frequencies.
 //!
@@ -44,7 +44,7 @@ impl<'a> Series<'a> {
         }
     }
 
-    /// One dot per sample, for showing where the sweep actually evaluated.
+    /// One dot per sample, showing where the sweep evaluated.
     #[must_use]
     pub fn dots(color: Color32, points: &'a [(f64, f64)]) -> Self {
         Self {

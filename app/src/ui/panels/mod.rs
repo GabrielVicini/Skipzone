@@ -1,10 +1,9 @@
-//! The trace readouts, one file per panel. Deliberately dense and complete
-//! rather than tidy: this is an instrument panel, not a product screen.
+//! The trace readouts, one file per panel. Dense and complete, like an
+//! instrument panel.
 //!
-//! Each panel is a free function over the result types and renders a single
-//! collapsing section, so they can be composed in any order - today they all
-//! live in the Calculate dialog. Adding a readout means adding a sibling file
-//! here and one call where it belongs, not editing an existing panel.
+//! Each panel is a free function over the result types that renders one
+//! collapsing section, so they can be composed in any order; all are currently
+//! in the trace panel. A new readout is a sibling file plus one call.
 
 mod assumptions;
 mod diagnostics;

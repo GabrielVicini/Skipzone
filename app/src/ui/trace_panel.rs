@@ -3,13 +3,13 @@
 //! A side panel rather than a window: the trace is long, is read alongside the
 //! map, and is referred back to while changing inputs - so it pushes the map
 //! and the floating controls aside instead of covering them. It is resizable by
-//! its inner edge and closes with the ✕; running Calculate again simply
-//! replaces its contents with the new solve.
+//! its inner edge and closes with the close button; running Calculate again
+//! replaces its contents.
 //!
 //! Every readout in it comes from [`crate::ui::panels`]: the verdict, the
 //! great-circle reference, the modes found, the selected mode's totals and
 //! per-hop breakdown, near-misses, engine errors, the assumptions the model was
-//! built from, and the vertical profile actually sampled.
+//! built from, and the sampled vertical profile.
 
 use egui::{Align, Button, Layout, Panel, RichText, ScrollArea, Ui};
 
@@ -36,7 +36,7 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
     let mut close = false;
 
     // The window's right edge, read before the panel takes its bite out of the
-    // layout, so the width the panel really occupies can be measured against it.
+    // layout, so the width the panel occupies can be measured against it.
     let right_edge = ui.max_rect().right();
 
     let panel = Panel::right("trace_panel")
@@ -58,12 +58,10 @@ pub fn draw(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Optio
                 .inner
         });
 
-    // Measured from the panel's left edge to the window's right edge, not from
-    // the panel's own reported width. egui grows a panel's reported rect to
-    // cover content that overflowed it, and that rect can run off the side of
-    // the window - which used to push the floating overlays inwards by however
-    // much the widest readout overhung. What the overlays need is the strip the
-    // panel actually covers.
+    // Measured from the panel's left edge to the window's right edge rather
+    // than from the panel's reported width, which egui grows to cover
+    // overflowing content and can run off the window. The overlays need the
+    // strip the panel covers.
     ui_state.right_inset = (right_edge - panel.response.rect.left()).clamp(0.0, right_edge);
     if close {
         ui_state.trace_open = false;

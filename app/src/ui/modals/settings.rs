@@ -1,9 +1,8 @@
 //! The Settings dialog: every modelling assumption the operator can change.
 //!
-//! Split from the per-run controls on purpose. Frequency, mode and power live
-//! on the map overlay because they change between runs; what is in here defines
-//! the *model* - the ionosphere, the absorbing layer, the noise environment,
-//! the field and the ground - and is set once and left alone.
+//! Frequency, mode and power live on the map overlay because they change
+//! between runs. This dialog defines the model (ionosphere, absorbing layer,
+//! noise environment, field and ground), which is usually set once.
 
 use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 
@@ -18,8 +17,8 @@ use crate::ui::widgets::{card, hint, labelled_drag, section};
 pub fn show(ctx: &Context, session: &mut Session, ui_state: &mut UiState) {
     let inputs = &mut session.inputs;
     // The open flag and the overlay toggle live in the same struct, so the
-    // dialog's `&mut open` is taken as a copy and written back; only the one
-    // field the body actually edits is lent to it.
+    // dialog's `&mut open` is taken as a copy and written back; only the field
+    // the body edits is lent to it.
     let mut open = ui_state.modals.settings;
     let show_coastlines = &mut ui_state.show_coastlines;
     super::chrome::dialog(

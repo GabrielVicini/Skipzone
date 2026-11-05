@@ -80,7 +80,7 @@ fn body(ui: &mut Ui, session: &mut Session, ui_state: &mut UiState) -> Option<Ac
 }
 
 /// The resolution and extent controls. Returns how many grid points the current
-/// settings would actually solve.
+/// settings would solve.
 fn grid_controls(ui: &mut Ui, session: &mut Session) -> usize {
     let cfg = &mut session.coverage_config;
     ui.horizontal(|ui| {

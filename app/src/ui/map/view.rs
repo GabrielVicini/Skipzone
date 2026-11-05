@@ -156,9 +156,9 @@ impl MapView {
         if let Some(tex) = &self.basemap {
             // One quad for the whole world. Its left edge is at the camera's
             // longitude minus 180, which is a different meridian every time the
-            // map is panned - so the texture coordinate has to be the one for
-            // *that* meridian, and is then allowed to run past 1 and wrap. `u`
-            // fixed at 0..1 is what slid the raster out from under the vectors.
+            // map is panned, so the texture coordinate is the one for that
+            // meridian and is allowed to run past 1 and wrap. A fixed 0..1 would
+            // misalign the raster with the vectors.
             let u0 = basemap::u_of_lon(proj.camera().lon - 180.0);
             let mut mesh = Mesh::with_texture(tex.id());
             mesh.add_rect_with_uv(
@@ -244,9 +244,8 @@ mod tests {
         Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 800.0))
     }
 
-    /// A fitted view must contain both stations. Checked on a path that crosses
-    /// the antimeridian, which is the case the old Mercator fit got wrong by
-    /// framing the long way round.
+    /// A fitted view must contain both stations, checked on a path that
+    /// crosses the antimeridian so it must not frame the long way round.
     #[test]
     fn fit_frames_both_stations_across_the_antimeridian() {
         let mut session = Session::new(egui::Context::default());

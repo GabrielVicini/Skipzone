@@ -1,46 +1,32 @@
 //! The map projection and the camera that frames it.
 //!
-//! # Why equirectangular, and nothing else
+//! # Why equirectangular
 //!
 //! The projection is plain equirectangular (Plate Carrée): `x` is linear in
-//! longitude, `y` is linear in latitude, at the same number of pixels per degree
-//! on both axes. It is chosen for one reason - it is the only projection in
-//! which the map means exactly what the numbers in the rest of the interface
-//! say.
+//! longitude and `y` in latitude, at the same pixels per degree on both axes,
+//! so the map matches the lat/lon numbers used everywhere else:
 //!
-//! * A coverage cell is a lat/lon box half a step either side of a solved grid
-//!   point. Here it draws as a rectangle of constant size anywhere on the map,
-//!   which is what it is. Under Web Mercator the same box grew without bound
-//!   towards the poles and the polar rows had to be thrown away entirely.
-//! * The graticule is a square lattice, so "how far north is that hop" is read
-//!   off the map by eye instead of estimated through a nonlinear vertical scale.
-//! * The whole world exists. Mercator has no poles: it has to be cut, and the
-//!   cut is arbitrary. Latitude runs to +/-90 here and every degree of it is
-//!   drawn.
+//! * A coverage cell, a lat/lon box around a solved grid point, draws as a
+//!   rectangle of constant size anywhere. Under Web Mercator it grows without
+//!   bound towards the poles.
+//! * The graticule is a square lattice, so latitude can be read off by eye.
+//! * The poles exist: latitude runs to +/-90 and all of it is drawn.
 //!
-//! What it costs is the thing every world projection costs somewhere: east-west
-//! distances are stretched by `1/cos(lat)`, so a great-circle path is a curve,
-//! not a straight line. That is honest and legible - a high-latitude path bows
-//! visibly north because it really does go north - and it is the same curve
-//! every HF area-coverage program has drawn for decades. It is emphatically not
-//! the same thing as the *geometry itself* deforming, which is what Mercator
-//! does to the coverage tiles.
+//! The cost is that east-west distances stretch by `1/cos(lat)`, so a
+//! great-circle path draws as a curve, as on most HF area-coverage programs.
 //!
 //! # The camera
 //!
-//! [`Camera`] is the whole view state: a centre in degrees and a scale in screen
-//! pixels per degree. [`Camera::clamped`] is the one place the view is
-//! constrained, and it enforces two rules:
+//! [`Camera`] is the whole view state: a centre in degrees and a scale in
+//! screen pixels per degree. [`Camera::clamped`] enforces two rules:
 //!
-//! * You can never zoom out past the whole world. The minimum scale puts 360
-//!   degrees of longitude exactly across the viewport, so there is never a
-//!   second copy of the world on screen and never a void either side of it.
-//! * You can never pan off the top or bottom. Latitude is clamped so the poles
-//!   stay at or outside the edges whenever the world is taller than the
-//!   viewport, and pinned to the equator when it is not.
+//! * No zooming out past the whole world: the minimum scale puts 360 degrees of
+//!   longitude exactly across the viewport.
+//! * No panning off the top or bottom: latitude is clamped so the poles stay at
+//!   or outside the edges when the world is taller than the viewport, and
+//!   pinned to the equator when it is not.
 //!
-//! Longitude is deliberately *not* clamped: it wraps, so a Pacific path can be
-//! centred without the map hitting a wall at the antimeridian.
+//! Longitude is not clamped but wraps, so a Pacific path can be centred.
 
 use egui::{Pos2, Rect, Vec2, pos2};
 
@@ -187,7 +173,7 @@ impl Proj {
         )
     }
 
-    /// The part of the world that is actually on screen, as
+    /// The part of the world that is on screen, as
     /// `(south, north, west, east)` in degrees. West may exceed east numerically
     /// (it is an unwrapped span, not a wrapped pair) so that callers can walk it
     /// with a plain loop.
@@ -231,17 +217,13 @@ impl Proj {
     /// A feature's longitude extent `[min_lon, max_lon]` put on the same
     /// continuous scale as the camera, as `(west, east)`.
     ///
-    /// The extent's *midpoint* moves to whichever copy of itself is nearest the
-    /// camera and the two edges keep their real distance from it. Unwrapping the
-    /// two edges independently is the trap: a feature spanning the full world
-    /// has `wrap_lon(max - min) == wrap_lon(360) == 0`, so its span collapses to
-    /// nothing and it culls itself off the map. Natural Earth holds Africa,
-    /// Europe and Asia as one ring joined at Suez, which is exactly such a
-    /// feature - and it duly disappeared.
+    /// The extent's midpoint moves to whichever copy is nearest the camera and
+    /// the edges keep their distance from it. Unwrapping the edges separately
+    /// would give a full-world feature `wrap_lon(360) == 0` width and cull it;
+    /// Natural Earth holds Africa, Europe and Asia as one such ring.
     ///
-    /// Anchoring on the midpoint rather than an edge keeps the result centred on
-    /// the view, so the untranslated copy of the world is the one that matters
-    /// and the +/-360 copies stay the rare case they are meant to be.
+    /// Anchoring on the midpoint keeps the result centred on the view, so the
+    /// +/-360 copies are rarely needed.
     #[must_use]
     pub fn span_near_camera(&self, min_lon: f64, max_lon: f64) -> (f64, f64) {
         let half = 0.5 * (max_lon - min_lon);
@@ -276,10 +258,9 @@ mod tests {
     }
 
     /// Screen positions are `f32`, so a round trip is only ever exact to the
-    /// precision of a pixel coordinate. The tolerance is that limit and no
-    /// looser: a thousandth of a degree is about a hundred metres, far below
-    /// anything the map is read to, and far above `f32` rounding at a
-    /// four-figure pixel coordinate.
+    /// precision of a pixel coordinate. A thousandth of a degree (about a
+    /// hundred metres) is far below what the map is read to and far above `f32`
+    /// rounding at a four-figure pixel coordinate.
     #[test]
     fn project_and_unproject_round_trip() {
         let cam = Camera {

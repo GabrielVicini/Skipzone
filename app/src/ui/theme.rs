@@ -12,7 +12,7 @@ use egui::{
 
 use crate::noise::PathState;
 
-// --- Verdict palette -----------------------------------------------------
+// Verdict palette
 
 pub const OK: Color32 = Color32::from_rgb(0x3F, 0xC7, 0x66);
 pub const WARN: Color32 = Color32::from_rgb(0xF2, 0xB5, 0x3C);
@@ -21,7 +21,7 @@ pub const FAIL: Color32 = Color32::from_rgb(0xE6, 0x39, 0x46);
 pub const MUTED: Color32 = Color32::from_gray(0x92);
 pub const ACCENT: Color32 = Color32::from_rgb(0x4C, 0xC9, 0xF0);
 
-// --- Surfaces ------------------------------------------------------------
+// Surfaces
 
 /// The solid bar behind the menus and the TX/RX rows.
 const HEADER_FILL: Color32 = Color32::from_rgb(0x14, 0x18, 0x1D);
@@ -100,7 +100,7 @@ pub fn popup_frame() -> Frame {
         })
 }
 
-// --- Text and spacing ----------------------------------------------------
+// Text and spacing
 
 /// Text and spacing scale with the window width, so the same readouts stay
 /// legible on a laptop without looking cramped on a large display. Re-applied
@@ -134,7 +134,7 @@ fn scale_style(style: &mut Style, scale: f32) {
     style.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, HAIRLINE);
 }
 
-// --- Solution and verdict colours ----------------------------------------
+// Solution and verdict colours
 
 /// Palette for distinguishing solutions on the map and in the legend; the index
 /// wraps, so any number of modes can be drawn.
@@ -164,15 +164,15 @@ pub fn state_color(state: PathState) -> Color32 {
     }
 }
 
-/// Colour band per verdict state, shaded WITHIN the band by `badness`
+/// Colour band per verdict state, shaded within the band by `badness`
 /// (0 = best, 1 = worst):
 ///   * usable          - green, darkening as the SNR margin shrinks
 ///   * below threshold - yellow, darkening as the shortfall grows
 ///   * no path         - red, darkening as the near-miss grows
 ///
-/// The three bands are deliberately different HUES, not points on one ramp:
-/// "geometry closes but nobody can hear it" is a different kind of answer from
-/// "there is no path", and no chart should blend them into each other.
+/// The three bands are different hues rather than points on one ramp, because
+/// "geometry closes but nobody can hear it" and "there is no path" are
+/// different kinds of answer.
 #[must_use]
 pub fn state_shade(state: PathState, badness: f32) -> Color32 {
     match state {
@@ -192,15 +192,15 @@ pub fn state_legend() -> [(Color32, &'static str); 3] {
     ]
 }
 
-// --- Area coverage gradient ----------------------------------------------
+// Area coverage gradient
 
 /// SNR-to-colour breakpoints for the area coverage map, in the VOACAP idiom:
 /// blues for weak, greens for moderate, yellow/orange for strong, red for very
 /// strong. Between two stops the colour is interpolated linearly in RGB; below
 /// the first and above the last it saturates.
 ///
-/// This is a colour ramp over ONE computed number. It never interpolates
-/// between grid points - each tile is painted the colour of its own solve.
+/// A colour ramp over one computed number; each tile is painted the colour of
+/// its own solve, with no interpolation between grid points.
 pub const COVERAGE_STOPS: [(f64, [u8; 3]); 7] = [
     (-10.0, [0x0D, 0x1B, 0x4A]), // deep navy: nothing usable
     (0.0, [0x1F, 0x4F, 0xD8]),   // blue: signal equals the noise
@@ -211,30 +211,26 @@ pub const COVERAGE_STOPS: [(f64, [u8; 3]); 7] = [
     (50.0, [0xD8, 0x23, 0x1C]),  // red: very strong
 ];
 
-/// Colour for a grid point where ray tracing found no path at all. Grey, and
-/// deliberately outside the ramp: "nothing arrives" is a different kind of
-/// answer from "something weak arrives", and the two must not blend.
+/// Colour for a grid point where ray tracing found no path at all. Grey and
+/// outside the ramp, so "nothing arrives" never blends with "something weak
+/// arrives".
 pub const COVERAGE_NO_PATH: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
 
 /// Colour for a grid point the deterministic layers cannot reach, but that a
 /// sporadic-E opening can. Purple, a third hue outside both the ramp and the
 /// no-path grey.
 ///
-/// This exists because the key used to promise a distinction the solver could
-/// not make. A position inside the F2 skip zone was painted the same grey as a
-/// position nothing could reach - which is how a several-hundred-km "hard dead
-/// zone" appeared around the transmitter on paths that were, in fact, being
-/// heard. An Es tile is now its own answer, and its colour carries how likely
-/// it is: see [`coverage_es_color`].
+/// Without it, a position inside the F2 skip zone would look like one nothing
+/// can reach. The tile colour also carries the Es likelihood; see
+/// [`coverage_es_color`].
 pub const COVERAGE_ES_ONLY: Color32 = Color32::from_rgb(0x9B, 0x59, 0xD0);
 
 /// Colour for an Es-only tile at a given SNR and occurrence probability.
 ///
 /// The ramp colour for the SNR, faded towards the background as the occurrence
-/// probability falls. The fade is the honesty: a 45 %-likely opening reads
-/// strongly, a 5 %-likely one barely reads at all, and neither is confusable
-/// with a deterministic path of the same strength - which keeps its full
-/// saturation.
+/// probability falls: a 45 %-likely opening reads strongly, a 5 %-likely one
+/// barely at all, and neither looks like a deterministic path of the same
+/// strength, which keeps full saturation.
 #[must_use]
 pub fn coverage_es_color(snr_db: f64, probability: f64) -> Color32 {
     let base = coverage_color(snr_db);
@@ -283,7 +279,7 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> Color32 {
 mod tests {
     use super::*;
 
-    /// The published breakpoints are what the map actually paints, the ramp
+    /// The published breakpoints are what the map paints, the ramp
     /// saturates outside them, and a value with no path never lands anywhere on
     /// the ramp.
     #[test]
@@ -305,7 +301,7 @@ mod tests {
     }
 
     /// Between two stops the colour moves monotonically from one to the other,
-    /// so a brighter tile really does mean a stronger computed SNR.
+    /// so a brighter tile means a stronger computed SNR.
     #[test]
     fn coverage_ramp_interpolates_between_stops() {
         let mid = coverage_color(5.0).to_tuple();
