@@ -7,7 +7,7 @@
 
 Symbols and sign conventions: [conventions.md](../conventions.md#5-symbols).
 The time convention is $e^{-i\omega t}$, so $U = 1 + iZ$ and
-$\operatorname{Im} n > 0$ means loss.
+$\mathrm{Im}\, n > 0$ means loss.
 
 This file derives the complex refractive index of a cold magnetised electron
 plasma and the forms of it the code evaluates. Sections 1 to 3 go from the
@@ -269,7 +269,7 @@ section 6. `ordinary_stable_across_reflection` checks it.
   with significant $Y_T$, a sliver inside the coupling region above.
 - **Exactness at $Z = 0$.** Every intermediate has zero imaginary part through
   $+$, $-$, $\times$, $\div$ and the square root of a non-negative real, so a
-  collisionless evaluation returns $\operatorname{Im} = 0.0$ exactly. Zero
+  collisionless evaluation returns $\mathrm{Im} = 0.0$ exactly. Zero
   collisions therefore give zero absorption bit for bit, which
   `absorption_sign_and_collisionless_reality` checks.
 

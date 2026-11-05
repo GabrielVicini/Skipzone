@@ -76,7 +76,7 @@ $k_\varphi$ equations follow in the same way.
 The tracer uses
 
 $$
-\mathcal{H}(q, \mathbf{m}) = \frac12\left[\mathbf{m}\cdot\mathbf{m} - \operatorname{Re} n^2(q, \hat{\mathbf{m}})\right],
+\mathcal{H}(q, \mathbf{m}) = \frac12\left[\mathbf{m}\cdot\mathbf{m} - \mathrm{Re}\, n^2(q, \hat{\mathbf{m}})\right],
 \qquad
 \mathbf{m} = \frac{c}{\omega}\mathbf{k}.
 $$
@@ -117,12 +117,12 @@ $$
 \end{aligned}
 $$
 
-with $G_q = \partial(\operatorname{Re} n^2)/\partial q$ at fixed physical
+with $G_q = \partial(\mathrm{Re}\, n^2)/\partial q$ at fixed physical
 $\mathbf{m}$. The chain rule through the four magnetoionic parameters gives
 
 $$
 \begin{aligned}
-G_q &= \operatorname{Re}\left[
+G_q &= \mathrm{Re}\left[
 \frac{\partial n^2}{\partial X}\frac{\partial X}{\partial q}
 + \frac{\partial n^2}{\partial Y}\frac{\partial Y}{\partial q}
 + \frac{\partial n^2}{\partial Z}\frac{\partial Z}{\partial q}
@@ -152,7 +152,7 @@ as $\omega^{-1}$, so
 
 $$
 \left.\frac{\partial\mathcal{H}}{\partial\omega}\right|_{\mathbf{k}}
-= -\frac{1}{\omega}\left[\mathbf{m}\cdot\mathbf{m} + \frac{\omega}{2}\frac{\partial(\operatorname{Re} n^2)}{\partial\omega}\right].
+= -\frac{1}{\omega}\left[\mathbf{m}\cdot\mathbf{m} + \frac{\omega}{2}\frac{\partial(\mathrm{Re}\, n^2)}{\partial\omega}\right].
 $$
 
 $n^2$ depends on $\omega$ through $X \propto \omega^{-2}$,
@@ -166,7 +166,7 @@ $$
 and the group path $P' = ct$ accumulates in $\sigma$ as
 
 $$
-\frac{dP'}{d\sigma} = \mathbf{m}\cdot\mathbf{m} - \operatorname{Re}\left[\frac{\partial n^2}{\partial X}X + \frac12\frac{\partial n^2}{\partial Y}Y + \frac12\frac{\partial n^2}{\partial Z}Z\right].
+\frac{dP'}{d\sigma} = \mathbf{m}\cdot\mathbf{m} - \mathrm{Re}\left[\frac{\partial n^2}{\partial X}X + \frac12\frac{\partial n^2}{\partial Y}Y + \frac12\frac{\partial n^2}{\partial Z}Z\right].
 $$
 
 Two limits confirm the sign. In vacuum $dP'/d\sigma = 1$. In an isotropic
@@ -180,7 +180,7 @@ The remaining integrands are
 $$
 \frac{dP}{d\sigma} = \mathbf{m}\cdot\mathbf{v},
 \qquad
-\frac{dA}{d\sigma} = \frac{\omega}{c}\,\operatorname{Im}(n)\,\lvert\mathbf{v}\rvert,
+\frac{dA}{d\sigma} = \frac{\omega}{c}\,\mathrm{Im}(n)\,\lvert\mathbf{v}\rvert,
 \qquad
 \frac{ds}{d\sigma} = \lvert\mathbf{v}\rvert .
 $$
@@ -203,7 +203,7 @@ $\mathcal{H}$ starts at zero and its drift measures integrator error.
 
 At the launch point $q_0$ the elevation and azimuth give a unit wave normal
 $\hat{\mathbf{k}}$. With $\cos\Theta$ from $\hat{\mathbf{k}}$ and $\hat{b}$,
-evaluate $n_0^2 = \operatorname{Re} n^2$. If $n_0^2 \le 0$ the mode is
+evaluate $n_0^2 = \mathrm{Re}\, n^2$. If $n_0^2 \le 0$ the mode is
 evanescent at the source and the tracer returns the typed error
 `EvanescentLaunch`. Otherwise $\mathbf{m} = \sqrt{n_0^2}\,\hat{\mathbf{k}}$.
 This is on shell with no iteration, because $n$ depends only on the direction
@@ -222,9 +222,9 @@ smooth in $\sigma$. This is why the tracer must not reparametrise by arc
 length: $d\mathbf{k}/ds$ diverges at the apex like $1/n$. Five consequences
 follow.
 
-- **Absorption integrand.** $\operatorname{Im} n \approx \operatorname{Im} n^2/(2\operatorname{Re} n)$
+- **Absorption integrand.** $\mathrm{Im}\, n \approx \mathrm{Im}\, n^2/(2\mathrm{Re}\, n)$
   diverges at the apex, but $dA/d\sigma$ multiplies it by
-  $\lvert\mathbf{v}\rvert \approx \operatorname{Re} n$. The product stays
+  $\lvert\mathbf{v}\rvert \approx \mathrm{Re}\, n$. The product stays
   finite, which matches the physics: deviative absorption at reflection is
   finite.
 - **Group integrand.** $dP'/d\sigma \to X = 1$ at an isotropic apex, which is
@@ -232,7 +232,7 @@ follow.
 - **Step control.** The step tightens near the apex through the error norm on
   $\mathbf{m}$. Nothing in the code special-cases the apex.
 - **Evanescent overshoot.** Trial Runge–Kutta stages may land slightly beyond
-  the turning point, where $\operatorname{Re} n^2 < 0$. The collisionless
+  the turning point, where $\mathrm{Re}\, n^2 < 0$. The collisionless
   $n^2$ is real and analytic through zero, so those stage evaluations are well
   defined and the Hamiltonian flow pulls the ray back.
 - **The Spitze.** A near-vertical O-mode ray in the magnetic meridian plane has
