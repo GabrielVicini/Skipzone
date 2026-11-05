@@ -46,9 +46,6 @@ exceptions = [
     { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
     # NeQuick reference data compiled in from crates/skipzone-iono/data/nequick/.
     { crate = "skipzone-iono", allow = ["EUPL-1.2"] },
-    # Terminal colours in dify, the image diff behind the app's snapshot
-    # tests. A dev-dependency only, never in a shipped binary.
-    { crate = "colored", allow = ["MPL-2.0"] },
 ]
 
 [licenses.private]

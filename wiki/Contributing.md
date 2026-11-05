@@ -38,30 +38,8 @@ cargo test --workspace --all-targets
 The tests need no network access and no `corpus/` directory. Many of them run
 real solves.
 
-### Snapshot tests
-
-`app/tests/snapshots.rs` renders four screens and compares them with the
-reference images in `app/tests/snapshots/`: the main window, the
-Point-to-Point menu, the Settings dialog and the trace panel with a result.
-They render with wgpu, so they sit behind the `snapshots` feature and
-`cargo test --workspace` skips them.
-
-```bash
-cargo test -p skipzone-app --features snapshots
-```
-
-They need a GPU or a software Vulkan driver. On Ubuntu, Mesa's lavapipe is
-in `mesa-vulkan-drivers`. The tests pin the clock and the scenario, so a
-render only changes when the interface does. A small per-pixel threshold
-absorbs driver differences.
-
-A failing test writes `<name>.new.png` and `<name>.diff.png` next to the
-reference. If the change is intended, update the references and commit them
-with the change:
-
-```bash
-UPDATE_SNAPSHOTS=1 cargo test -p skipzone-app --features snapshots
-```
+The app's interface is covered by the headless kittest tests in
+`app/tests/`, which `cargo test --workspace` runs like any other test.
 
 The engine also has Criterion benchmarks of one traced hop and a 64-ray fan:
 
@@ -81,7 +59,6 @@ cargo build -p skipzone --lib
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 python3 scripts/check-boundaries.py
 cargo deny --workspace --all-features check     # needs: cargo install cargo-deny
-cargo test -p skipzone-app --features snapshots  # if you changed the app's interface
 ```
 
 If you changed `docs/`, the README or a `docs/` citation in code, also run the docs link check:
@@ -220,7 +197,6 @@ runs on every push to `master` and every pull request.
 | `msrv` | `cargo check` of `skipzone`, `skipzone-iono` and `skipzone-predict`, each on the `rust-version` its `Cargo.toml` declares |
 | `docs` | `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS=-D warnings` |
 | `boundaries` | `scripts/check-boundaries.py` (the dependency rule in [Architecture](Architecture#the-dependency-rule)) and `scripts/check-docs.py` (every derivation is cited and every citation resolves) |
-| `snapshots` | the [snapshot tests](#snapshot-tests) and clippy on them, on Ubuntu 24.04 with lavapipe. On failure it uploads the new renders and diffs as the `snapshot-diffs` artifact |
 | `deny` | `cargo deny` advisories, then bans, licences and sources, configured in `deny.toml` |
 
 Two more workflows run on their own triggers. `wiki.yml` mirrors `wiki/` to
@@ -285,8 +261,7 @@ Only the `.shp` geometry files from Natural Earth are shipped, because the
 coastline code reads polygons and no attributes.
 
 These are gitignored and stay out of commits: `target/`, `corpus/`,
-`release/`, `graphify-out/`, `.idea/` and the snapshot tests' `.new.png`,
-`.diff.png` and `.old.png` files.
+`release/`, `graphify-out/` and `.idea/`.
 
 ## What the app saves
 
