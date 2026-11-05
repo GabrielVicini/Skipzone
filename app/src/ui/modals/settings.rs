@@ -7,7 +7,7 @@
 use egui::{ComboBox, Context, DragValue, Grid, RichText, Ui, vec2};
 
 use crate::state::{AppState, Modal};
-use crate::ui::actions::Action;
+use crate::ui::actions::{Action, InputChange, edited};
 use crate::ui::widgets::{card, hint, labelled_drag, section};
 use skipzone_iono::fof2::Fof2Backend;
 use skipzone_predict::noise::{
@@ -15,10 +15,10 @@ use skipzone_predict::noise::{
 };
 use skipzone_predict::scenario::{GroundType, Inputs, fof2_from_ssn};
 
-pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
+pub fn show(ctx: &Context, state: &AppState, out: &mut Vec<Action>) {
     let open = state.ui.modals.settings;
-    let inputs = &mut state.inputs.scenario;
-    let show_coastlines = &mut state.inputs.display.show_coastlines;
+    let inputs = &state.inputs.scenario;
+    let show_coastlines = state.inputs.display.show_coastlines;
     super::chrome::dialog(
         ctx,
         Modal::Settings,
@@ -26,20 +26,32 @@ pub fn show(ctx: &Context, state: &mut AppState, out: &mut Vec<Action>) {
         "Settings",
         vec2(520.0, 560.0),
         out,
-        |ui, _| body(ui, inputs, show_coastlines),
+        |ui, out| body(ui, inputs, show_coastlines, out),
     );
 }
 
-fn body(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
-    ionosphere(ui, inputs);
-    absorption(ui, inputs);
-    noise(ui, inputs);
-    magnetic_field(ui, inputs);
-    surface(ui, inputs, show_coastlines);
-    geometry(ui, inputs);
+fn body(ui: &mut Ui, inputs: &Inputs, show_coastlines: bool, out: &mut Vec<Action>) {
+    ionosphere(ui, inputs, out);
+    absorption(ui, inputs, out);
+    noise(ui, inputs, out);
+    magnetic_field(ui, inputs, out);
+    surface(ui, inputs, show_coastlines, out);
+    geometry(ui, inputs, out);
 }
 
-fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
+/// Let `widget` edit a copy of one input, and emit `change` if it moved.
+fn edit<T: Copy + PartialEq>(
+    out: &mut Vec<Action>,
+    value: T,
+    change: fn(T) -> InputChange,
+    widget: impl FnOnce(&mut T),
+) {
+    if let Some(v) = edited(value, widget) {
+        out.push(Action::SetInput(change(v)));
+    }
+}
+
+fn ionosphere(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Ionosphere");
     card(ui, |ui| {
         Grid::new("settings_iono")
@@ -47,36 +59,47 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
                 ui.label("foF2 model");
-                ComboBox::from_id_salt("fof2_backend")
-                    .selected_text(inputs.fof2_backend.label())
-                    .show_ui(ui, |ui| {
-                        for b in Fof2Backend::ALL {
-                            ui.selectable_value(&mut inputs.fof2_backend, b, b.label());
-                        }
-                    });
+                edit(out, inputs.fof2_backend, InputChange::Fof2Backend, |v| {
+                    ComboBox::from_id_salt("fof2_backend")
+                        .selected_text(v.label())
+                        .show_ui(ui, |ui| {
+                            for b in Fof2Backend::ALL {
+                                ui.selectable_value(v, b, b.label());
+                            }
+                        });
+                });
                 ui.end_row();
-                labelled_drag(
-                    ui,
-                    "Sunspot number",
-                    DragValue::new(&mut inputs.ssn)
-                        .speed(1.0)
-                        .range(0.0..=300.0),
-                );
-                labelled_drag(
-                    ui,
-                    "hmF2 (peak height)",
-                    DragValue::new(&mut inputs.hmf2_km)
-                        .speed(1.0)
-                        .range(90.0..=600.0)
-                        .suffix(" km"),
-                );
-                labelled_drag(
-                    ui,
-                    "Chapman scale H",
-                    DragValue::new(&mut inputs.scale_height_km)
-                        .speed(1.0)
-                        .range(5.0..=200.0)
-                        .suffix(" km"),
+                edit(out, inputs.ssn, InputChange::Ssn, |v| {
+                    labelled_drag(
+                        ui,
+                        "Sunspot number",
+                        DragValue::new(v).speed(1.0).range(0.0..=300.0),
+                    );
+                });
+                edit(out, inputs.hmf2_km, InputChange::Hmf2Km, |v| {
+                    labelled_drag(
+                        ui,
+                        "hmF2 (peak height)",
+                        DragValue::new(v)
+                            .speed(1.0)
+                            .range(90.0..=600.0)
+                            .suffix(" km"),
+                    );
+                });
+                edit(
+                    out,
+                    inputs.scale_height_km,
+                    InputChange::ScaleHeightKm,
+                    |v| {
+                        labelled_drag(
+                            ui,
+                            "Chapman scale H",
+                            DragValue::new(v)
+                                .speed(1.0)
+                                .range(5.0..=200.0)
+                                .suffix(" km"),
+                        );
+                    },
                 );
             });
         hint(
@@ -123,31 +146,42 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
              into the deterministic verdict.",
         );
         ui.add_space(4.0);
-        ui.checkbox(&mut inputs.es_enabled, "Model sporadic E");
+        edit(out, inputs.es_enabled, InputChange::EsEnabled, |v| {
+            ui.checkbox(v, "Model sporadic E");
+        });
         ui.add_enabled_ui(inputs.es_enabled, |ui| {
-            ui.checkbox(
-                &mut inputs.es_manual,
-                "Override foEs and occurrence (otherwise from season, local time and latitude)",
-            );
+            edit(out, inputs.es_manual, InputChange::EsManual, |v| {
+                ui.checkbox(
+                    v,
+                    "Override foEs and occurrence (otherwise from season, local time and latitude)",
+                );
+            });
             ui.add_enabled_ui(inputs.es_manual, |ui| {
                 Grid::new("settings_es")
                     .num_columns(2)
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
-                        labelled_drag(
-                            ui,
-                            "foEs",
-                            DragValue::new(&mut inputs.foes_mhz)
-                                .speed(0.1)
-                                .range(1.0..=30.0)
-                                .suffix(" MHz"),
-                        );
-                        labelled_drag(
-                            ui,
-                            "Occurrence probability",
-                            DragValue::new(&mut inputs.es_probability)
-                                .speed(0.01)
-                                .range(0.0..=1.0),
+                        edit(out, inputs.foes_mhz, InputChange::FoesMhz, |v| {
+                            labelled_drag(
+                                ui,
+                                "foEs",
+                                DragValue::new(v)
+                                    .speed(0.1)
+                                    .range(1.0..=30.0)
+                                    .suffix(" MHz"),
+                            );
+                        });
+                        edit(
+                            out,
+                            inputs.es_probability,
+                            InputChange::EsProbability,
+                            |v| {
+                                labelled_drag(
+                                    ui,
+                                    "Occurrence probability",
+                                    DragValue::new(v).speed(0.01).range(0.0..=1.0),
+                                );
+                            },
                         );
                     });
             });
@@ -155,7 +189,7 @@ fn ionosphere(ui: &mut Ui, inputs: &mut Inputs) {
     });
 }
 
-fn absorption(ui: &mut Ui, inputs: &mut Inputs) {
+fn absorption(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Absorption");
     card(ui, |ui| {
         hint(
@@ -166,9 +200,13 @@ fn absorption(ui: &mut Ui, inputs: &mut Inputs) {
              function of zenith angle - it follows neutral density.",
         );
         ui.add_space(4.0);
-        ui.checkbox(
-            &mut inputs.collision_manual,
-            "Override collision profile manually",
+        edit(
+            out,
+            inputs.collision_manual,
+            InputChange::CollisionManual,
+            |v| {
+                ui.checkbox(v, "Override collision profile manually");
+            },
         );
         if inputs.collision_manual {
             ui.add_space(4.0);
@@ -176,46 +214,56 @@ fn absorption(ui: &mut Ui, inputs: &mut Inputs) {
                 .num_columns(2)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
-                    labelled_drag(
-                        ui,
-                        "nu at ref alt",
-                        DragValue::new(&mut inputs.nu0_per_s)
-                            .speed(1e3)
-                            .range(0.0..=1e9)
-                            .suffix(" /s"),
-                    );
-                    labelled_drag(
-                        ui,
-                        "ref altitude",
-                        DragValue::new(&mut inputs.nu_ref_alt_km)
-                            .speed(1.0)
-                            .range(50.0..=300.0)
-                            .suffix(" km"),
-                    );
-                    labelled_drag(
-                        ui,
-                        "nu scale H",
-                        DragValue::new(&mut inputs.nu_scale_height_km)
-                            .speed(0.5)
-                            .range(2.0..=100.0)
-                            .suffix(" km"),
+                    edit(out, inputs.nu0_per_s, InputChange::Nu0PerS, |v| {
+                        labelled_drag(
+                            ui,
+                            "nu at ref alt",
+                            DragValue::new(v).speed(1e3).range(0.0..=1e9).suffix(" /s"),
+                        );
+                    });
+                    edit(out, inputs.nu_ref_alt_km, InputChange::NuRefAltKm, |v| {
+                        labelled_drag(
+                            ui,
+                            "ref altitude",
+                            DragValue::new(v)
+                                .speed(1.0)
+                                .range(50.0..=300.0)
+                                .suffix(" km"),
+                        );
+                    });
+                    edit(
+                        out,
+                        inputs.nu_scale_height_km,
+                        InputChange::NuScaleHeightKm,
+                        |v| {
+                            labelled_drag(
+                                ui,
+                                "nu scale H",
+                                DragValue::new(v)
+                                    .speed(0.5)
+                                    .range(2.0..=100.0)
+                                    .suffix(" km"),
+                            );
+                        },
                     );
                 });
         }
     });
 }
 
-fn noise(ui: &mut Ui, inputs: &mut Inputs) {
+fn noise(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Receiver noise and the usable/unusable verdict");
     card(ui, |ui| {
         ui.label(RichText::new("RX man-made noise environment").small());
-        ComboBox::from_id_salt("settings_noise_env")
-            .selected_text(inputs.noise_env.label())
-            .show_ui(ui, |ui| {
-                for env in NoiseEnvironment::ALL {
-                    ui.selectable_value(&mut inputs.noise_env, env, env.label());
-                }
-            });
+        edit(out, inputs.noise_env, InputChange::NoiseEnv, |v| {
+            ComboBox::from_id_salt("settings_noise_env")
+                .selected_text(v.label())
+                .show_ui(ui, |ui| {
+                    for env in NoiseEnvironment::ALL {
+                        ui.selectable_value(v, env, env.label());
+                    }
+                });
+        });
         if !skipzone_predict::noise::man_made_range_is_valid(inputs.freq_mhz) {
             hint(
                 ui,
@@ -234,13 +282,12 @@ fn noise(ui: &mut Ui, inputs: &mut Inputs) {
             .selected_text(inputs.op_mode.label())
             .show_ui(ui, |ui| {
                 for mode in OperatingMode::ALL {
+                    // Picking a preset seeds the bandwidth and threshold below.
                     if ui
-                        .selectable_value(&mut inputs.op_mode, mode, mode.label())
+                        .selectable_label(inputs.op_mode == mode, mode.label())
                         .clicked()
                     {
-                        let (bandwidth_hz, threshold_db) = mode.defaults();
-                        inputs.bandwidth_hz = bandwidth_hz;
-                        inputs.snr_threshold_db = threshold_db;
+                        out.push(Action::SetInput(InputChange::OpMode(mode)));
                     }
                 }
             });
@@ -250,29 +297,40 @@ fn noise(ui: &mut Ui, inputs: &mut Inputs) {
             .num_columns(2)
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
-                labelled_drag(
-                    ui,
-                    "TX power",
-                    DragValue::new(&mut inputs.tx_power_w)
-                        .speed(5.0)
-                        .range(0.1..=10_000.0)
-                        .suffix(" W"),
-                );
-                labelled_drag(
-                    ui,
-                    "RX bandwidth",
-                    DragValue::new(&mut inputs.bandwidth_hz)
-                        .speed(10.0)
-                        .range(10.0..=20_000.0)
-                        .suffix(" Hz"),
-                );
-                labelled_drag(
-                    ui,
-                    "SNR threshold",
-                    DragValue::new(&mut inputs.snr_threshold_db)
-                        .speed(0.5)
-                        .range(-30.0..=60.0)
-                        .suffix(" dB"),
+                edit(out, inputs.tx_power_w, InputChange::TxPower, |v| {
+                    labelled_drag(
+                        ui,
+                        "TX power",
+                        DragValue::new(v)
+                            .speed(5.0)
+                            .range(0.1..=10_000.0)
+                            .suffix(" W"),
+                    );
+                });
+                edit(out, inputs.bandwidth_hz, InputChange::BandwidthHz, |v| {
+                    labelled_drag(
+                        ui,
+                        "RX bandwidth",
+                        DragValue::new(v)
+                            .speed(10.0)
+                            .range(10.0..=20_000.0)
+                            .suffix(" Hz"),
+                    );
+                });
+                edit(
+                    out,
+                    inputs.snr_threshold_db,
+                    InputChange::SnrThresholdDb,
+                    |v| {
+                        labelled_drag(
+                            ui,
+                            "SNR threshold",
+                            DragValue::new(v)
+                                .speed(0.5)
+                                .range(-30.0..=60.0)
+                                .suffix(" dB"),
+                        );
+                    },
                 );
             });
         hint(
@@ -286,50 +344,56 @@ fn noise(ui: &mut Ui, inputs: &mut Inputs) {
     });
 }
 
-fn magnetic_field(ui: &mut Ui, inputs: &mut Inputs) {
+fn magnetic_field(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Magnetic field");
     card(ui, |ui| {
-        ui.checkbox(
-            &mut inputs.use_field,
-            "Use IGRF-14 (off = zero field, O/X degenerate)",
-        );
+        edit(out, inputs.use_field, InputChange::UseField, |v| {
+            ui.checkbox(v, "Use IGRF-14 (off = zero field, O/X degenerate)");
+        });
         if inputs.use_field {
             ui.add_space(4.0);
-            ui.add(
-                DragValue::new(&mut inputs.igrf_epoch)
-                    .speed(0.1)
-                    .range(1900.0..=2030.0)
-                    .prefix("epoch "),
-            );
+            edit(out, inputs.igrf_epoch, InputChange::IgrfEpoch, |v| {
+                ui.add(
+                    DragValue::new(v)
+                        .speed(0.1)
+                        .range(1900.0..=2030.0)
+                        .prefix("epoch "),
+                );
+            });
         }
     });
 }
 
-fn surface(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
+fn surface(ui: &mut Ui, inputs: &Inputs, show_coastlines: bool, out: &mut Vec<Action>) {
     section(ui, "Surface (ground reflections)");
     card(ui, |ui| {
-        ComboBox::from_id_salt("settings_ground")
-            .selected_text(inputs.ground_type.label())
-            .show_ui(ui, |ui| {
-                for ground in GroundType::ALL_SELECTABLE {
-                    ui.selectable_value(&mut inputs.ground_type, ground, ground.label());
-                }
-            });
+        edit(out, inputs.ground_type, InputChange::Ground, |v| {
+            ComboBox::from_id_salt("settings_ground")
+                .selected_text(v.label())
+                .show_ui(ui, |ui| {
+                    for ground in GroundType::ALL_SELECTABLE {
+                        ui.selectable_value(v, ground, ground.label());
+                    }
+                });
+        });
 
         if inputs.ground_type.is_auto() {
             ui.add_space(6.0);
             ui.label(RichText::new("Land fallback (soil type is not in the data)").small());
-            ComboBox::from_id_salt("settings_ground_land")
-                .selected_text(inputs.ground_land_fallback.label())
-                .show_ui(ui, |ui| {
-                    for ground in GroundType::LAND_TYPES {
-                        ui.selectable_value(
-                            &mut inputs.ground_land_fallback,
-                            ground,
-                            ground.label(),
-                        );
-                    }
-                });
+            edit(
+                out,
+                inputs.ground_land_fallback,
+                InputChange::GroundLandFallback,
+                |v| {
+                    ComboBox::from_id_salt("settings_ground_land")
+                        .selected_text(v.label())
+                        .show_ui(ui, |ui| {
+                            for ground in GroundType::LAND_TYPES {
+                                ui.selectable_value(v, ground, ground.label());
+                            }
+                        });
+                },
+            );
             hint(
                 ui,
                 "Each hop's reflection point is tested against the Natural Earth 1:50m \
@@ -343,10 +407,9 @@ fn surface(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
             );
 
             ui.add_space(6.0);
-            ui.checkbox(
-                show_coastlines,
-                "Debug: draw the land / lake polygons on the map",
-            );
+            edit(out, show_coastlines, InputChange::ShowCoastlines, |v| {
+                ui.checkbox(v, "Debug: draw the land / lake polygons on the map");
+            });
             match skipzone_predict::coastline::get() {
                 Ok(c) => hint(ui, &c.summary()),
                 Err(e) => {
@@ -377,26 +440,26 @@ fn surface(ui: &mut Ui, inputs: &mut Inputs, show_coastlines: &mut bool) {
     });
 }
 
-fn geometry(ui: &mut Ui, inputs: &mut Inputs) {
+fn geometry(ui: &mut Ui, inputs: &Inputs, out: &mut Vec<Action>) {
     section(ui, "Solver geometry");
     card(ui, |ui| {
         Grid::new("settings_geometry")
             .num_columns(2)
             .spacing([10.0, 4.0])
             .show(ui, |ui| {
-                labelled_drag(
-                    ui,
-                    "Max hops",
-                    DragValue::new(&mut inputs.max_hops).range(1..=8),
-                );
-                labelled_drag(
-                    ui,
-                    "Domain top",
-                    DragValue::new(&mut inputs.domain_top_km)
-                        .speed(10.0)
-                        .range(400.0..=2000.0)
-                        .suffix(" km"),
-                );
+                edit(out, inputs.max_hops, InputChange::MaxHops, |v| {
+                    labelled_drag(ui, "Max hops", DragValue::new(v).range(1..=8));
+                });
+                edit(out, inputs.domain_top_km, InputChange::DomainTopKm, |v| {
+                    labelled_drag(
+                        ui,
+                        "Domain top",
+                        DragValue::new(v)
+                            .speed(10.0)
+                            .range(400.0..=2000.0)
+                            .suffix(" km"),
+                    );
+                });
             });
         hint(
             ui,

@@ -368,4 +368,31 @@ mod tests {
         assert!(s.ui.modals.is_open(Modal::Coverage));
         assert!(!s.ui.modals.is_open(Modal::Settings));
     }
+
+    /// Settings edits land on their own field and nowhere else.
+    #[test]
+    fn settings_edits_change_only_their_field() {
+        use skipzone_predict::scenario::GroundType;
+
+        let (mut s, jobs) = setup();
+        let before = s.inputs.scenario.clone();
+        apply(
+            &mut s,
+            &jobs,
+            [
+                Action::SetInput(InputChange::Ssn(150.0)),
+                Action::SetInput(InputChange::Ground(GroundType::SeaWater)),
+                Action::SetInput(InputChange::MaxHops(3)),
+                Action::SetInput(InputChange::ShowCoastlines(true)),
+            ],
+        );
+        let expected = Inputs {
+            ssn: 150.0,
+            ground_type: GroundType::SeaWater,
+            max_hops: 3,
+            ..before
+        };
+        assert_eq!(s.inputs.scenario, expected);
+        assert!(s.inputs.display.show_coastlines);
+    }
 }

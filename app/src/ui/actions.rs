@@ -13,7 +13,9 @@
 //! nothing.
 
 use skipzone_iono::clock::CivilDate;
-use skipzone_predict::noise::OperatingMode;
+use skipzone_iono::fof2::Fof2Backend;
+use skipzone_predict::noise::{NoiseEnvironment, OperatingMode};
+use skipzone_predict::scenario::GroundType;
 
 use crate::state::{AppInputs, Modal, Station};
 
@@ -42,6 +44,29 @@ pub enum InputChange {
     UtcHours(f64),
     Date(CivilDate),
     ShowTerminator(bool),
+    // The Settings dialog, one variant per field it edits.
+    Fof2Backend(Fof2Backend),
+    Ssn(f64),
+    Hmf2Km(f64),
+    ScaleHeightKm(f64),
+    EsEnabled(bool),
+    EsManual(bool),
+    FoesMhz(f64),
+    EsProbability(f64),
+    CollisionManual(bool),
+    Nu0PerS(f64),
+    NuRefAltKm(f64),
+    NuScaleHeightKm(f64),
+    NoiseEnv(NoiseEnvironment),
+    BandwidthHz(f64),
+    SnrThresholdDb(f64),
+    UseField(bool),
+    IgrfEpoch(f64),
+    Ground(GroundType),
+    GroundLandFallback(GroundType),
+    MaxHops(u32),
+    DomainTopKm(f64),
+    ShowCoastlines(bool),
 }
 
 impl InputChange {
@@ -63,6 +88,28 @@ impl InputChange {
                 (s.year, s.month, s.day_of_month) = (date.year, date.month, date.day);
             }
             Self::ShowTerminator(on) => inputs.display.show_terminator = on,
+            Self::Fof2Backend(b) => s.fof2_backend = b,
+            Self::Ssn(v) => s.ssn = v,
+            Self::Hmf2Km(v) => s.hmf2_km = v,
+            Self::ScaleHeightKm(v) => s.scale_height_km = v,
+            Self::EsEnabled(on) => s.es_enabled = on,
+            Self::EsManual(on) => s.es_manual = on,
+            Self::FoesMhz(v) => s.foes_mhz = v,
+            Self::EsProbability(v) => s.es_probability = v,
+            Self::CollisionManual(on) => s.collision_manual = on,
+            Self::Nu0PerS(v) => s.nu0_per_s = v,
+            Self::NuRefAltKm(v) => s.nu_ref_alt_km = v,
+            Self::NuScaleHeightKm(v) => s.nu_scale_height_km = v,
+            Self::NoiseEnv(env) => s.noise_env = env,
+            Self::BandwidthHz(v) => s.bandwidth_hz = v,
+            Self::SnrThresholdDb(v) => s.snr_threshold_db = v,
+            Self::UseField(on) => s.use_field = on,
+            Self::IgrfEpoch(v) => s.igrf_epoch = v,
+            Self::Ground(g) => s.ground_type = g,
+            Self::GroundLandFallback(g) => s.ground_land_fallback = g,
+            Self::MaxHops(n) => s.max_hops = n,
+            Self::DomainTopKm(v) => s.domain_top_km = v,
+            Self::ShowCoastlines(on) => inputs.display.show_coastlines = on,
         }
     }
 }
