@@ -1,5 +1,5 @@
 //! Centered tilted dipole: the n = 1 spherical-harmonic field in closed form.
-//! Derivation: docs/derivations/magnetic-field.md section 4.
+//! Derivation: docs/derivations/engine/magnetic-field.md §4.
 
 use super::{FieldSample, MagneticField};
 use crate::geo::SphericalPoint;
@@ -87,7 +87,8 @@ mod tests {
 
     #[test]
     fn axial_magnitude_matches_closed_form() {
-        // |B| = (a/r)^3 |g10| sqrt(1 + 3 cos^2 theta), derivation section 4.
+        // |B| = (a/r)^3 |g10| sqrt(1 + 3 cos^2 theta),
+        // docs/derivations/engine/magnetic-field.md §4.
         let a = Meters::from_km(6371.2);
         let d = Dipole::axial(a, Tesla::new(-3.0e-5));
         for p in sample_points() {

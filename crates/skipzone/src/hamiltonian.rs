@@ -1,6 +1,6 @@
 //! Assembly of the Haselgrove ray equations from the medium models.
-//! Every equation here is derived in docs/derivations/haselgrove.md; the
-//! section numbers in comments refer to that file.
+//! Every equation here is derived in docs/derivations/engine/haselgrove.md,
+//! cited below by section.
 //!
 //! State vector layout (SI, f64, fixed size - no allocation in the loop):
 //!
@@ -11,7 +11,8 @@
 //! y[8] absorption A [Np]  y[9] arc length s [m]
 //! ```
 //!
-//! The independent variable sigma has units of metres (section 2).
+//! The independent variable sigma has units of metres
+//! (docs/derivations/engine/haselgrove.md §2).
 
 use crate::collision::CollisionFrequency;
 use crate::constants::{OMEGA_H_PER_TESLA, OMEGA_P_SQ_PER_DENSITY, SPEED_OF_LIGHT};
@@ -66,7 +67,7 @@ where
         }
     }
 
-    /// The ray right-hand side dy/dsigma (haselgrove.md sections 2-4).
+    /// The ray right-hand side dy/dsigma (docs/derivations/engine/haselgrove.md §2-4).
     ///
     /// # Errors
     /// `PoleProximity` if the state is within `SIN_COLAT_MIN` of a
@@ -109,7 +110,7 @@ where
         let ri = appleton_hartree(self.mode, x, y_par, z, cos_th);
         let (dx_re, dy_re, dcos_re, dz_re) = (ri.d_x.re, ri.d_y.re, ri.d_cos.re, ri.d_z.re);
 
-        // v = dH/dm (section 2): m plus the wave-normal-direction term.
+        // v = dH/dm (docs/derivations/engine/haselgrove.md §2): m plus the wave-normal term.
         let v = if y_par == 0.0 {
             m
         } else {
@@ -121,7 +122,7 @@ where
             ]
         };
 
-        // G_q = d(Re n^2)/dq at fixed physical m (section 2).
+        // G_q = d(Re n^2)/dq at fixed physical m (docs/derivations/engine/haselgrove.md §2).
         let mut g = [0.0; 3];
         for (q, gq) in g.iter_mut().enumerate() {
             let db_q = [fld.db[0][q], fld.db[1][q], fld.db[2][q]];
@@ -142,12 +143,14 @@ where
         dy[4] = (0.5 * g[1] + m[2] * v[2] * cot_t - m[1] * v[0]) / r;
         dy[5] = (0.5 * g[2] / sin_t - m[2] * v[0] - m[2] * v[1] * cot_t) / r;
 
-        // Group path integrand (section 3): m.m + (omega/2) d(Re n^2)/domega.
+        // Group path integrand (docs/derivations/engine/haselgrove.md §3):
+        // m.m + (omega/2) d(Re n^2)/domega.
         let m_sq = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
         dy[6] = m_sq - (dx_re * x + 0.5 * dy_re * y_par + 0.5 * dz_re * z);
-        // Phase path integrand (section 4): m.v.
+        // Phase path integrand (docs/derivations/engine/haselgrove.md §4): m.v.
         dy[7] = m[0] * v[0] + m[1] * v[1] + m[2] * v[2];
-        // Absorption integrand (section 4); exactly zero without collisions.
+        // Absorption integrand (docs/derivations/engine/haselgrove.md §4); exactly zero without
+        // collisions.
         let v_norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         dy[8] = if z == 0.0 {
             0.0
@@ -192,7 +195,8 @@ where
         self.x_per_ne * self.density.sample(p).ne
     }
 
-    /// State exactly on the dispersion shell at a launch point (section 6).
+    /// State exactly on the dispersion shell at a launch point
+    /// (docs/derivations/engine/haselgrove.md §5).
     ///
     /// # Errors
     /// `EvanescentLaunch` if Re n^2 <= 0 for this mode at the launch point;

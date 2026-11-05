@@ -17,7 +17,7 @@ pub trait CollisionFrequency {
 }
 
 /// The collisionless limit: Z = 0 exactly, absorption exactly zero (a
-/// validation invariant, see appleton-hartree.md section 6).
+/// validation invariant, see docs/derivations/engine/appleton-hartree.md §6).
 pub struct ZeroCollisions;
 
 impl CollisionFrequency for ZeroCollisions {

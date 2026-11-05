@@ -18,15 +18,14 @@ pub const VACUUM_PERMITTIVITY: f64 = 8.854_187_818_8e-12;
 /// Angular plasma frequency squared per unit electron density:
 /// `omega_p^2 = Ne * e^2 / (eps0 * m_e)`, so this constant is
 /// `e^2 / (eps0 * m_e)` in units of s^-2 m^3. Derived from the constants above;
-/// the standard cold-plasma result (derivation: docs/derivations/appleton-hartree.md,
-/// section 1).
+/// the standard cold-plasma result (derivation: docs/derivations/engine/appleton-hartree.md §1).
 pub const OMEGA_P_SQ_PER_DENSITY: f64 =
     ELEMENTARY_CHARGE * ELEMENTARY_CHARGE / (VACUUM_PERMITTIVITY * ELECTRON_MASS);
 
 /// Electron angular gyrofrequency per unit magnetic flux density:
 /// `omega_H = e |B| / m_e`, so this constant is `e / m_e` in units of
 /// rad s^-1 T^-1. Taken positive; the sign conventions that absorb the
-/// electron's negative charge are fixed in the Appleton-Hartree derivation.
+/// electron's negative charge are fixed in docs/derivations/engine/appleton-hartree.md §4.
 pub const OMEGA_H_PER_TESLA: f64 = ELEMENTARY_CHARGE / ELECTRON_MASS;
 
 #[cfg(test)]

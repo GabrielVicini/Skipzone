@@ -1,6 +1,6 @@
 //! IGRF-14: the International Geomagnetic Reference Field, 14th generation,
 //! evaluated from its defining Schmidt semi-normalised spherical-harmonic
-//! expansion (docs/derivations/magnetic-field.md sections 1-3).
+//! expansion (docs/derivations/engine/magnetic-field.md §1-3).
 //!
 //! Coefficient source: `data/igrf14coeffs.txt`, the published IAGA V-MOD
 //! working group file (fetched from NOAA NCEI), embedded verbatim. Main-field

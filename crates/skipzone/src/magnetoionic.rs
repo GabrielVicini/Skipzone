@@ -1,13 +1,14 @@
 //! Full complex Appleton-Hartree refractive index, O and X modes, with
 //! analytic partial derivatives. No quasi-longitudinal or quasi-transverse
 //! approximation anywhere. Derivation and all conventions:
-//! docs/derivations/appleton-hartree.md; time convention exp(-i omega t),
+//! docs/derivations/engine/appleton-hartree.md; time convention exp(-i omega t),
 //! so Im(n^2) >= 0 in absorbing regions.
 //!
-//! Known degeneracies (derivation section 6): the Ellis-window sliver around
-//! (X = 1, transverse Y_T = 0) and exact root coalescence S_m = 0 are guarded
-//! to return finite continuations rather than NaN; mode labels are not
-//! globally continuable there and mode-conversion physics is out of scope.
+//! Known degeneracies (docs/derivations/engine/appleton-hartree.md §6): the
+//! Ellis-window sliver around (X = 1, transverse Y_T = 0) and exact root
+//! coalescence S_m = 0 are guarded to return finite continuations rather than
+//! NaN; mode labels are not globally continuable there and mode-conversion
+//! physics is out of scope.
 
 use num_complex::Complex64;
 
@@ -61,7 +62,8 @@ pub fn appleton_hartree(mode: Mode, x: f64, y: f64, z: f64, cos_theta: f64) -> R
     let a1 = Complex64::from(y * y * c * c); // Y_L^2
     let a2 = Complex64::from(y * y * (1.0 - c * c)); // Y_T^2
 
-    // Differentials in the (X, Y, cos, Z) directions; derivation section 7.
+    // Differentials in the (X, Y, cos, Z) directions;
+    // docs/derivations/engine/appleton-hartree.md §7.
     let du: Diff = [ZERO, ZERO, ZERO, I];
     let dx: Diff = [ONE, ZERO, ZERO, ZERO];
     let dw: Diff = [-ONE, ZERO, ZERO, I];
@@ -78,8 +80,9 @@ pub fn appleton_hartree(mode: Mode, x: f64, y: f64, z: f64, cos_theta: f64) -> R
         ZERO,
     ];
 
-    // S_m = sqrt(Y_T^4/4 + Y_L^2 W^2), principal branch (derivation
-    // section 4: real non-negative in the collisionless case for all X).
+    // S_m = sqrt(Y_T^4/4 + Y_L^2 W^2), principal branch, real and
+    // non-negative in the collisionless case for all X
+    // (docs/derivations/engine/appleton-hartree.md §4).
     let s_m = (0.25 * a2 * a2 + a1 * w * w).sqrt();
     let g = s_m + 0.5 * a2;
 
@@ -98,8 +101,8 @@ pub fn appleton_hartree(mode: Mode, x: f64, y: f64, z: f64, cos_theta: f64) -> R
     match mode {
         Mode::Ordinary => {
             // Ellis-window point (W = 0, Y_T = 0): G = 0. Return the
-            // quasi-transverse limit 1 - X/U (derivation section 6) with its
-            // isotropic-limit derivatives.
+            // quasi-transverse limit 1 - X/U with its isotropic-limit
+            // derivatives (docs/derivations/engine/appleton-hartree.md §6).
             if g == ZERO {
                 let n_sq = ONE - x / u;
                 return RefractiveIndexSq {
@@ -162,7 +165,7 @@ mod tests {
         }
     }
 
-    /// Derivation section 4 anchors, collisionless.
+    /// The mode-label anchors of docs/derivations/engine/appleton-hartree.md §4, collisionless.
     #[test]
     fn transverse_and_longitudinal_limits() {
         let (x, y) = (0.4, 0.25);
@@ -181,7 +184,8 @@ mod tests {
         }
     }
 
-    /// O reflects at X = 1; X-mode zeros at X = 1 -+ Y (derivation sec. 4).
+    /// O reflects at X = 1; X-mode zeros at X = 1 -+ Y
+    /// (docs/derivations/engine/appleton-hartree.md §4).
     #[test]
     fn reflection_conditions() {
         for &y in &[0.05, 0.3, 0.7] {
@@ -289,7 +293,7 @@ mod tests {
         }
     }
 
-    /// Loss sign (conventions.md): in the propagating region with Z > 0,
+    /// Loss sign (docs/derivations/conventions.md): in the propagating region with Z > 0,
     /// Im(n^2) > 0; with Z = 0, Im is exactly 0.0 for every parameter.
     #[test]
     fn absorption_sign_and_collisionless_reality() {

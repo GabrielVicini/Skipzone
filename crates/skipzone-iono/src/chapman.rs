@@ -4,7 +4,7 @@
 //! [`SolarChapmanLayer`], that the D, E and F2 regions are built from, plus the
 //! Chapman grazing-incidence function `Ch(X, chi)` the photochemical ones use.
 //! Derivation, sign conventions and checks:
-//! docs/derivations/chapman-grazing.md.
+//! docs/derivations/iono/chapman-grazing.md.
 //!
 //! Two things vary horizontally, as separate settings:
 //!
@@ -53,8 +53,9 @@ const CF_RESCALE_ABOVE: f64 = 1e250;
 const CF_RESCALE: f64 = 1.0 / 1_152_921_504_606_846_976.0;
 
 /// Scaled complementary error function `erfcx(t) = e^{t^2} erfc(t)` for
-/// `t >= 0`. Stable everywhere (no `e^{t^2}` overflow): series below 2, the
-/// A&S 7.1.14 continued fraction above. See derivation section 3.
+/// `t >= 0`. Stable everywhere (no `e^{t^2}` overflow): series below 3, the
+/// A&S 7.1.14 continued fraction above. See
+/// docs/derivations/iono/chapman-grazing.md §3.
 #[must_use]
 pub fn erfcx(t: f64) -> f64 {
     debug_assert!(t >= 0.0, "erfcx here is only needed for t >= 0");
@@ -113,14 +114,16 @@ pub fn erfcx(t: f64) -> f64 {
     }
 }
 
-/// `erfcx'(t) = 2 t erfcx(t) - 2/sqrt(pi)` (derivation eq. 4).
+/// `erfcx'(t) = 2 t erfcx(t) - 2/sqrt(pi)`
+/// (docs/derivations/iono/chapman-grazing.md eq. (4)).
 #[must_use]
 pub fn erfcx_deriv(t: f64, erfcx_t: f64) -> f64 {
     2.0 * t * erfcx_t - TWO_OVER_SQRT_PI
 }
 
 /// Chapman grazing-incidence function `Ch(X, chi)` and its derivative
-/// `dCh/dchi` (derivation eqs. 3, 8). `x` is `X = r_m/H`, `chi` in radians.
+/// `dCh/dchi` (docs/derivations/iono/chapman-grazing.md eqs. (3), (8)).
+/// `x` is `X = r_m/H`, `chi` in radians.
 /// Returns `(Ch, dCh/dchi)`; `Ch = +inf` in deep night where the closed form
 /// overflows (the caller then yields vacuum).
 #[must_use]
@@ -211,9 +214,9 @@ impl PeakDensitySource for ConstantPeak {
 pub enum SlantFactor {
     /// Photochemical (alpha-Chapman) equilibrium: the grazing function
     /// `Ch(X, chi)` at the local solar zenith angle of each sampled point. The
-    /// realised peak is `Nm Ch^{-1/2}` at `r_peak + H ln Ch` (derivation
-    /// section 2), staying finite through the terminator where the
-    /// plane-parallel `sec(chi)` does not.
+    /// realised peak is `Nm Ch^{-1/2}` at `r_peak + H ln Ch`
+    /// (docs/derivations/iono/chapman-grazing.md §2), staying finite through
+    /// the terminator where the plane-parallel `sec(chi)` does not.
     Solar {
         sin_decl: f64,
         cos_decl: f64,
@@ -253,8 +256,8 @@ impl SlantFactor {
 ///
 /// where `Ch` is either `Ch(X, chi(theta, phi))` or `1`, per [`SlantFactor`].
 /// Both sources of horizontal structure contribute to the gradient; the
-/// derivation of the `Ch` terms is docs/derivations/chapman-grazing.md and the
-/// `Nm` term is the plain product rule, `(dNm/dtheta) e^{F}`.
+/// derivation of the `Ch` terms is docs/derivations/iono/chapman-grazing.md §4
+/// and the `Nm` term is the plain product rule, `(dNm/dtheta) e^{F}`.
 pub struct SolarChapmanLayer {
     source: Box<dyn PeakDensitySource>,
     slant: SlantFactor,
@@ -418,8 +421,9 @@ impl SolarChapmanLayer {
     }
 
     /// Local solar zenith angle chi (radians) at a colatitude/longitude
-    /// (derivation eq. 5), or 0 for an [`SlantFactor::Overhead`] layer, which
-    /// has no sun of its own. `sample` computes this inline on the hot path.
+    /// (docs/derivations/iono/chapman-grazing.md eq. (5)), or 0 for an
+    /// [`SlantFactor::Overhead`] layer, which has no sun of its own. `sample`
+    /// computes this inline on the hot path.
     #[must_use]
     pub fn zenith_angle(&self, colat: f64, lon: f64) -> f64 {
         match self.slant {
@@ -622,7 +626,8 @@ impl ElectronDensity for SolarChapmanLayer {
             };
         }
 
-        // dNe/dr = Ne * 1/2 (Ch e^{-z} - 1)/H (derivation eq. 7).
+        // dNe/dr = Ne * 1/2 (Ch e^{-z} - 1)/H
+        // (docs/derivations/iono/chapman-grazing.md eq. (7)).
         let dne_dr = ne * 0.5 * (ch * emz - 1.0) / self.scale_height;
 
         // Horizontal partials, in two independent contributions:
@@ -904,9 +909,9 @@ mod tests {
         }
     }
 
-    /// Ch limits (derivation section 2): overhead = sec = 1; below ~75 deg it
-    /// tracks sec(chi); at 90 deg it is finite = sqrt(pi X/2); continuous
-    /// across the branch at 90 deg.
+    /// Ch limits (docs/derivations/iono/chapman-grazing.md §2): overhead =
+    /// sec = 1; below ~75 deg it tracks sec(chi); at 90 deg it is finite =
+    /// sqrt(pi X/2); continuous across the branch at 90 deg.
     #[test]
     fn chapman_grazing_limits() {
         let x = 1076.0;

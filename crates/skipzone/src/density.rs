@@ -70,7 +70,7 @@ impl ElectronDensity for ZeroDensity {
 
 /// Ne = slope (r - r_base) above r_base, zero below. C0 at the base with a
 /// gradient kink there. In flat geometry this profile gives exactly parabolic
-/// rays (docs/derivations/analytic-solutions.md); in spherical geometry its
+/// rays (docs/derivations/engine/analytic-solutions.md §5); in spherical geometry its
 /// reference solution is the Bouguer quadrature.
 pub struct LinearLayer {
     r_base: f64,
@@ -163,7 +163,7 @@ impl ElectronDensity for ParabolicLayer {
 /// upper zero (requires r_b > y_m, amply true for realistic layers). Chosen
 /// because n^2 r^2 is quadratic in r for 1/f^2-scaled X, which makes every
 /// spherical ray integral elementary - the closed-form validation target
-/// (docs/derivations/analytic-solutions.md). C0 with kinks at both zeros.
+/// (docs/derivations/engine/analytic-solutions.md §4). C0 with kinks at both zeros.
 pub struct QuasiParabolicLayer {
     nm: f64,
     r_peak: f64,

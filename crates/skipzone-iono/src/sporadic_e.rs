@@ -6,7 +6,7 @@
 //! * It is not photochemical. Es is metallic ions concentrated into a sheet by
 //!   wind shear, so it has no Chapman profile and no `Ch(X, chi)`. The shape is
 //!   a thin [`QuasiParabolicLayer`], also the engine's closed-form validation
-//!   target (docs/derivations/analytic-solutions.md).
+//!   target (docs/derivations/engine/analytic-solutions.md §4).
 //! * It is probabilistic: Es is either there or not. This module gives an
 //!   occurrence probability alongside foEs, and the solver keeps Es-supported
 //!   paths in a separate verdict carrying that probability.

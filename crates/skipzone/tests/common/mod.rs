@@ -1,5 +1,5 @@
 //! Shared reference machinery for the validation suites, computed from
-//! docs/derivations/analytic-solutions.md independently of the tracer.
+//! docs/derivations/engine/analytic-solutions.md independently of the tracer.
 #![allow(dead_code)] // each test binary uses a subset
 
 use skipzone::density::{
@@ -40,7 +40,8 @@ pub struct BouguerRef {
     pub absorption: f64,
 }
 
-/// Bouguer-quadrature reference (derivation section 6). With a collision
+/// Bouguer-quadrature reference
+/// (docs/derivations/engine/analytic-solutions.md §6). With a collision
 /// profile the ray geometry uses the real part of the collisional index,
 /// n_g^2 = 1 - X/(1+Z^2), exactly as the tracer's Hamiltonian does, and the
 /// absorption integrand is (omega/c) Im(n) with the principal square root
@@ -176,7 +177,8 @@ pub fn bouguer_reference(
     }
 }
 
-/// QP closed forms (derivation section 4): (delta, group, phase, r_apex).
+/// QP closed forms (docs/derivations/engine/analytic-solutions.md §4):
+/// (delta, group, phase, r_apex).
 #[allow(clippy::many_single_char_names)]
 pub fn qp_closed_form(
     layer: &QuasiParabolicLayer,
@@ -206,8 +208,8 @@ pub fn qp_closed_form(
         "turning point below layer base: parameters penetrate"
     );
     // acosh antiderivatives, disc > 0 branch; apex limits are exact zeros
-    // (see the derivation's conditioning note - evaluating them at the
-    // floating-point rt costs 0.01-100 m of noise).
+    // (evaluating them at the floating-point rt costs 0.01-100 m of noise;
+    // see the conditioning note in docs/derivations/engine/analytic-solutions.md §4).
     let ff = |r: f64| a * r * r + b * r + c0;
     let ach = |u: f64| u.max(1.0).acosh();
     let i1 = |r: f64| -ach(-(2.0 * a * r + b) / disc.sqrt()) / a.sqrt();

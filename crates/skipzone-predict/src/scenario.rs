@@ -572,7 +572,7 @@ pub fn resolve(inputs: &Inputs) -> Assumptions {
     let rx_season = season_at(inputs.month, inputs.rx_lat);
 
     // D region: day/night-aware alpha-Chapman layer on the Chapman grazing
-    // function (docs/derivations/chapman-grazing.md). The layer is always built
+    // function (docs/derivations/iono/chapman-grazing.md). The layer is always built
     // (build_models) and evaluated at the local solar zenith angle along the
     // ray; these numbers are the realised peak at the path midpoint, for
     // display only.
@@ -858,7 +858,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     // and shows the winter anomaly), so its day/night behaviour comes from the
     // climatology; a zenith-angle law on top would count it twice. The engine's
     // `ChapmanLayer::with_zenith_angle` would also refuse past 85 deg and put a
-    // cliff on F2 at every terminator (docs/derivations/chapman-grazing.md).
+    // cliff on F2 at every terminator (docs/derivations/iono/chapman-grazing.md §1).
     let f2_source: Box<dyn skipzone_iono::chapman::PeakDensitySource> = match a.fof2_backend {
         Fof2Backend::Ccir => Box::new(
             ccir_peak(inputs).map_err(|e| format!("bundled CCIR maps failed to load: {e}"))?,
@@ -883,7 +883,7 @@ pub fn build_models(inputs: &Inputs, a: &Assumptions) -> Result<Models, String> 
     // The D region is always present: it evaluates the Chapman grazing
     // function at each sampled point's solar zenith angle, so it varies
     // smoothly across the terminator with no midpoint threshold
-    // (docs/derivations/chapman-grazing.md).
+    // (docs/derivations/iono/chapman-grazing.md §4).
     let ion = inputs.anchors.ionosphere;
     let d = SolarChapmanLayer::d_region(
         ion.d_peak_ne_overhead.value,
