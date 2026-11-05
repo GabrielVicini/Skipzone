@@ -3,47 +3,40 @@
 //!
 //! # Why this is a file and not a query
 //!
-//! [`crate::wsprlive::Query`] samples with `ORDER BY rand()`, so a fit run
-//! against it is optimising against a moving target - a parameter change and a
-//! resample look the same in the result. A calibration therefore fetches ONCE,
-//! writes here, and fits against the file. The file carries its own provenance
-//! header so that a number quoted from a fit can be traced back to the exact
-//! selection that produced it.
+//! [`crate::wsprlive::Query`] samples with `ORDER BY rand()`, so fitting against
+//! it confuses a parameter change with a resample. A calibration fetches once,
+//! writes here, and fits against the file. The file has a provenance header so
+//! a fitted number can be traced to the selection that produced it.
 //!
-//! # What a negative is, and what it is not
+//! # Negatives
 //!
-//! The archive publishes only successful decodes, so a "hit rate" computed from
-//! it is not a skill score: a model that predicted every path would score 100 %.
-//! The missing half can be reconstructed, carefully. In a given two-minute cycle
-//! on a given band:
+//! The archive publishes only successful decodes, so a hit rate computed from
+//! it is not a skill score: a model that predicted every path would score
+//! 100 %. The missing half can be reconstructed. In a given two-minute cycle on
+//! a given band:
 //!
 //! * transmitter A was on the air - somebody spotted it;
 //! * receiver W was awake and healthy on that band - it spotted several other
 //!   stations in that same cycle;
 //! * W did not spot A.
 //!
-//! That is a path that was attempted and failed, which is exactly the
-//! observation the archive lacks. [`crate::corpus::Negative`] records one.
+//! That is a path that was attempted and failed. [`crate::corpus::Negative`]
+//! records one.
 //!
-//! It is not a clean experiment, and the caveats are structural rather than
-//! incidental:
+//! Caveats:
 //!
-//! * **W may have been listening on another band.** Guarded against by requiring
-//!   W to have spotted [`crate::corpus::MIN_RX_SPOTS_FOR_HEALTHY`] stations on A's OWN band in
-//!   that cycle, not merely to have been active somewhere.
-//! * **A's transmission may have collided** with another signal in the same
-//!   200 Hz window at W. Unknowable from the archive; it inflates the negative
-//!   set with paths that were open but unlucky, which biases the measured
-//!   false-positive rate UPWARD, i.e. against the model.
-//! * **W's antenna may be directional and pointed elsewhere.** Also unknowable,
-//!   and also a bias against the model.
-//! * **A's transmission is not in every cycle.** WSPR stations transmit in a
-//!   fraction of cycles. Requiring that A was spotted by somebody in the cycle
-//!   establishes that it did transmit then.
+//! * W may have been listening on another band. Guarded against by requiring W
+//!   to have spotted [`crate::corpus::MIN_RX_SPOTS_FOR_HEALTHY`] stations on
+//!   A's band in that cycle.
+//! * A's transmission may have collided with another signal in the same 200 Hz
+//!   window at W. This cannot be known from the archive and adds open paths to
+//!   the negatives, biasing the false-positive rate upward.
+//! * W's antenna may be directional and pointed elsewhere, with the same bias.
+//! * WSPR stations transmit in only a fraction of cycles. Requiring that A was
+//!   spotted by somebody in the cycle establishes that it transmitted.
 //!
-//! Both unknowables push the same way, so a false-positive rate measured here is
-//! an UPPER BOUND on the model's true false-positive rate. That is the honest
-//! direction for it to err in, and it is stated wherever the number is reported.
+//! Both unknowns push the same way, so a false-positive rate measured here is
+//! an upper bound, and it is reported as one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -51,39 +44,36 @@ use std::fmt::Write as _;
 use crate::grid;
 use crate::wspr::{WsprSpot, parse_spots};
 
-/// How many DIFFERENT transmitters a receiver must have decoded, in the same
-/// cycle and on the same band, before its silence about one more is evidence.
+/// How many different transmitters a receiver must have decoded, in the same
+/// cycle and on the same band, before its silence about one more counts.
 ///
-/// One spot is not enough: a receiver that heard exactly one station may have
-/// been mid-restart, mid-band-change, or running an antenna that only works in
-/// one direction. Three is enough to establish that the receiver was awake, tuned
-/// to that band, and hearing in more than one direction.
+/// A receiver that heard one station may have been restarting, changing band,
+/// or using a one-direction antenna. Three shows it was awake, on that band,
+/// and hearing in more than one direction.
 pub const MIN_RX_SPOTS_FOR_HEALTHY: usize = 3;
 
 /// How far the archive's own `distance` may differ from the great-circle range
 /// the solver computes before the row is dropped, as a fraction.
 ///
 /// The two are computed from the same grid squares, so they should agree to the
-/// grid resolution. A disagreement beyond this means the archive's distance was
-/// computed from a DIFFERENT position than the grid states - a station whose
-/// reported locator does not match where it actually is - and the path being
-/// fitted is then not the path that was measured.
+/// grid resolution. A larger disagreement means the station's reported locator
+/// does not match its position, so the fitted path is not the measured one.
 pub const MAX_DISTANCE_MISMATCH: f64 = 0.05;
 
 /// Minimum spots a station must appear in before its fixed effect is estimated.
 ///
 /// A station seen twice contributes two residuals and one unknown, so its effect
 /// absorbs its own residual almost exactly and tells the fit nothing about the
-/// physics. Ten is the point at which the effect is pinned well enough that the
-/// remaining variation is the physics rather than the station.
+/// physics. At ten the effect is pinned well enough for the remaining variation
+/// to be physics.
 pub const MIN_SPOTS_PER_STATION: usize = 10;
 
 /// One corpus row: a measured spot plus the solar activity observed on its own
 /// day.
 ///
-/// The SSN is per-DAY and not per-corpus: a corpus spanning weeks spans real
-/// changes in solar activity, and scoring all of it against one number would
-/// charge the model for an input error.
+/// The SSN is per day: a corpus spanning weeks spans real changes in solar
+/// activity, and one number for all of it would charge the model for an input
+/// error.
 #[derive(Clone, Debug)]
 pub struct CorpusSpot {
     pub spot: WsprSpot,
@@ -116,8 +106,8 @@ pub struct Negative {
     /// The transmitting station, which demonstrably transmitted in this cycle.
     pub tx_call: String,
     pub tx_grid: String,
-    /// Claimed power, taken from the spots this transmitter DID produce in the
-    /// same cycle - it is a property of the transmission, not of the receiver.
+    /// Claimed power, taken from the spots this transmitter produced in the
+    /// same cycle.
     pub tx_dbm: f64,
     /// The receiving station, which demonstrably decoded
     /// [`MIN_RX_SPOTS_FOR_HEALTHY`] other stations on this band in this cycle.
@@ -129,16 +119,16 @@ pub struct Negative {
     pub tx_lon: f64,
     pub rx_lat: f64,
     pub rx_lon: f64,
-    /// How many stations the receiver DID hear on this band in this cycle. The
+    /// How many stations the receiver heard on this band in this cycle, the
     /// evidence that its silence means something.
     pub rx_heard: usize,
     pub ssn: f64,
 }
 
 impl Negative {
-    /// This negative as a [`WsprSpot`], so the solver can be handed it through
-    /// exactly the same path a positive takes. The SNR field carries
-    /// [`NEGATIVE_SNR_SENTINEL`] and must never be scored as a measurement.
+    /// This negative as a [`WsprSpot`], so the solver takes it through the same
+    /// path as a positive. The SNR field carries [`NEGATIVE_SNR_SENTINEL`] and
+    /// must not be scored as a measurement.
     #[must_use]
     pub fn as_spot(&self) -> WsprSpot {
         WsprSpot {
@@ -159,25 +149,21 @@ impl Negative {
     }
 }
 
-/// The SNR a negative carries. Not a measurement: a negative has no measured
-/// SNR, and anything that averages this into an error statistic is wrong.
+/// The SNR a negative carries. A negative has no measured SNR.
 ///
-/// NaN rather than a large negative number, deliberately. A sentinel like
-/// -999 would flow through an arithmetic mean and produce a plausible-looking
-/// wrong answer; NaN makes any such mistake visible immediately.
+/// NaN rather than a value like -999, which would flow through a mean and give
+/// a plausible wrong answer; NaN makes the mistake visible.
 pub const NEGATIVE_SNR_SENTINEL: f64 = f64::NAN;
 
 impl Negative {
-    /// Confirms this negative carries no measured SNR. The guard that makes the
-    /// sentinel choice above self-enforcing.
+    /// Confirms this negative carries no measured SNR.
     #[must_use]
     pub fn snr_is_absent(&self) -> bool {
         self.as_spot().snr_db.is_nan()
     }
 }
 
-/// What each filter removed while a corpus was assembled. Reported, never
-/// silently applied.
+/// What each filter removed while a corpus was assembled, for the report.
 #[derive(Clone, Debug, Default)]
 pub struct Rejections {
     pub unparseable_rows: usize,
@@ -185,8 +171,8 @@ pub struct Rejections {
     pub distance_mismatch: usize,
     pub station_too_rare: usize,
     pub extreme_station_effect: usize,
-    /// The worst distance disagreements seen, for the report to show rather than
-    /// summarise: `(tx_grid, rx_grid, archive_km, solved_km)`.
+    /// The worst distance disagreements seen:
+    /// `(tx_grid, rx_grid, archive_km, solved_km)`.
     pub worst_mismatches: Vec<(String, String, f64, f64)>,
 }
 
@@ -202,10 +188,8 @@ impl Rejections {
 
 /// De-duplicate and reject rows the fit cannot use.
 ///
-/// `great_circle_km` is passed in rather than computed here so that the check is
-/// against the SAME range function the solver uses; a cross-check against an
-/// independent reimplementation of the great circle would be testing this module
-/// instead of the data.
+/// `great_circle_km` is passed in so the check uses the same range function as
+/// the solver, and so tests the data rather than a second implementation.
 #[must_use]
 pub fn clean(
     spots: Vec<CorpusSpot>,
@@ -216,10 +200,10 @@ pub fn clean(
     let mut kept = Vec::with_capacity(spots.len());
 
     for s in spots {
-        // One transmission heard by one receiver in one cycle on one band is ONE
-        // observation however many times the archive carries it. The band is
-        // keyed by rounded kHz so two rows a few Hz apart - the same transmission
-        // measured with slightly different frequency estimates - collapse.
+        // One transmission heard by one receiver in one cycle on one band is one
+        // observation however many rows the archive has. The band is keyed by
+        // rounded kHz so rows a few Hz apart (the same transmission with
+        // slightly different frequency estimates) collapse.
         #[allow(clippy::cast_possible_truncation)]
         let key = (
             s.cycle(),
@@ -234,7 +218,7 @@ pub fn clean(
 
         let solved = great_circle_km(&s.spot);
         let archive = s.spot.reported_km;
-        // Compared against the LONGER of the two so a near-zero archive distance
+        // Compared against the longer of the two so a near-zero archive distance
         // cannot pass by making the denominator small.
         let scale = solved.max(archive).max(1.0);
         if !solved.is_finite() || (solved - archive).abs() / scale > MAX_DISTANCE_MISMATCH {
@@ -250,9 +234,8 @@ pub fn clean(
 /// [`MIN_SPOTS_PER_STATION`] times, iterating until the corpus is stable.
 ///
 /// One pass is not enough: removing a rare receiver's spots can take a
-/// transmitter below the threshold, which can take another receiver below it. The
-/// loop runs to a fixed point so the surviving corpus really does satisfy the
-/// condition it claims to.
+/// transmitter below the threshold, which can take another receiver below it, so
+/// the loop runs to a fixed point.
 #[must_use]
 pub fn require_identifiable_stations(
     mut spots: Vec<CorpusSpot>,
@@ -282,8 +265,8 @@ pub fn require_identifiable_stations(
 ///
 /// `census` is every spot the archive holds for that cycle on that band, already
 /// hygiene-filtered. `min_km`/`max_km` bound which of the constructed pairs are
-/// kept, matching the corpus's own range window - a 40 km pair is not a path this
-/// model claims to predict.
+/// kept, matching the corpus's range window (a 40 km pair is not a path this
+/// model predicts).
 #[must_use]
 pub fn negatives_from_cycle(
     census: &[WsprSpot],
@@ -292,13 +275,13 @@ pub fn negatives_from_cycle(
     ssn: f64,
     great_circle_km: impl Fn(&WsprSpot) -> f64,
 ) -> Vec<Negative> {
-    // Who transmitted, and with what claimed power. A transmitter that appears in
-    // this census demonstrably radiated in this cycle.
+    // Who transmitted, and with what claimed power. A transmitter in this census
+    // radiated in this cycle.
     let mut transmitters: BTreeMap<&str, &WsprSpot> = BTreeMap::new();
     // Which distinct transmitters each receiver decoded. `BTreeSet` because
     // hearing the same station twice is not two pieces of evidence of health.
     let mut receiver_heard: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    // The pairs that DID work, which are exactly the ones that are not negatives.
+    // The pairs that worked, i.e. the ones that are not negatives.
     let mut decoded: BTreeSet<(&str, &str)> = BTreeSet::new();
 
     for s in census {
@@ -357,14 +340,13 @@ pub fn negatives_from_cycle(
     out
 }
 
-// --- On-disk format -------------------------------------------------------
+// On-disk format.
 
 /// Serialise positives as the nine-column TSV [`parse_spots`] reads, with the
 /// per-day SSN as a tenth column and a `#` provenance header.
 ///
-/// Kept parser-compatible on purpose: the ten-column rows load through the same
-/// [`parse_spots`] the live path uses, which ignores trailing fields, so there is
-/// no second spot parser to keep in step with the first.
+/// The ten-column rows load through the same [`parse_spots`] as the live path,
+/// which ignores trailing fields, so there is only one spot parser.
 #[must_use]
 pub fn write_positives(spots: &[CorpusSpot], provenance: &str) -> String {
     let mut s = String::new();
@@ -401,9 +383,7 @@ pub fn write_positives(spots: &[CorpusSpot], provenance: &str) -> String {
 
 /// Read back what [`write_positives`] wrote.
 ///
-/// The SSN column is required: a corpus row whose solar activity is unknown would
-/// silently fall back to a default, and the fit would then be scoring that
-/// default as much as the model.
+/// The SSN column is required; a default would be scored as if it were data.
 #[must_use]
 pub fn read_positives(text: &str) -> (Vec<CorpusSpot>, Vec<String>) {
     let (spots, mut problems) = parse_spots(text);
@@ -435,9 +415,8 @@ pub fn read_positives(text: &str) -> (Vec<CorpusSpot>, Vec<String>) {
     (out, problems)
 }
 
-/// Serialise negatives. A separate format from the positives on purpose: a
-/// negative has no measured SNR, and a file that gave it one - even a sentinel in
-/// an SNR column - invites something downstream to average it in.
+/// Serialise negatives, in a separate format with no SNR column so nothing
+/// downstream can average a placeholder in.
 #[must_use]
 pub fn write_negatives(negatives: &[Negative], provenance: &str) -> String {
     let mut s = String::new();
@@ -590,7 +569,7 @@ mod tests {
     }
 
     /// A row whose archive distance disagrees with the solved great circle is a
-    /// row whose stated location is wrong, and it must be dropped and COUNTED.
+    /// row whose stated location is wrong; it must be dropped and counted.
     #[test]
     fn distance_mismatch_is_dropped_and_reported() {
         let rows = vec![
@@ -601,7 +580,7 @@ mod tests {
         assert_eq!(kept.len(), 1);
         assert_eq!(rej.distance_mismatch, 1);
         assert_eq!(rej.worst_mismatches.len(), 1);
-        // A few percent must still pass: the grids really are +/- a few km.
+        // A few percent must still pass: the grids are +/- a few km.
         let ok = vec![corpus(spot(2, "A", "B", 14.097, 408.0))];
         let (kept, rej) = clean(ok, |_| 400.0);
         assert_eq!(kept.len(), 1, "2 % is inside the grid resolution");
@@ -640,7 +619,7 @@ mod tests {
         assert_eq!(kept.len(), MIN_SPOTS_PER_STATION);
         assert_eq!(rej.station_too_rare, 5);
 
-        // And the invariant the function claims really holds afterwards.
+        // The invariant holds afterwards.
         let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for s in &kept {
             *counts.entry(s.spot.rx_call.as_str()).or_default() += 1;
@@ -651,11 +630,9 @@ mod tests {
     /// The negatives construction, on a census small enough to check by hand.
     ///
     /// Four transmitters were on the air. RX_GOOD heard all four, so it is
-    /// demonstrably healthy but has no silence left to explain. RX_OK heard
-    /// three, enough to be healthy, and did not hear TX4, which is exactly one
-    /// negative. RX_DEAF heard two, which is below
-    /// [`MIN_RX_SPOTS_FOR_HEALTHY`] and so is not evidence of anything, however
-    /// many stations it missed.
+    /// healthy with no silence to explain. RX_OK heard three, enough to be
+    /// healthy, and missed TX4: one negative. RX_DEAF heard two, below
+    /// [`MIN_RX_SPOTS_FOR_HEALTHY`], so its misses do not count.
     #[test]
     fn negatives_need_a_demonstrably_healthy_receiver() {
         let census = vec![
@@ -680,8 +657,7 @@ mod tests {
         assert!((n.tx_dbm - 23.0).abs() < 1e-9);
 
         // One more station heard by RX_DEAF tips it over the threshold, and then
-        // its two misses DO become negatives. The threshold is the only thing
-        // standing between "quiet receiver" and "evidence".
+        // its two misses become negatives.
         let mut more = census.clone();
         more.push(spot(2, "TX3", "RX_DEAF", 14.097, 400.0));
         let negs = negatives_from_cycle(&more, 300.0, 20_000.0, 119.0, |_| 400.0);
@@ -689,8 +665,7 @@ mod tests {
         assert!(negs.iter().any(|n| n.rx_call == "RX_DEAF"));
     }
 
-    /// A pair outside the corpus's range window is not a path the model claims,
-    /// so it is not a fair negative either.
+    /// A pair outside the corpus's range window is not a fair negative.
     #[test]
     fn negatives_respect_the_range_window() {
         let census = vec![
@@ -707,8 +682,7 @@ mod tests {
     }
 
     /// Positives and negatives must survive a round trip through their files,
-    /// SSN included. A corpus that loses its solar activity on save would have
-    /// the fit silently scoring a default.
+    /// SSN included.
     #[test]
     fn both_files_round_trip() {
         let spots = vec![
@@ -725,7 +699,7 @@ mod tests {
         assert!((back[1].spot.freq_mhz - 7.040_1).abs() < 1e-6);
         assert_eq!(back[1].spot.timestamp, (2026, 7, 27, 4, 4));
 
-        // A corpus row with no SSN column must be REPORTED, not defaulted.
+        // A corpus row with no SSN column must be reported, not defaulted.
         let (bad, problems) = read_positives(
             "2026-07-27 04:02\tK1ABC\t14.0971\t-15\tDN70aa\t23\tW9XYZ\tDN80aa\t400\n",
         );

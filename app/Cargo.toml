@@ -22,12 +22,10 @@ num-complex = "0.4"
 rayon = "1"
 shapefile = { version = "0.9.0", default-features = false }
 # HTTPS for the validation harness only: it fetches live WSPR spots and the
-# current solar indices. Nothing in the GUI or the solver touches the network,
-# and the engine crate never sees this - the workspace split exists so that an
-# HTTP dependency here cannot reach it. Pure-Rust TLS so there is no system
-# library to install, matching the crate's portability requirement.
+# current solar indices. The GUI and solver never touch the network, and the
+# workspace split keeps this dependency out of the engine crate. Pure-Rust TLS
+# avoids a system library.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
-# Deliberately NOT clippy-pedantic, unlike the engine crate: this is an
-# egui application crate, and pedantic lint churn on UI layout code buys
-# nothing. The engine keeps its strict lints.
+# Not clippy-pedantic, unlike the engine crate: pedantic lints on egui layout
+# code add churn without catching bugs.

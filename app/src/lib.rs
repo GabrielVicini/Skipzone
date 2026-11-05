@@ -2,14 +2,13 @@
 //!
 //! This crate calls the engine's public API (`ChapmanLayer`,
 //! `QuasiParabolicLayer`, `Igrf`, `ExponentialCollisions`, `Tracer`, `Homing`)
-//! and renders the results. The engine crate is untouched by design, and lives
-//! in a separate workspace member so the app's dependency tree never reaches it.
+//! and renders the results. The engine is a separate workspace member so the
+//! app's dependency tree never reaches it.
 //!
-//! It is a library with a thin `main.rs` on top rather than a plain binary, so
-//! that the headless validation harnesses in `src/bin/` drive exactly the same
-//! model and solver code the GUI does, instead of a parallel copy of it.
+//! It is a library with a thin `main.rs` so that the headless validation
+//! harnesses in `src/bin/` run the same model and solver code as the GUI.
 //!
-//! The exception to "no physics here" is the ionospheric model layer -
+//! The exception to "no physics here" is the ionospheric model layer:
 //! `chapman`, `fof2` and `sporadic_e`. Coupling electron production to solar
 //! geometry and to a climatology map is a scenario concern, not a reusable
 //! engine primitive; it is derived and validated the same way

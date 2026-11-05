@@ -1,28 +1,20 @@
 //! Live WSPR spot retrieval from the wspr.live archive.
 //!
 //! wspr.live exposes the WSPRnet archive as a public ClickHouse endpoint that
-//! answers plain SQL over HTTP. That is used directly rather than through a
-//! JSON API, for one specific reason: ClickHouse can be asked to format its
-//! answer as TSV, and the columns can be ordered to be *exactly* the tab
-//! separated layout [`crate::wspr::parse_spots`] already reads. So the network
-//! path and the file path go through one parser, with one set of tests, and a
-//! fetched run and a saved-file run cannot diverge in how a spot is read.
+//! answers SQL over HTTP. ClickHouse can return TSV with the columns in the
+//! layout [`crate::wspr::parse_spots`] reads, so fetched and saved spots go
+//! through one parser.
 //!
-//! # Ingest lag, and why the window stops short of now
+//! # Ingest lag
 //!
-//! WSPR receivers upload in their own time. A spot decoded at 12:34 may reach
-//! the database seconds later or minutes later, so the most recent few minutes
-//! of the archive are always PARTIALLY populated - present, but missing an
-//! unknown fraction of the stations that will eventually report. Sampling that
-//! region silently biases a validation run: the spots that arrive quickest are
-//! not a random subset of all spots (they skew towards well-connected,
-//! well-run, often better-equipped stations).
+//! WSPR receivers upload in their own time, so the most recent few minutes of
+//! the archive are only partly populated. The spots that arrive first skew
+//! towards well-connected, better-equipped stations, which would bias a
+//! validation run.
 //!
-//! So a window never runs up to the present. It ends [`crate::wsprlive::INGEST_LAG_MINUTES`]
-//! before it, and [`crate::wsprlive::Window::describe`] states the lag it applied so the report
-//! can show it rather than the operator having to know. `--at` exists for the
-//! same reason from the other direction: scoring a specific past instant needs
-//! no lag allowance at all, because that data settled long ago.
+//! So a window ends [`crate::wsprlive::INGEST_LAG_MINUTES`] before the present,
+//! and [`crate::wsprlive::Window::describe`] states the lag so the report can
+//! show it. `--at` scores a past instant, which needs no lag allowance.
 
 use crate::net::{self, NetError};
 
@@ -44,10 +36,8 @@ const ENDPOINT: &str = "https://db1.wspr.live/";
 ///   20:30      5   0.5 min old
 /// ```
 ///
-/// Ten minutes is therefore a generous margin rather than a guess. It is still
-/// only a default: [`Query::completeness`] measures the actual fill of the
-/// window that was sampled, so a run reports what it got rather than trusting
-/// this number.
+/// Ten minutes is a generous margin. [`Query::completeness`] measures the fill
+/// of the sampled window, so a run reports what it got.
 pub const INGEST_LAG_MINUTES: u32 = 10;
 
 /// The slice of the archive a run scores.
@@ -118,17 +108,13 @@ pub struct Query {
     pub band_mhz: Option<f64>,
     /// Upper frequency limit, MHz. Defaults to [`HF_TOP_MHZ`].
     ///
-    /// This exists to keep 6 m out of a default run, and it is a statement
-    /// about SCOPE rather than a convenience. Above about 30 MHz the layers
-    /// this model carries have no reflection to offer: an F2 critical frequency
-    /// of 10-15 MHz gives an oblique MUF that runs out well below 50 MHz, so
-    /// every 6 m opening in the archive is sporadic E, meteor scatter, TEP or
-    /// aircraft scatter - three of which are not modelled here at all. Scoring
-    /// them counts as a model failure something the model never claimed, and it
-    /// spends the random sample's budget doing it.
+    /// Keeps 6 m out of a default run. Above about 30 MHz the modelled layers
+    /// offer no reflection: an F2 critical frequency of 10-15 MHz gives an
+    /// oblique MUF well below 50 MHz, so 6 m openings are sporadic E, meteor
+    /// scatter, TEP or aircraft scatter, three of which are not modelled.
+    /// Scoring them would count as failures things the model does not claim.
     ///
-    /// Raise it deliberately (`--max-mhz 60`) to look at how the Es stack does
-    /// up there; that is a real question, just a different one.
+    /// Raise it (`--max-mhz 60`) to see how the Es stack does up there.
     pub max_mhz: f64,
     /// Row cap. Every row costs a full solve, so this is the run's real budget.
     pub limit: u32,
@@ -154,10 +140,9 @@ impl Default for Query {
 impl Query {
     /// The frequency ceiling actually applied, MHz.
     ///
-    /// An explicit `--band` wins over the default ceiling: asking for 6 m and
-    /// then silently getting nothing back because of a limit the caller did not
-    /// set would be the worst of both. A band above the ceiling raises it to
-    /// cover that band, and [`Self::describe_filter`] says so.
+    /// An explicit `--band` wins over the default ceiling: a band above it
+    /// raises the ceiling to cover that band, and [`Self::describe_filter`]
+    /// says so.
     #[must_use]
     pub fn effective_max_mhz(&self) -> f64 {
         match self.band_mhz {
@@ -197,23 +182,21 @@ impl Query {
     /// like `2026-07-27 20:July` that the spot parser rejects outright.
     ///
     /// `code >= 0` drops a small number of rows the archive carries with -1,
-    /// which is not one of the WSPR message types. The message type itself is
-    /// deliberately NOT filtered on: types 1, 2 and 3 are the plain, compound
-    /// and hashed-callsign forms of the same two-minute transmission, and all
-    /// three carry an SNR on the same scale. (An earlier version of this filter
-    /// asked for `code = 0`, which no row has, and quietly returned nothing.)
+    /// which is not a WSPR message type. The message type is not otherwise
+    /// filtered: types 1, 2 and 3 are the plain, compound and hashed-callsign
+    /// forms of the same transmission, with SNR on the same scale. No row has
+    /// `code = 0`.
     ///
-    /// The frequency ceiling is applied HERE rather than after fetching, so
-    /// out-of-scope rows never compete for the random sample's budget.
+    /// The frequency ceiling is applied in the query so out-of-scope rows do
+    /// not use up the random sample.
     ///
-    /// Sampling is by `rand()` rather than by taking the first N rows: the
-    /// archive returns rows in insertion order, so a plain `LIMIT` would score
-    /// whichever receivers happened to upload first - the same bias the ingest
-    /// lag guards against, reintroduced through the back door.
+    /// Sampling is by `rand()` because the archive returns rows in insertion
+    /// order, and a plain `LIMIT` would favour the receivers that uploaded
+    /// first, the same bias the ingest lag avoids.
     #[must_use]
     pub fn sql(&self) -> String {
-        // Rounded, not truncated: `(50.294 - 0.1) * 1e6` lands a whisker below
-        // 50 194 000 in binary floating point, and a bare cast would put the
+        // Rounded, not truncated: `(50.294 - 0.1) * 1e6` lands just below
+        // 50 194 000 in binary floating point, so a bare cast would put the
         // band edge a hertz low.
         let hz = |mhz: f64| (mhz * 1e6).round() as i64;
         let band = match self.band_mhz {
@@ -244,9 +227,8 @@ impl Query {
     /// How many spots the frequency ceiling removed from the window, and how
     /// many survived it.
     ///
-    /// Excluding 6 m is a scope decision, and a scope decision that hides how
-    /// much it excluded is just a silent filter. This counts both sides so the
-    /// report can state the size of what it declined to score.
+    /// Counts both sides so the report can state how much the 6 m exclusion
+    /// removed.
     ///
     /// # Errors
     /// Transport failures, and any error the archive reports.
@@ -290,12 +272,10 @@ impl Query {
 
 /// How full the sampled window was, against cycles old enough to have settled.
 ///
-/// The ingest lag is a default, and a default is an assumption. This measures
-/// the thing the assumption is about: it counts spots per two-minute cycle
-/// inside the window, and compares them with the median cycle over a longer
-/// span reaching further back. A window at 100 % was fully populated when it
-/// was read; one at 40 % was read too early, and every statistic computed from
-/// it is drawn from whichever receivers upload fastest.
+/// Checks the ingest-lag assumption: counts spots per two-minute cycle inside
+/// the window and compares them with the median cycle over a longer, older
+/// span. A window at 40 % was read too early, and its statistics come from
+/// whichever receivers upload fastest.
 #[derive(Clone, Debug)]
 pub struct Completeness {
     /// Median spots per cycle inside the sampled window.
@@ -318,7 +298,7 @@ impl Completeness {
         })
     }
 
-    /// Is the window full enough to score without a caveat?
+    /// Whether the window is full enough to score without a caveat.
     #[must_use]
     pub fn is_settled(&self) -> bool {
         self.fraction().is_some_and(|f| f >= 0.9)
@@ -326,7 +306,7 @@ impl Completeness {
 }
 
 impl Query {
-    /// Measure how full the sampled window actually was.
+    /// Measure how full the sampled window was.
     ///
     /// # Errors
     /// Transport failures, and any error the archive reports.
@@ -387,22 +367,18 @@ impl Query {
     }
 }
 
-// --- Calibration corpus ---------------------------------------------------
+// Calibration corpus.
 //
-// The live [`Query`] above is right for SCORING and wrong for FITTING, in two
-// specific ways that both matter enough to justify a second query type rather
-// than a flag on the first.
+// The live `Query` above suits scoring but not fitting:
 //
-// * `ORDER BY rand()` returns a different sample every run. Fitting against that
-//   is optimising against a moving target: a parameter change and a resample are
-//   indistinguishable in the result.
-// * `code >= 0` keeps message types 2 and 3, the compound and hashed-callsign
-//   forms. That is right for scoring - they carry an SNR on the same scale - and
-//   wrong here, because a two-way fixed-effects model needs to know WHICH
-//   station a spot came from, and a hashed callsign is ambiguous by construction.
+// * `ORDER BY rand()` returns a different sample every run, so a parameter
+//   change and a resample look the same.
+// * `code >= 0` keeps message types 2 and 3 (compound and hashed callsigns). A
+//   two-way fixed-effects model needs to know which station a spot came from,
+//   and a hashed callsign is ambiguous.
 //
-// A corpus query therefore differs from a scoring query in being reproducible
-// and in insisting on identifiable stations and locatable endpoints.
+// A corpus query is reproducible and requires identifiable stations and
+// locatable endpoints.
 
 /// Lowest claimed transmit power to accept, dBm. Below 0 dBm (1 mW) the claim is
 /// almost always a mis-set radio rather than a real QRP station.
@@ -422,9 +398,9 @@ pub const IDENTIFIABLE_MESSAGE_CODE: i32 = 1;
 /// A reproducible, hygiene-filtered query for one time window.
 ///
 /// Sampling is by `cityHash64` of the row's identity rather than by `rand()`:
-/// still a uniform sample uncorrelated with upload order, but the SAME sample
-/// every time the query is issued, which is what makes a fit against it
-/// meaningful. `salt` varies it deliberately when a different draw is wanted.
+/// still a uniform sample uncorrelated with upload order, but the same sample
+/// every time, so a fit against it is meaningful. `salt` gives a different
+/// draw.
 #[derive(Clone, Debug)]
 pub struct CorpusQuery {
     pub window: Window,
@@ -436,14 +412,13 @@ pub struct CorpusQuery {
     ///
     /// A whole-archive sample follows real band activity, which loads 20 m and
     /// 40 m and leaves 160 m and 10 m almost unrepresented. Targeting a band
-    /// explicitly is how the corpus gets the frequency spread that identifies the
-    /// absorption law; without it the frequency dependence would be fitted from
-    /// two bands.
+    /// explicitly gives the corpus the frequency spread that identifies the
+    /// absorption law.
     pub band_mhz: Option<f64>,
     /// Restrict both ends to the busiest stations, or `None` for any station.
     pub busiest: Option<BusiestFilter>,
-    /// Changes which rows the deterministic sample selects, without making the
-    /// selection unpredictable. Same salt, same rows, always.
+    /// Changes which rows the deterministic sample selects. Same salt, same
+    /// rows.
     pub salt: u32,
 }
 
@@ -455,33 +430,27 @@ pub struct CorpusQuery {
 /// A two-way fixed-effects model needs enough spots per station to pin that
 /// station's effect - see [`crate::corpus::MIN_SPOTS_PER_STATION`]. WSPR has
 /// thousands of active stations, so a uniform sample of a few thousand spots
-/// gives almost every one of them two or three rows, and then EVERY station
-/// effect is unidentified and the whole corpus is unusable. Measured against this
-/// archive: 224 uniformly-sampled spots spanned 173 stations, and requiring ten
-/// spots per station removed all 224.
+/// gives almost every one of them two or three rows, leaving every station
+/// effect unidentified. In this archive, 224 uniformly-sampled spots spanned
+/// 173 stations, and requiring ten spots per station removed all 224.
 ///
-/// Concentrating on the busiest stations fixes that, and the cost has to be
-/// stated rather than absorbed: busy stations are better sited, better equipped
-/// and electrically quieter than the WSPR population as a whole. So the station
-/// effects this yields describe the ACTIVE CORE of the network, not its median
-/// member, and the physics identified from within-station variation is identified
-/// over that subpopulation.
+/// The cost: busy stations are better sited, better equipped and quieter than
+/// the WSPR population as a whole, so the station effects (and the physics
+/// identified within stations) describe the active core of the network rather
+/// than its median member.
 ///
-/// # Why a subquery rather than a list of callsigns
+/// # Why a subquery
 ///
-/// Both. The ranking is available as a list through [`busiest_stations`], which
-/// is what the report prints. But putting 500 callsigns into the data query's
-/// `IN` clause produced a URL the endpoint rejected with HTTP 414, so the query
-/// itself carries the ranking as a SUBQUERY over the reference day. Same
-/// selection, and it stays the same selection however many stations are asked
-/// for.
+/// [`busiest_stations`] gives the ranking as a list for the report, but 500
+/// callsigns in an `IN` clause made a URL the endpoint rejected with HTTP 414.
+/// The data query therefore carries the ranking as a subquery over the
+/// reference day, which selects the same stations.
 #[derive(Clone, Debug)]
 pub struct BusiestFilter {
     /// UTC date the ranking is computed over, `YYYY-MM-DD`.
     ///
-    /// ONE day for the whole corpus, deliberately: ranking per window would let
-    /// the set of stations drift between windows, and a station effect estimated
-    /// over a drifting membership is not a fixed effect.
+    /// One day for the whole corpus: ranking per window would let the station
+    /// set drift between windows, and a fixed effect needs fixed membership.
     pub census_date: String,
     pub top_tx: u32,
     pub top_rx: u32,
@@ -520,9 +489,8 @@ impl CorpusQuery {
     /// nothing when the corpus is not restricted.
     ///
     /// The subquery repeats the hygiene and range predicates, so a station is
-    /// ranked by the spots it produced that this corpus would ACCEPT, not by its
-    /// total traffic. A receiver whose volume is all sub-300 km ground wave is
-    /// not a busy station for these purposes.
+    /// ranked by the spots this corpus would accept, not by its total traffic
+    /// (a receiver whose volume is all sub-300 km ground wave does not count).
     fn busiest_predicate(&self, end: StationEnd) -> String {
         let Some(b) = &self.busiest else {
             return String::new();
@@ -550,8 +518,7 @@ impl CorpusQuery {
     }
 
     /// The hygiene predicates, shared with the cycle census so the negatives are
-    /// drawn from the same population as the positives. A negative built from a
-    /// station the positives filter out would not be a comparable observation.
+    /// drawn from the same population as the positives.
     fn hygiene_sql(&self) -> String {
         format!(
             "code = {IDENTIFIABLE_MESSAGE_CODE} \
@@ -561,8 +528,7 @@ impl CorpusQuery {
     }
 
     /// One line naming every filter in force, for the corpus file's provenance
-    /// header. A saved corpus that does not record how it was selected cannot be
-    /// interpreted later.
+    /// header.
     #[must_use]
     pub fn describe_filter(&self) -> String {
         format!(
@@ -591,8 +557,8 @@ impl CorpusQuery {
     }
 
     /// The SQL. Projection pinned to the nine columns
-    /// [`crate::wspr::parse_spots`] reads, in its order, exactly as [`Query`]
-    /// does - so a corpus file and a live fetch go through one parser.
+    /// [`crate::wspr::parse_spots`] reads, in its order, as [`Query`] does, so
+    /// a corpus file and a live fetch go through one parser.
     #[must_use]
     pub fn sql(&self) -> String {
         format!(
@@ -624,10 +590,10 @@ impl CorpusQuery {
     }
 
     /// How many rows each hygiene filter removed from this window, so the corpus
-    /// can state the size of what it discarded rather than only what it kept.
+    /// can report what it discarded.
     ///
-    /// Counted in ONE pass with `countIf`, because six separate queries against a
-    /// live archive would each see a slightly different table.
+    /// Counted in one pass with `countIf`, because six separate queries against
+    /// a live archive would each see a slightly different table.
     ///
     /// # Errors
     /// Transport failures, and any error the archive reports.
@@ -696,13 +662,12 @@ impl HygieneCensus {
     }
 }
 
-/// EVERY spot in one two-minute cycle on one band, subject to the same hygiene
+/// Every spot in one two-minute cycle on one band, subject to the same hygiene
 /// filters as the corpus.
 ///
-/// This is the query the negatives set is built from, and it is deliberately
-/// unfiltered by distance: deciding whether a receiver was healthy in a cycle
-/// means counting everything it heard, including the short paths a calibration
-/// corpus would not score.
+/// The negatives set is built from this. It is not filtered by distance,
+/// because judging a receiver's health means counting everything it heard,
+/// including short paths the corpus would not score.
 ///
 /// # Errors
 /// Transport failures, and any error the archive reports.
@@ -725,9 +690,8 @@ pub fn cycle_census_tsv(utc_cycle: &str, band_mhz: f64) -> Result<String, NetErr
 
 /// The busiest stations at one end of a path over a window, most active first.
 ///
-/// This is how a corpus finds the stations whose fixed effects can actually be
-/// estimated; see [`CorpusQuery::busiest`] for why that restriction is
-/// necessary and what it costs in representativeness.
+/// This is how a corpus finds the stations whose fixed effects can be
+/// estimated; see [`CorpusQuery::busiest`] for why and what it costs.
 ///
 /// # Errors
 /// Transport failures, and any error the archive reports.
@@ -825,8 +789,7 @@ mod tests {
         );
     }
 
-    /// The projection has to match what `parse_spots` reads, in order, or the
-    /// two halves of the harness silently disagree.
+    /// The projection has to match what `parse_spots` reads, in order.
     #[test]
     fn projection_matches_the_spot_parser() {
         let sql = Query::default().sql();
@@ -853,9 +816,8 @@ mod tests {
         assert!(sql.contains("ORDER BY rand()"), "{sql}");
     }
 
-    /// A row the parser can read must come out of the projection's shape. This
-    /// is the contract between the two modules, pinned on a literal row in the
-    /// format ClickHouse emits for it.
+    /// A literal row in the format ClickHouse emits for the projection must
+    /// parse.
     #[test]
     fn a_clickhouse_row_parses_as_a_spot() {
         let row = "2026-07-27 03:22\tK1ABC\t14.097100\t-18\tFN42\t37\tW9XYZ\tEM48\t1420";
@@ -948,8 +910,7 @@ mod tests {
         assert!(q.describe_filter().contains("30 MHz"));
     }
 
-    /// Asking for 6 m explicitly must WORK, not silently return nothing
-    /// because of a ceiling the caller never set.
+    /// Asking for 6 m explicitly must raise the ceiling.
     #[test]
     fn an_explicit_band_lifts_the_ceiling() {
         let q = Query {

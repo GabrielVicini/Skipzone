@@ -1,25 +1,22 @@
 //! Area coverage: one transmitter, a grid of receiver positions, and the
-//! *existing* point-to-point calculation run once per grid point.
+//! point-to-point calculation run once per grid point.
 //!
-//! There is deliberately no coverage-specific physics, link budget or
-//! propagation shortcut in this module. A grid point is evaluated by moving the
-//! receiver to it and calling the same [`crate::solve::solve`] the RUN TRACE
-//! button calls - path loss, TX power to received power, antenna gain by takeoff
-//! angle, noise floor and per-hop ground/coastline detection all come from that
-//! one chain. This file only decides *which* receiver positions to try and
-//! reduces each solve to the one number the map colours by.
+//! There is no coverage-specific physics here. A grid point is evaluated by
+//! moving the receiver to it and calling the same [`crate::solve::solve`] as
+//! the RUN TRACE button, so path loss, antenna gain, noise floor and per-hop
+//! ground detection all come from that one chain. This module chooses the
+//! receiver positions and reduces each solve to the number the map colours by.
 //!
 //! # Why the engine models can be built once
 //!
 //! [`crate::scenario::build_models`] depends on the scenario only through the
 //! sunspot number, hmF2, scale height, the collision profile, the IGRF epoch and
 //! the solar *declination* - and declination (Cooper 1969) is a function of the
-//! day of year alone. None of those depend on where the receiver is, so one
-//! `Models` is valid for every grid point, exactly as the frequency sweep reuses
-//! one `Models` across every candidate frequency. [`crate::scenario::resolve`],
-//! which *does* vary with the receiver (day/night and season at the receiving
-//! site feed the noise floor), is re-run per grid point. The
-//! `cell_matches_a_full_point_to_point_solve` test pins that equivalence.
+//! day of year alone. None depend on the receiver position, so one `Models`
+//! serves every grid point, as the frequency sweep reuses one across
+//! frequencies. [`crate::scenario::resolve`] does depend on the receiver (its
+//! day/night and season feed the noise floor) and is re-run per grid point.
+//! `cell_matches_a_full_point_to_point_solve` checks the equivalence.
 
 use skipzone::magnetoionic::Mode;
 
@@ -27,28 +24,20 @@ use crate::noise::PathState;
 use crate::scenario::{self, EARTH_RADIUS_M, Inputs, Models};
 use crate::solve::{self, LayerMode, LayerStatus};
 
-/// Upper bound on grid points in one run. This is a guard against an
-/// accidentally enormous job, not a quality knob: a full solve costs on the
-/// order of a second, so a grid this size is already a deliberate, long run.
+/// Upper bound on grid points in one run, a guard against an accidentally
+/// enormous job: a full solve costs about a second.
 pub const MAX_POINTS: usize = 19_881; // 141 x 141
 
 /// Grid points nearer the transmitter than this are skipped. At zero range the
-/// great-circle bearing is undefined and there is no hop geometry to home; this
-/// is a domain limit of the point-to-point solver, not a coverage heuristic.
+/// great-circle bearing is undefined and there is no hop geometry to home.
 pub const MIN_RANGE_KM: f64 = 25.0;
 
 /// Highest latitude a grid row may sit at.
 ///
-/// This used to be 85 degrees, and it was a *projection* limit, not a physical
-/// one: Web Mercator diverges at the poles, so the tile would have been
-/// unrenderable and the row was simply not computed. Rows between 85 and 90
-/// were thrown away with no propagation reason whatsoever, which is one of the
-/// ways a full-extent run came back with holes in it. The map is now
-/// equirectangular and has real poles, so the limit is back to being about the
-/// solver: at exactly +/-90 the great-circle bearing from the transmitter is
-/// undefined, and one degree short of the pole is enough to keep it defined.
+/// At exactly +/-90 the great-circle bearing from the transmitter is undefined;
+/// one degree short of the pole keeps it defined.
 ///
-/// Public because the map clamps a *tile's* drawn edges to the same limit: a row
+/// Public because the map clamps a tile's drawn edges to the same limit: a row
 /// centred just inside it still extends half a step past it, and nothing may be
 /// painted past the pole.
 pub const LAT_LIMIT_DEG: f64 = 89.0;
@@ -56,10 +45,8 @@ pub const LAT_LIMIT_DEG: f64 = 89.0;
 /// The user-controlled grid: how far out from the transmitter to go, and how
 /// finely to sample.
 ///
-/// `points_per_deg` is the resolution setting, and it is real: raising it
-/// computes more grid points. Nothing anywhere interpolates or smooths between
-/// them, so a coarse setting looks blocky - that blockiness is an honest picture
-/// of how much was actually computed.
+/// `points_per_deg` sets how many grid points are computed. Nothing
+/// interpolates between them, so a coarse setting looks blocky.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct CoverageConfig {
     /// Half-width of the lat/lon box centred on the transmitter, degrees.
@@ -96,13 +83,12 @@ impl CoverageConfig {
         n.clamp(1, 70)
     }
 
-    /// The half-span the run will actually cover, which is the requested one
-    /// only until the [`MAX_POINTS`] cap bites.
+    /// The half-span the run will cover, which is the requested one until the
+    /// [`MAX_POINTS`] cap applies.
     ///
     /// [`half_steps`](Self::half_steps) clamps the lattice at 70 steps either
-    /// way, so a fine resolution silently shrinks the box: 180 degrees at 4
-    /// pts/deg is really 17.5. Exposed so the control can say so rather than
-    /// leaving the operator to wonder why most of the map came back empty.
+    /// way, so a fine resolution shrinks the box (180 degrees at 4 pts/deg is
+    /// really 17.5). Exposed so the control can show it.
     #[must_use]
     pub fn effective_half_span_deg(self) -> f64 {
         f64::from(self.half_steps()) * self.step_deg()
@@ -110,14 +96,10 @@ impl CoverageConfig {
 
     /// Longitude columns to generate, centred on the transmitter.
     ///
-    /// The naive `2 * half_steps() + 1` columns can span more than 360 degrees -
-    /// at the widest extent and coarsest resolution it spans 380 - and because
-    /// column longitudes are wrapped into [-180, 180), the surplus lands back on
-    /// top of columns already generated. Those duplicate positions are solved
-    /// twice and, since the tiles are drawn with alpha, painted twice: the
-    /// doubled column reads as a dark stripe across the map. Capping the count
-    /// at one full turn of longitude removes the overlap without leaving a gap,
-    /// because a whole number of steps short of 360 still closes the ring.
+    /// `2 * half_steps() + 1` columns can span more than 360 degrees (380 at the
+    /// widest extent and coarsest resolution). With longitudes wrapped into
+    /// [-180, 180), the surplus would be solved and painted twice, showing as a
+    /// dark stripe. Capping at one full turn removes the overlap without a gap.
     #[must_use]
     pub fn columns(self) -> i32 {
         let step = self.step_deg();
@@ -166,17 +148,14 @@ fn wrap_lon(lon: f64) -> f64 {
 
 /// One solved grid point: where it is, and what the receiver there would hear.
 ///
-/// Every field is read straight off the solve; nothing is rescaled or blended.
+/// Every field is read straight off the solve.
 ///
-/// # Deterministic and probabilistic, side by side
+/// # Deterministic and probabilistic verdicts
 ///
-/// A cell carries BOTH verdicts, because they are different kinds of answer and
-/// a map that folds them together is exactly what produced the reported "hard
-/// dead zone": a position the F2 layer cannot reach was painted the same grey
-/// as a position nothing can reach, even when a sporadic-E opening puts a real
-/// signal there a third of the time. `snr_db` is the strongest mode of any
-/// kind - what a listener would hear on a day when everything present is
-/// present - and `probability` says how often that day comes.
+/// A cell carries both verdicts. Folding them together would paint a position
+/// the F2 layer cannot reach like one nothing reaches, even when sporadic E puts
+/// a signal there a third of the time. `snr_db` is the strongest mode of any
+/// kind and `probability` says how often it is present.
 #[derive(Clone, Copy)]
 pub struct CoverageCell {
     pub lat: f64,
@@ -186,10 +165,10 @@ pub struct CoverageCell {
     /// resolution control is moved afterwards.
     pub step_deg: f64,
     pub state: PathState,
-    /// SNR (dB) of the strongest mode of ANY kind; `-inf` when nothing arrives.
+    /// SNR (dB) of the strongest mode of any kind; `-inf` when nothing arrives.
     /// A continuous field: the threshold is applied only for display.
     pub snr_db: f64,
-    /// SNR (dB) of the strongest DETERMINISTIC (F2 or E) mode; `-inf` when
+    /// SNR (dB) of the strongest deterministic (F2 or E) mode; `-inf` when
     /// there is none. Equal to `snr_db` unless a sporadic-E path wins.
     pub deterministic_snr_db: f64,
     /// Probability the mode behind `snr_db` is present at all: 1 for F2 and E,
@@ -198,9 +177,7 @@ pub struct CoverageCell {
     /// Which layer `snr_db` came from.
     pub layer: Option<LayerMode>,
     /// Why the deterministic stack produced nothing, when it produced nothing.
-    /// This is what separates "inside the F2 skip zone" from "nothing arrives
-    /// at all" - the map's colour key promised that distinction long before the
-    /// solver could make it.
+    /// This separates "inside the F2 skip zone" from "nothing arrives at all".
     pub deterministic_status: LayerStatus,
     pub rx_power_dbm: f64,
     pub noise_dbm: f64,
@@ -231,9 +208,8 @@ impl CoverageCell {
     }
 }
 
-/// Solve one grid point: move the receiver there and run the whole existing
-/// point-to-point chain, then keep the strongest mode - the signal an operator
-/// at that position would actually hear.
+/// Solve one grid point: move the receiver there, run the point-to-point chain,
+/// and keep the strongest mode.
 ///
 /// `models` is the shared, receiver-independent model set (see the module
 /// documentation); `step_deg` is recorded on the cell so a tile keeps the size
@@ -263,9 +239,8 @@ pub fn solve_cell(
         .find(|r| r.status == LayerStatus::Solved)
         .map_or_else(
             || {
-                // Nothing deterministic closed: report the F2 layer's own
-                // reason, which is the one an operator looking at a dead zone
-                // is actually asking about.
+                // Nothing deterministic closed: report the F2 layer's reason,
+                // which is what a dead zone on the map is asking about.
                 out.mode_reports
                     .iter()
                     .find(|r| r.layer == LayerMode::F2)
@@ -317,11 +292,10 @@ pub fn solve_cell(
 mod tests {
     use super::*;
 
-    /// The load-bearing claim of this module: a coverage cell is the point-to-
-    /// point answer, not an approximation of it. Solving a grid position through
-    /// `solve_cell` with the shared models must reproduce, bit for bit, what the
-    /// app produces when the operator drags the receiver to that position and
-    /// presses RUN TRACE (models rebuilt from scratch for that scenario).
+    /// A coverage cell is the point-to-point answer: solving a grid position
+    /// through `solve_cell` with the shared models must match, bit for bit, a
+    /// RUN TRACE with the receiver at that position (models rebuilt from
+    /// scratch).
     #[test]
     fn cell_matches_a_full_point_to_point_solve() {
         let inputs = Inputs::default();
@@ -332,7 +306,7 @@ mod tests {
             let cell = solve_cell(lat, lon, 4.0, &inputs, &shared_models);
 
             // The independent reference: the whole chain rebuilt for a scenario
-            // whose receiver IS that grid point.
+            // whose receiver is that grid point.
             let mut reference_inputs = inputs.clone();
             reference_inputs.rx_lat = lat;
             reference_inputs.rx_lon = lon;
@@ -389,8 +363,8 @@ mod tests {
         assert_eq!(points.len(), 11 * 11 - 1);
     }
 
-    /// Raising the resolution must produce more genuinely computed points, and
-    /// the run can never exceed the hard cap.
+    /// Raising the resolution must produce more computed points, and the run
+    /// can never exceed the hard cap.
     #[test]
     fn resolution_adds_real_points_and_is_capped() {
         let coarse = CoverageConfig {
@@ -410,10 +384,9 @@ mod tests {
         assert!(absurd.grid(0.0, 0.0).len() <= MAX_POINTS);
     }
 
-    /// The widest extent at the coarsest resolution used to generate 19 columns
-    /// of 20 degrees - 380 degrees - so one column wrapped back onto another and
-    /// was solved and painted twice. No grid may contain a duplicate position,
-    /// and the ring must still close.
+    /// At the widest extent and coarsest resolution, 19 columns of 20 degrees
+    /// would span 380 degrees. No grid may contain a duplicate position, and
+    /// the ring must still close.
     #[test]
     fn columns_never_wrap_onto_themselves() {
         for &(half_span, res) in &[
@@ -444,10 +417,9 @@ mod tests {
                 // Never more than one full turn of longitude...
                 let span = f64::from(cfg.columns()) * cfg.step_deg();
                 assert!(span <= 360.0 + 1e-9, "span {span} at res {res}");
-                // ...and never a gap left in one, when a full turn was both
-                // asked for and actually granted. A run the point cap has
-                // truncated covers less than the requested extent by design,
-                // and `effective_half_span_deg` is what reports that.
+                // ...and no gap when a full turn was asked for and granted. A run
+                // truncated by the point cap covers less, as
+                // `effective_half_span_deg` reports.
                 if 2.0 * cfg.effective_half_span_deg() >= 360.0 {
                     assert!(
                         span > 360.0 - cfg.step_deg() - 1e-9,
@@ -459,8 +431,8 @@ mod tests {
     }
 
     /// Every computed row is drawn as a band half a step tall either side of its
-    /// centre. Clamped to the latitude limit that band must stay a real,
-    /// non-empty piece of the map - the drawing layer relies on it.
+    /// centre. Clamped to the latitude limit, that band must stay non-empty;
+    /// the drawing layer relies on it.
     #[test]
     fn tile_bands_stay_inside_the_latitude_limit() {
         let cfg = CoverageConfig {

@@ -1,8 +1,8 @@
 //! Two-way fixed-effects calibration of the model against measured WSPR SNRs.
 //!
-//! # The problem this module exists to avoid
+//! # Station effects
 //!
-//! A WSPR spot's measured SNR is not a measurement of propagation alone:
+//! A WSPR spot's measured SNR mixes propagation with station properties:
 //!
 //! ```text
 //!   measured = physics + tx_effect + rx_effect + fading + error
@@ -13,73 +13,62 @@
 //! with the receiver site's local noise floor. Neither is in the archive, and
 //! both are large.
 //!
-//! Regress the physics parameters on raw measured SNR and those two unknowns do
-//! not vanish - they get absorbed by whichever physical parameter is most
-//! flexible, which here is D-region absorption or the noise model. The residual
-//! goes down and the model gets worse. That is the failure mode, and it is the
-//! default outcome rather than an unlucky one.
+//! Fitting the physics to raw measured SNR lets those two unknowns leak into
+//! the most flexible physical parameter (D-region absorption or the noise
+//! model): the residual falls while the model gets worse.
 //!
-//! # What is done instead
-//!
-//! `tx_effect` and `rx_effect` are estimated EXPLICITLY, as nuisance parameters,
-//! jointly with the physics ([`crate::fit::StationEffects`]). The physics is then identified
-//! from variation WITHIN a station rather than across stations:
+//! So `tx_effect` and `rx_effect` are estimated as nuisance parameters jointly
+//! with the physics ([`crate::fit::StationEffects`]), and the physics is identified from
+//! variation within a station:
 //!
 //! * one transmitter heard by many receivers in one cycle: the TX effect and the
-//!   claimed power are common to all of them, so they cancel in the comparison;
-//! * one TX->RX pair on several bands at once: both effects are common, so the
-//!   FREQUENCY dependence of absorption is cleanly identified;
-//! * one TX->RX pair over many hours: both effects are fixed, so the DIURNAL
+//!   claimed power cancel;
+//! * one TX->RX pair on several bands at once: both effects cancel, which
+//!   identifies the frequency dependence of absorption;
+//! * one TX->RX pair over many hours: both effects are fixed, so the diurnal
 //!   variation isolates the solar-zenith-angle dependence of the D region.
 //!
-//! # What this makes unidentifiable, on purpose
+//! # What cannot be identified
 //!
-//! Any quantity that is CONSTANT for a given station is absorbed into that
-//! station's effect and cannot be recovered. That is not a defect of the method,
-//! it is an honest statement about what WSPR contains:
+//! Anything constant for a given station is absorbed into that station's
+//! effect:
 //!
 //! | quantity | identified by | identifiable here |
 //! |---|---|---|
 //! | absorption magnitude | overall level, and its frequency and zenith pattern | yes |
-//! | atmospheric noise day-night DIFFERENCE | diurnal variation within a station | yes |
-//! | atmospheric noise frequency SLOPES | cross-band within a station | yes |
-//! | atmospheric noise ABSOLUTE level | nothing - it is a constant | no, absorbed |
+//! | atmospheric noise day-night difference | diurnal variation within a station | yes |
+//! | atmospheric noise frequency slopes | cross-band within a station | yes |
+//! | atmospheric noise absolute level | nothing - it is a constant | no, absorbed |
 //! | receiver noise environment | a constant per receiver | no, absorbed |
 //! | latitude terms of the noise model | a receiver's latitude never changes | no, absorbed |
 //! | seasonal swing | needs more than one season in the corpus | not from one month |
 //! | absolute antenna gain | a constant per station | no, absorbed |
 //!
-//! So a fit here can calibrate HOW THE SIGNAL VARIES with frequency, path length,
-//! zenith angle, hop count and layer. It cannot calibrate absolute levels, and
-//! anything claiming to have done so from WSPR has fitted station population
-//! statistics and called them physics.
+//! A fit can therefore calibrate how the signal varies with frequency, path
+//! length, zenith angle, hop count and layer, but not absolute levels.
 //!
-//! # Why the inner loop is cheap
+//! # Caching
 //!
-//! Re-solving a spot costs a few hundred milliseconds, and a fit needs thousands
-//! of evaluations. Two measured facts make almost all of that unnecessary:
+//! Re-solving a spot costs a few hundred milliseconds and a fit needs thousands
+//! of evaluations. Two measured facts avoid that:
 //!
-//! 1. **Absorption is exactly linear in the collision frequency.** Doubling
-//!    `NU_REF_PER_S` doubles the reported absorption to four significant figures
-//!    (`the_absorption_scale_is_linear` pins it). In the D region `nu << omega`,
-//!    so the absorption coefficient is proportional to `Ne nu / omega^2`, and
-//!    scaling either factor scales the whole line integral.
-//! 2. **The D-region and collision parameters do not move the ray.** The D
-//!    region's plasma frequency is ~0.3 MHz, so at 7 MHz `X ~ 0.002` and there is
-//!    no refraction to speak of. Measured: changing the collision reference
-//!    altitude from 65 to 80 km moves absorption from 5.7 dB to 53.4 dB and moves
-//!    the launch elevation by 0.0003 degrees.
+//! 1. Absorption is linear in the collision frequency. Doubling `NU_REF_PER_S`
+//!    doubles the reported absorption to four significant figures
+//!    (`the_absorption_scale_is_linear` checks it). In the D region
+//!    `nu << omega`, so the absorption coefficient is proportional to
+//!    `Ne nu / omega^2`.
+//! 2. The D-region and collision parameters do not move the ray. The D region's
+//!    plasma frequency is ~0.3 MHz, so at 7 MHz `X ~ 0.002`. Moving the
+//!    collision reference altitude from 65 to 80 km changes absorption from
+//!    5.7 dB to 53.4 dB but the launch elevation by only 0.0003 degrees.
 //!
-//! Together those mean the ray can be traced ONCE per spot and the link budget
-//! re-derived arithmetically for any absorption scale and any noise anchors. That
-//! is [`crate::fit::Cached`], and it makes the inner loop about four orders of magnitude
-//! cheaper than re-solving.
+//! So each spot is traced once and the link budget is re-derived
+//! arithmetically for any absorption scale and noise anchors ([`crate::fit::Cached`]).
 //!
-//! The parameters that DO change which paths exist - E-region geometry, foE, foEs,
-//! Es occurrence - cannot be cached this way and need a real re-solve. They are
-//! scanned coarsely rather than optimised, and scored against the negatives set,
-//! because turning a path on or off is not a quantity least squares can
-//! differentiate.
+//! Parameters that change which paths exist (E-region geometry, foE, foEs, Es
+//! occurrence) need a real re-solve. They are scanned coarsely and scored
+//! against the negatives set, since least squares cannot differentiate a path
+//! turning on or off.
 
 use std::collections::BTreeMap;
 
@@ -90,10 +79,9 @@ use crate::solar::Season;
 /// Everything about one solved spot that lets its SNR be re-derived without
 /// tracing the ray again.
 ///
-/// The split is exact rather than approximate: the link budget is
-/// `tx_power - (loss - gain) - noise`, and absorption is the only loss term the
-/// cached parameters touch. `tests::cache_reproduces_the_solver` pins the
-/// reconstruction against a real solve.
+/// The split is exact: the link budget is `tx_power - (loss - gain) - noise`,
+/// and absorption is the only loss term the cached parameters touch.
+/// `tests::cache_reproduces_the_solver` checks it against a real solve.
 #[derive(Clone, Debug)]
 pub struct Cached {
     /// Index of the transmitting station in the fit's station table.
@@ -104,16 +92,16 @@ pub struct Cached {
     pub measured_db: f64,
     /// Transmitter power as claimed, dBm.
     pub tx_power_dbm: f64,
-    /// Every loss term EXCEPT ionospheric absorption, less the antenna gain, dB.
+    /// Every loss term except ionospheric absorption, less the antenna gain, dB.
     /// Free-space spreading, ground reflections and any Es sheet loss.
     pub loss_without_absorption_db: f64,
-    /// Ionospheric absorption at the BASELINE anchors, dB. Scaled linearly.
+    /// Ionospheric absorption at the baseline anchors, dB. Scaled linearly.
     pub absorption_db: f64,
     /// Frequency, needed to recompute the noise floor. MHz.
     pub freq_mhz: f64,
     /// Receiver bandwidth the measured SNR is quoted in, Hz.
     pub bandwidth_hz: f64,
-    /// Was it day at the RECEIVER? The noise floor is heard there.
+    /// Whether it was day at the receiver, where the noise floor is heard.
     pub rx_is_day: bool,
     pub rx_season: Season,
     pub rx_lat: f64,
@@ -126,30 +114,27 @@ pub struct Cached {
     pub probability: f64,
     /// Day of the corpus this spot came from, for the hold-out split.
     pub date: (i32, u32, u32),
-    /// Solar zenith angle at the path MIDPOINT, degrees. Above 90 the midpoint
-    /// is in darkness. The receiver's own day flag is the wrong thing to cut a
-    /// layer by: the reflection happens at the midpoint, not at either end.
+    /// Solar zenith angle at the path midpoint, degrees; above 90 the midpoint
+    /// is dark. Layers are split on this because the reflection happens at the
+    /// midpoint.
     pub midpoint_zenith_deg: f64,
-    /// The best F2 path that ALSO closed on this spot, when the layer actually
-    /// reported was a lower one. `None` when F2 was itself the choice, or when
-    /// no F2 path closed at all - and those two cases mean opposite things, so
-    /// see [`Cached::layer_was_a_race`].
+    /// The best F2 path that also closed on this spot, when a lower layer was
+    /// reported. `None` when F2 was itself the choice or no F2 path closed;
+    /// [`Cached::layer_was_a_race`] tells the two apart.
     pub alternative: Option<Alternative>,
 }
 
 /// The F2 path a lower layer beat, carried so its SNR can be re-derived under
 /// the same parameters as the path that won.
 ///
-/// Only the two loss terms are stored. Everything else the link budget needs -
-/// power, frequency, bandwidth, noise environment, day, season, latitude - is a
-/// property of the SPOT and is already on [`Cached`], so an alternative scored
-/// against those is scored against exactly the conditions the winner was.
+/// Only the two loss terms are stored; everything else the link budget needs
+/// is a property of the spot and is already on [`Cached`].
 #[derive(Clone, Copy, Debug)]
 pub struct Alternative {
     /// Every loss term except ionospheric absorption, less antenna gain, dB.
     pub loss_without_absorption_db: f64,
-    /// Ionospheric absorption at the BASELINE anchors, dB. Scaled linearly, the
-    /// same way the winner's is.
+    /// Ionospheric absorption at the baseline anchors, dB. Scaled linearly, as
+    /// the winner's is.
     pub absorption_db: f64,
 }
 
@@ -179,11 +164,8 @@ impl Cached {
 
     /// Was the reported layer chosen over an F2 path that also closed?
     ///
-    /// This is the distinction that matters when a lower layer reads optimistic.
-    /// If F2 was available and lost, the layer was picked by a COMPARISON, and a
-    /// comparison that systematically prefers the lower layer is a selection rule
-    /// to examine. If F2 was not available, the lower layer was the only answer
-    /// there was, and the question is instead why it closed at all.
+    /// When a lower layer reads optimistic, this separates a selection rule
+    /// that prefers it over F2 from a lower layer that was the only path.
     #[must_use]
     pub fn layer_was_a_race(&self) -> bool {
         self.alternative.is_some()
@@ -206,9 +188,8 @@ impl Cached {
         )
     }
 
-    /// Is the path MIDPOINT in darkness? The reflection happens there, so this
-    /// is the cut a layer's behaviour has to be split on - not the receiver's
-    /// local day, which on a long path can be the opposite.
+    /// Whether the path midpoint is dark. The reflection happens there, and on
+    /// a long path the receiver's local day can differ.
     #[must_use]
     pub fn midpoint_is_night(&self) -> bool {
         self.midpoint_zenith_deg > 90.0
@@ -232,18 +213,12 @@ impl Cached {
 
 /// The absorption scale expressed back as a collision frequency, s^-1.
 ///
-/// The fit moves one number, the absorption magnitude. Absorption is
-/// proportional to the PRODUCT of the D-region electron density and the electron-
-/// neutral collision frequency, so that product is what the data identifies and
-/// the split between the two factors is not identifiable at all - a finding worth
-/// more than a fitted pair would be.
-///
-/// The scale is attributed to [`crate::scenario::NU_REF_PER_S`] rather than to
-/// the density for a measurable reason: doubling the collision frequency doubles
-/// the reported absorption exactly, whereas doubling the D-region peak density
-/// changes it by only about 5 %, because in this model the E and F2 layers
-/// contribute most of the absorption integral. So the collision frequency is the
-/// factor the data actually constrains.
+/// Absorption depends on the product of D-region electron density and
+/// collision frequency, so the data cannot split the two. The scale is
+/// attributed to [`crate::scenario::NU_REF_PER_S`] because doubling the
+/// collision frequency doubles the reported absorption, while doubling the
+/// D-region peak density changes it by only about 5 % (the E and F2 layers
+/// contribute most of the absorption integral).
 #[must_use]
 pub fn absorption_scale_as_nu(scale: f64, prior: Bounded) -> (Bounded, bool) {
     prior.clamped(prior.value * scale)
@@ -261,10 +236,9 @@ pub fn absorption_scale_as_nu(scale: f64, prior: Bounded) -> (Bounded, bool) {
 /// by forcing both sets of effects to average zero and carrying the leftover
 /// explicitly in [`Self::global_db`].
 ///
-/// That makes the global offset VISIBLE rather than hidden inside the station
-/// effects. It is the part of the model's bias that WSPR cannot attribute - it
-/// could be the model being optimistic, or the station population being worse
-/// than the assumed antennas, and no amount of this data separates those.
+/// The global offset is the part of the bias WSPR cannot attribute: the model
+/// being optimistic and the station population being worse than the assumed
+/// antennas look the same.
 #[derive(Clone, Debug, Default)]
 pub struct StationEffects {
     /// Transmitter offsets, dB, mean zero. Indexed as [`Cached::tx`].
@@ -274,8 +248,7 @@ pub struct StationEffects {
     /// The offset the two cannot tell apart, dB. Positive means the model reads
     /// high once station effects are removed.
     pub global_db: f64,
-    /// How many spots each transmitter contributed. An effect estimated from two
-    /// spots is not an estimate.
+    /// How many spots each transmitter contributed.
     pub tx_counts: Vec<usize>,
     pub rx_counts: Vec<usize>,
 }
@@ -290,14 +263,11 @@ impl StationEffects {
     /// Solve the two-way layout for a fixed set of model residuals.
     ///
     /// `residual_i = modelled_i - measured_i`. The effects are the least-squares
-    /// two-way decomposition of that, computed by alternating conditional means -
-    /// the standard "sweep" algorithm for a two-factor additive model with
-    /// unbalanced cells. It converges geometrically and 200 sweeps is far past
-    /// the point of no further movement for corpora of this size.
-    ///
-    /// The alternative would be to build and solve the normal equations, which
-    /// for a few hundred stations is a few hundred thousand entries; the sweep
-    /// gives the same answer without the matrix.
+    /// two-way decomposition of that, computed by alternating conditional means
+    /// (the standard sweep algorithm for a two-factor additive model with
+    /// unbalanced cells). It converges geometrically, and 200 sweeps is far more
+    /// than corpora of this size need. It gives the normal-equations answer
+    /// without building the matrix.
     #[must_use]
     pub fn solve(residuals: &[f64], spots: &[Cached], n_tx: usize, n_rx: usize) -> Self {
         let mut tx = vec![0.0; n_tx];
@@ -355,8 +325,7 @@ impl StationEffects {
                 }
             }
 
-            // Re-centre, so the gauge stays where the doc comment says it is and
-            // the global offset really is the whole unattributable part.
+            // Re-centre so the global offset holds the whole unattributable part.
             recentre(&mut tx, &tx_counts);
             recentre(&mut rx, &rx_counts);
         }
@@ -370,9 +339,8 @@ impl StationEffects {
         }
     }
 
-    /// Spread of the estimated effects, over stations with enough spots to have
-    /// been estimated at all. This is a MEASUREMENT of the WSPR station
-    /// population and is worth reporting on its own.
+    /// Spread of the estimated effects over stations with enough spots. This
+    /// measures the WSPR station population and is reported on its own.
     #[must_use]
     pub fn distribution(&self, min_spots: usize) -> EffectDistribution {
         let pick = |v: &[f64], counts: &[usize]| -> Vec<f64> {
@@ -452,7 +420,7 @@ impl Spread {
     }
 }
 
-/// Linearly interpolated percentile of a SORTED slice; NaN when empty.
+/// Linearly interpolated percentile of a sorted slice; NaN when empty.
 #[must_use]
 pub fn percentile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
@@ -476,14 +444,12 @@ pub fn percentile(sorted: &[f64], q: f64) -> f64 {
 
 /// How well modelled tracks measured: the headline the calibration is judged on.
 ///
-/// The SLOPE matters more than the bias. A model whose bias is zero but whose
-/// slope is 0.3 emits nearly the same number for every path and has learnt
-/// nothing about which paths are strong; correcting its bias would only hide
-/// that.
+/// The slope matters more than the bias: a slope of 0.3 means the model gives
+/// nearly the same number for every path.
 ///
 /// # Why two slopes are reported
 ///
-/// Against RAW measured SNR the slope is attenuated by construction. If
+/// Against raw measured SNR the slope is attenuated by construction. If
 /// `measured = physics + station_effect`, then regressing the modelled value
 /// (which contains no station effect) on the measured value gives
 ///
@@ -491,15 +457,13 @@ pub fn percentile(sorted: &[f64], q: f64) -> f64 {
 ///   slope = Var(physics) / (Var(physics) + Var(station_effect))
 /// ```
 ///
-/// which is below 1 however perfect the physics is. That is classical
-/// errors-in-variables attenuation, not a model defect. With station effects
-/// worth twice the variance of the physics it lands near 0.33 on its own.
+/// which is below 1 even for perfect physics (errors-in-variables
+/// attenuation). With station effects worth twice the variance of the physics
+/// it lands near 0.33.
 ///
-/// So [`Fit::slope_raw`] is reported because it is what a naive comparison shows,
-/// and [`Fit::slope_adjusted`] - measured with the estimated station effects
-/// removed from the measurement - is reported because it is the one that says
-/// whether the physics tracks reality. Quoting only the first understates the
-/// model; quoting only the second overstates what a user would see.
+/// [`Fit::slope_raw`] is what a naive comparison shows. [`Fit::slope_adjusted`]
+/// removes the estimated station effects from the measurement and shows
+/// whether the physics tracks reality.
 #[derive(Clone, Debug, Default)]
 pub struct Fit {
     pub n: usize,
@@ -537,7 +501,7 @@ impl Fit {
             let offset = effects.offset_for(c);
             modelled.push(m);
             measured.push(c.measured_db);
-            // The measurement with the station's own offset folded IN, which is
+            // The measurement with the station's offset folded in, which is
             // what the physics should be compared against.
             explained.push(c.measured_db + offset);
             residual.push(m - c.measured_db);
@@ -562,8 +526,8 @@ impl Fit {
 
 /// Ordinary least squares slope of `y` on `x`, and the R^2 of that line.
 ///
-/// Returns `(NaN, NaN)` rather than a confident zero when `x` has no variance:
-/// a slope against a constant is undefined, not flat.
+/// Returns `(NaN, NaN)` when `x` has no variance, since a slope against a
+/// constant is undefined.
 #[must_use]
 pub fn regress(x: &[f64], y: &[f64]) -> (f64, f64) {
     let pairs: Vec<(f64, f64)> = x
@@ -592,8 +556,8 @@ pub fn regress(x: &[f64], y: &[f64]) -> (f64, f64) {
 
 /// The parameters a cached fit can move, and the range each may move in.
 ///
-/// Deliberately only the ones that re-derive from [`Cached`] without a re-solve.
-/// The rest change which paths exist and are scanned separately.
+/// Only the ones that re-derive from [`Cached`] without a re-solve. The rest
+/// change which paths exist and are scanned separately.
 #[derive(Clone, Copy, Debug)]
 pub struct CachedParams {
     /// Multiplier on the baseline absorption. Stands for the product of D-region
@@ -607,8 +571,7 @@ impl CachedParams {
     /// constants.
     ///
     /// The absorption bound follows from `NU_REF_PER_S`'s own plausible range of
-    /// 1e6 to 2e7 s^-1 against its 5e6 prior, i.e. 0.2x to 4x. It is not a
-    /// separate freedom; it is that range restated.
+    /// 1e6 to 2e7 s^-1 against its 5e6 prior, i.e. 0.2x to 4x.
     #[must_use]
     pub fn prior() -> Self {
         let nu = Anchors::default().ionosphere.nu_ref_per_s;
@@ -618,23 +581,17 @@ impl CachedParams {
         }
     }
 
-    /// The parameters a search has to STEP, on a common 0..1 scale so it can do
-    /// so without knowing their units.
+    /// The parameters a search steps, on a common 0..1 scale.
     ///
-    /// The absorption scale is deliberately ABSENT: the prediction is exactly
-    /// linear in it, so it is solved in closed form at every trial point instead
-    /// ([`best_absorption_scale`]). Stepping it alongside the noise slopes, which
-    /// it is strongly correlated with, made the descent stall - measured on a
-    /// planted case, it stopped at a scale of 1.76 and an RMS of 0.20 dB when the
-    /// true optimum was 1.80 at an RMS of 0. Profiling it out removes that
-    /// correlation from the search entirely.
+    /// The absorption scale is not here: the prediction is linear in it, so it
+    /// is solved in closed form at every trial point
+    /// ([`best_absorption_scale`]). Stepping it alongside the correlated noise
+    /// slopes made the descent stall (1.76 instead of a planted 1.80).
     ///
-    /// The atmospheric anchors a fixed-effects design cannot identify - the
-    /// seasonal swing and both latitude terms - are also absent. A receiver's
-    /// latitude never changes, so the latitude terms are a constant per receiver
-    /// and are absorbed exactly into its effect; a one-month corpus has no second
-    /// season. Offering them to the search would let it move them freely without
-    /// changing the objective, and then report a "fitted value" that is noise.
+    /// The seasonal swing and both latitude terms are also left out. Latitude
+    /// terms are constant per receiver and absorbed into its effect, and a
+    /// one-month corpus has one season, so the search could move them without
+    /// changing the objective.
     #[must_use]
     #[allow(clippy::type_complexity)]
     pub fn fields() -> Vec<(&'static str, fn(&Self) -> Bounded, fn(&mut Self, Bounded))> {
@@ -649,10 +606,9 @@ impl CachedParams {
                 |p: &Self| p.atm.slope_day_db,
                 |p: &mut Self, v| p.atm.slope_day_db = v,
             ),
-            // The three that carry the day/night contrast. These are what a WSPR
-            // corpus can actually see: the level of the floor is constant per
-            // station and absorbed into that station's effect, the difference
-            // across the terminator is not.
+            // The three that carry the day/night contrast. A WSPR corpus can see
+            // the difference across the terminator, while the floor level is
+            // absorbed into each station's effect.
             (
                 "atm day->night step [dB]",
                 |p: &Self| p.atm.step_1mhz_db,
@@ -676,30 +632,22 @@ impl CachedParams {
 ///
 /// # Why the positives alone cannot identify the level
 ///
-/// A corpus of spots is a corpus of SUCCESSES. Every residual in it is
-/// `modelled - measured - station - global`, and `global` is re-solved at every
-/// trial point, so shifting the whole model by a constant costs the objective
-/// exactly nothing. The level is not weakly identified from the positives, it is
-/// not identified at all - and the fit is therefore free to close a residual by
-/// sliding the model optimistic, which is precisely what it was measured doing.
+/// Every positive residual is `modelled - measured - station - global`, and
+/// `global` is re-solved at every trial point, so a constant shift of the model
+/// costs nothing. The positives do not identify the level, and the fit was
+/// observed closing residuals by sliding the model optimistic.
 ///
-/// A negative is different in kind. It says that on THIS path, at THIS hour, a
-/// receiver that was demonstrably hearing other stations did not hear this one.
-/// That is a one-sided statement about an ABSOLUTE quantity: the modelled SNR
-/// should have been below the decode threshold. It cannot be satisfied by any
-/// constant shift, so it removes the degeneracy the positives leave behind.
+/// A negative says a receiver that was hearing other stations did not hear
+/// this one on this path at this hour, i.e. the modelled SNR should have been
+/// below the decode threshold. No constant shift satisfies that, so it removes
+/// the degeneracy.
 ///
-/// # Why the term is a hinge and not a residual
+/// # Why the term is a hinge
 ///
-/// The corpus documentation is explicit that the false-positive rate it measures
-/// is an UPPER BOUND: a negative may be a path that really was open and merely
-/// collided, or arrived off the back of a beam. So a negative carries no
-/// information at all about how far below the threshold the signal should have
-/// been - only that it should not have been above it. Penalising
-/// `(modelled - threshold)^2` unconditionally would invent that missing
-/// information and drive every negative towards a specific SNR the data never
-/// stated. The hinge `max(0, modelled - threshold)^2` charges only the excess,
-/// which is the whole of what a non-decode asserts.
+/// The measured false-positive rate is an upper bound: a negative may be an
+/// open path that collided or arrived off the back of a beam. A negative says
+/// nothing about how far below the threshold the signal was, so the hinge
+/// `max(0, modelled - threshold)^2` charges only the excess.
 #[derive(Clone, Copy)]
 pub struct Negatives<'a> {
     /// Solved non-decodes. `measured_db` is meaningless on these and is never
@@ -712,7 +660,7 @@ pub struct Negatives<'a> {
 }
 
 impl<'a> Negatives<'a> {
-    /// No constraint: the positives-only objective, exactly as before.
+    /// No constraint: the positives-only objective.
     #[must_use]
     pub fn none() -> Self {
         Self {
@@ -722,14 +670,10 @@ impl<'a> Negatives<'a> {
         }
     }
 
-    /// Negatives weighted so their TOTAL weight equals the positives' total.
+    /// Negatives weighted so their total weight equals the positives' total.
     ///
-    /// How many negatives get scored is an arbitrary sampling decision - the
-    /// calibrator thins tens of thousands of them down to whatever is
-    /// affordable - so an unweighted sum would let that choice, rather than the
-    /// evidence, decide how much the one-sided term counts for. Equalising the
-    /// totals makes the objective half positives and half negatives however many
-    /// of each were solved.
+    /// The number of negatives scored is a sampling choice, so equal totals keep
+    /// that choice from setting how much the one-sided term counts.
     #[must_use]
     pub fn balanced(spots: &'a [Cached], threshold_db: f64, n_positives: usize) -> Self {
         #[allow(clippy::cast_precision_loss)]
@@ -747,9 +691,9 @@ impl<'a> Negatives<'a> {
 
     /// This negative's predicted SNR less the station offsets that apply to it.
     ///
-    /// A station absent from the fit's index space contributes 0, which is not a
-    /// guess: the effects are gauge-centred to mean zero, so 0 IS the population
-    /// estimate for a station nothing is known about.
+    /// A station absent from the fit's index space contributes 0: the effects
+    /// are centred on zero, so 0 is the population estimate for an unknown
+    /// station.
     fn excess(&self, c: &Cached, scale: f64, atm: AtmosphericAnchors, e: &StationEffects) -> f64 {
         let station =
             e.tx.get(c.tx).copied().unwrap_or(0.0) + e.rx.get(c.rx).copied().unwrap_or(0.0);
@@ -779,55 +723,36 @@ impl<'a> Negatives<'a> {
     }
 }
 
-/// The absorption scale AND the global offset that minimise the residual, solved
-/// jointly in closed form.
+/// The absorption scale and the global offset that minimise the residual,
+/// solved jointly in closed form.
 ///
-/// # Why the two must be solved together
+/// # Why the two are solved together
 ///
-/// The prediction is `base_i - s * absorption_i`, exactly linear in `s`, and the
-/// unattributable global offset `g` is a constant. Solving them alternately - `s`
-/// against a fixed `g`, then `g` as the residual mean - converges, but only
+/// The prediction is `base_i - s * absorption_i`, linear in `s`, and the
+/// global offset `g` is a constant. Solving them alternately converges only
 /// geometrically, at rate
 ///
 /// ```text
 ///   k = mean(a)^2 / (mean(a)^2 + var(a))
 /// ```
 ///
-/// which is the fraction of absorption's total mean-square that its MEAN accounts
-/// for. Measured on a planted case with `mean(a) = 7.5 dB` and
-/// `var(a) = 11.7 dB^2`, `k = 0.83`, so the alternation removed only 17 % of the
-/// error per round: after 12 rounds a planted scale of 1.80 read 1.73, and after
-/// 20 rounds 1.77. That looked exactly like a stuck optimiser and was not one.
+/// the fraction of absorption's mean square explained by its mean. On a
+/// planted case with `k = 0.83`, a scale of 1.80 still read 1.77 after 20
+/// rounds. The scale is identified by how much absorption varies across the
+/// corpus, not by its mean, since a constant absorption looks like the global
+/// offset. Solving the 2x2 system converges in a couple of rounds.
 ///
-/// The reason is worth stating as a result rather than hiding in an
-/// implementation: **the absorption scale is identified by how much absorption
-/// VARIES across the corpus, not by its average level.** A constant amount of
-/// absorption is indistinguishable from the global offset, which WSPR cannot
-/// attribute to physics or to the station population. So a corpus with little
-/// spread in absorption cannot calibrate absorption at all, however many spots it
-/// holds.
+/// The bool reports whether the scale was clamped to its range; a scale
+/// outside every published collision frequency is a finding about the model.
 ///
-/// Solving the 2x2 system removes that confounded direction from the alternation
-/// entirely, so the fit converges in a couple of rounds instead of dozens.
-///
-/// The bool reports whether the scale had to be clamped to its range, because a
-/// scale that wants to leave every published collision frequency is a finding
-/// about the model rather than a number to quietly accept.
-/// # How the one-sided negatives enter a closed-form solve
+/// # How the one-sided negatives enter
 ///
 /// A violating negative contributes `w (u_i - g - s a_i)^2` with
-/// `u_i = base_i - threshold - station_i`, which is ALGEBRAICALLY IDENTICAL to a
-/// positive whose measurement is the threshold, carrying weight `w`. So the
-/// hinge does not need a different solver - it needs the right set of
-/// pseudo-observations.
-///
-/// Which negatives are violating depends on `(g, s)`, and `(g, s)` depends on
-/// which are violating. The objective is convex in `(g, s)` - a sum of squares
-/// plus squared hinges of affine functions - so alternating the two converges to
-/// the global minimum: pick the active set, solve the weighted 2x2 exactly,
-/// repeat until the active set stops changing. It settles in a handful of passes
-/// and cannot cycle, because each solve strictly reduces a convex objective that
-/// each active-set update also cannot increase.
+/// `u_i = base_i - threshold - station_i`, the same as a positive measured at
+/// the threshold with weight `w`. The active set depends on `(g, s)`, but the
+/// objective is convex in `(g, s)`, so alternating between choosing the active
+/// set and solving the weighted 2x2 reaches the global minimum without
+/// cycling, usually in a handful of passes.
 #[must_use]
 pub fn best_absorption_scale(
     spots: &[Cached],
@@ -837,11 +762,9 @@ pub fn best_absorption_scale(
     negatives: Negatives<'_>,
 ) -> (Bounded, f64, bool) {
     // Regress u_i on (1, a_i): u_i = g + s * a_i, in the least-squares sense.
-    // Note the sign - the prediction SUBTRACTS s * a_i - so `u` is formed to make
-    // `s` come out positive for a model that needs more absorption.
-    //
-    // The positives' contribution never changes with the active set, so it is
-    // accumulated once.
+    // The prediction subtracts s * a_i, so `u` is formed to make `s` positive
+    // for a model that needs more absorption. The positives' contribution does
+    // not depend on the active set, so it is accumulated once.
     let mut base_n = 0.0;
     let mut base_a = 0.0;
     let mut base_aa = 0.0;
@@ -884,27 +807,18 @@ pub fn best_absorption_scale(
         }
         let det = n * saa - sa * sa;
         if det.abs() < 1e-12 {
-            // No absorption variation at all: the scale is not identified. Leave
-            // it at the prior and put everything into the offset, which is the
-            // honest outcome rather than an invented scale.
+            // No absorption variation: the scale is not identified, so leave it
+            // at the prior and put everything into the offset.
             return None;
         }
         Some(((su * saa - sa * sua) / det, (n * sua - sa * su) / det))
     };
 
-    // The active set is SEEDED at the prior scale rather than started empty.
-    //
-    // The positives can be singular in the scale direction all by themselves -
-    // that is the documented case where absorption does not vary and the scale is
-    // not identified - and it is exactly then that the negatives carry the only
-    // information there is. Starting from an empty active set would solve the
-    // positives alone, find them singular, and give up before ever looking at the
-    // evidence that resolves them.
-    //
-    // The seed pair must be a pair that actually DESCRIBES the prior model:
-    // `base_u / base_n` is the offset that fits when the scale is zero, not when
-    // it is the prior, and seeding with a mismatched pair mis-classifies which
-    // negatives the prior model would have claimed.
+    // Seed the active set at the prior scale. When the positives alone are
+    // singular in the scale direction, only the negatives carry information,
+    // and an empty active set would give up before using them. The seed offset
+    // must match the prior scale: `base_u / base_n` fits a scale of zero and
+    // would misclassify the negatives.
     let mut s = prior.value;
     let mut g = (base_u - s * base_a) / base_n;
     let violating = |g: f64, s: f64| -> Vec<usize> {
@@ -921,9 +835,8 @@ pub fn best_absorption_scale(
     // piecewise-quadratic, so this cap is for floating-point ties on the
     // threshold rather than for any real risk of cycling.
     for _ in 0..64 {
-        // Singular even with the active negatives included: the scale genuinely
-        // is not identified, so leave it at the prior and let the offset carry
-        // everything. That is the honest outcome, not an invented scale.
+        // Singular even with the active negatives: the scale is not
+        // identified, so leave it at the prior and let the offset carry it.
         let Some((gi, si)) = solve(&active) else {
             break;
         };
@@ -937,10 +850,8 @@ pub fn best_absorption_scale(
     }
 
     let (scale, hit) = prior.clamped(s);
-    // With the scale clamped, re-solve the offset conditional on it, or the two
-    // no longer describe the same fit. The active set is held at the one the
-    // unclamped solve settled on: re-deriving it under a clamped scale would be
-    // solving a different problem than the one that reported the clamp.
+    // With the scale clamped, re-solve the offset for it so the pair describes
+    // one fit. The active set stays at the unclamped solution.
     let g = if hit {
         let (mut n, mut su, mut sa) = (base_n, base_u, base_a);
         for &i in &active {
@@ -956,14 +867,12 @@ pub fn best_absorption_scale(
     (scale, g, hit)
 }
 
-/// The sum of squares at one point, with the absorption scale FIXED and only the
-/// global offset solved for it.
+/// The sum of squares with the absorption scale fixed and only the global
+/// offset solved for it.
 ///
-/// Used to profile the objective along the absorption scale, which
-/// [`best_absorption_scale`] otherwise solves in closed form and so never
-/// exposes as a curve. The global offset must still be re-solved at every scale,
-/// or the profile would measure the cost of holding the level wrong rather than
-/// the cost of the scale.
+/// Used to draw the objective along the absorption scale, which
+/// [`best_absorption_scale`] otherwise solves in closed form. The offset is
+/// re-solved at every scale so the profile measures the scale alone.
 #[must_use]
 pub fn objective_at_scale(
     spots: &[Cached],
@@ -1010,12 +919,9 @@ pub fn objective_at_scale(
 /// The objective with the absorption scale and the global offset profiled out,
 /// exactly as the fit's inner loop does it.
 ///
-/// Public so a report can draw the objective as a CURVE along each parameter.
-/// A parameter that ends on a bound has two quite different explanations - the
-/// objective really falls all the way to the edge, or it goes flat partway and a
-/// descent drifts to the edge because nothing stops it - and only the curve
-/// distinguishes them. `Bounded::at_bound` cannot: it sees where the value
-/// landed, not what the objective was doing there.
+/// Public so a report can draw the objective along each parameter. A parameter
+/// on a bound may sit where the objective keeps falling, or where it went flat
+/// and the descent drifted; only the curve tells these apart.
 #[must_use]
 pub fn profiled_objective(
     spots: &[Cached],
@@ -1042,10 +948,9 @@ pub fn profiled_objective(
 /// held fixed, and repeat. Both halves reduce the same sum of squares, so the
 /// objective is monotone and the loop cannot cycle.
 ///
-/// Coordinate descent rather than a gradient method because the objective is
-/// cheap, only five-dimensional, and the parameters are bounded - and because a
-/// coordinate step that wants to leave its bound is exactly the finding the
-/// bounds exist to surface. `report_bound_hits` says which ones did.
+/// Coordinate descent suits a cheap, five-dimensional, bounded objective, and
+/// a step that wants to leave its bound is a finding in itself;
+/// `report_bound_hits` lists them.
 #[must_use]
 pub fn fit_cached(
     spots: &[Cached],
@@ -1062,15 +967,13 @@ pub fn fit_cached(
     }
 
     let prior_scale = CachedParams::prior().absorption_scale;
-    // The PROFILED objective: at every trial set of noise anchors the absorption
-    // scale is solved in closed form rather than searched, so the search only ever
-    // walks the four-dimensional noise surface. Returns the objective and the
-    // scale that produced it.
+    // The profiled objective: the absorption scale is solved in closed form at
+    // every trial set of noise anchors, so the search walks only the noise
+    // surface. Returns the objective and the scale that produced it.
     //
-    // The hinge over the negatives is part of the SAME objective, not a separate
-    // score compared afterwards. That is the whole point: a trial point that
-    // improves the positives by sliding the model optimistic must pay for the
-    // non-decodes it thereby claims would have decoded.
+    // The hinge over the negatives is part of this objective, so a trial point
+    // that helps the positives by sliding the model optimistic pays for the
+    // non-decodes it would then claim.
     let profiled = |atm: AtmosphericAnchors, e: &StationEffects| -> (f64, Bounded, f64) {
         profiled_objective(spots, atm, e, prior_scale, negatives)
     };
@@ -1082,25 +985,22 @@ pub fn fit_cached(
             .map(|c| c.modelled_db(params.absorption_scale.value, params.atm) - c.measured_db)
             .collect();
         effects = StationEffects::solve(&residuals, spots, n_tx, n_rx);
-        // Re-profile the scale and the global offset against the effects just
-        // solved. Both together, for the reason  explains.
+        // Re-profile the scale and the global offset together against the
+        // effects just solved (see `best_absorption_scale`).
         let (_, scale, global) = profiled(params.atm, &effects);
         params.absorption_scale = scale;
         effects.global_db = global;
 
         // Parameters, by coordinate descent on the unit scale.
         //
-        // Each step size is swept to convergence rather than once. The absorption
-        // scale and the noise-model frequency slopes are genuinely correlated -
-        // both change how the prediction varies across bands - so a single sweep
-        // per step size zigzags and stalls short of the optimum. Measured on a
-        // planted case: one sweep per size recovered 1.69 of a true 1.80;
-        // sweeping to convergence recovers it.
+        // Each step size is swept to convergence. The absorption scale and the
+        // noise frequency slopes are correlated, so one sweep per size zigzags
+        // and stalls (1.69 of a planted 1.80).
         let mut improved = false;
         let fields = CachedParams::fields();
         // Coarse to fine: 1/8 of each range down to 1/4096, which resolves the
         // absorption scale to about 0.1 % and the noise anchors to a hundredth of
-        // a dB - well below the precision the data can support either way.
+        // a dB, finer than the data supports.
         let mut step = 0.125;
         while step > 1.0 / 4096.0 {
             // Cap the sweeps so a pathological objective cannot spin here; 200 is
@@ -1126,8 +1026,8 @@ pub fn fit_cached(
                             best = (value, get(&trial), scale, global);
                         }
                     }
-                    // A relative improvement floor, so the sweep stops on genuine
-                    // convergence rather than on floating-point dust.
+                    // Relative improvement floor, so rounding noise does not keep
+                    // the sweep going.
                     if best.0 < base * (1.0 - 1e-12) {
                         set(&mut params, best.1);
                         params.absorption_scale = best.2;
@@ -1139,16 +1039,11 @@ pub fn fit_cached(
                 if !moved {
                     break;
                 }
-                // PATTERN MOVE (Hooke-Jeeves). Pure coordinate descent cannot
-                // follow a valley that runs diagonally to its axes, and this
-                // objective has exactly such a valley: raising the noise
-                // frequency slope and lowering the absorption scale change the
-                // prediction across bands in nearly the same way. Measured on a
-                // planted case, axis-only descent stalled at a scale of 1.77 with
-                // 0.19 dB of residual when the optimum was 1.80 with none.
-                //
-                // So after each productive sweep, keep going in the direction the
-                // sweep moved, as far as that keeps helping.
+                // Pattern move (Hooke-Jeeves). Raising the noise frequency slope
+                // and lowering the absorption scale change the prediction in
+                // nearly the same way, a diagonal valley that axis-only descent
+                // cannot follow. After each productive sweep, keep moving in the
+                // sweep's direction while it helps.
                 let after: Vec<f64> = fields
                     .iter()
                     .map(|(_, get, _)| get(&params).unit_position())
@@ -1217,9 +1112,8 @@ pub fn fit_cached(
 
 /// Which fitted parameters ended up sitting on a bound.
 ///
-/// A bound hit is a FINDING, not a nuisance to be widened away: it means the
-/// residual the fit was chasing is not produced by the quantity it was pushing,
-/// so the error lives elsewhere in the model.
+/// A bound hit means the residual the fit was chasing does not come from the
+/// parameter it was pushing, so the error lives elsewhere in the model.
 #[must_use]
 pub fn report_bound_hits(params: &CachedParams) -> Vec<String> {
     let mut out = Vec::new();
@@ -1268,17 +1162,16 @@ pub fn cuts_by(
 
 /// How a set of negatives scored: paths the model claimed that did not happen.
 ///
-/// The false-positive rate here is an UPPER BOUND, because the negatives set
-/// necessarily includes some paths that were open but collided or arrived off the
+/// The false-positive rate here is an upper bound, because the negatives set
+/// includes some paths that were open but collided or arrived off the
 /// back of a directional antenna. See [`crate::corpus`].
 #[derive(Clone, Debug, Default)]
 pub struct NegativeScore {
     pub n: usize,
     /// Negatives for which the model found a geometric path at all.
     pub path_found: usize,
-    /// Negatives the model predicted would be DECODED - above the WSPR threshold.
-    /// This is the false positive that matters: claiming an opening that was not
-    /// there.
+    /// Negatives the model predicted would decode (above the WSPR threshold):
+    /// claimed openings that were not there.
     pub predicted_decodable: usize,
     /// Of those, how many needed the probabilistic Es sheet.
     pub via_es: usize,
@@ -1332,7 +1225,7 @@ mod tests {
     }
 
     /// An alternative scored under the same conditions as its winner must differ
-    /// only by its own two loss terms - the noise floor is a property of the spot.
+    /// only by its own two loss terms, since the noise floor belongs to the spot.
     #[test]
     fn the_alternative_is_scored_against_the_same_noise() {
         let atm = AtmosphericAnchors::default();
@@ -1357,7 +1250,7 @@ mod tests {
         );
     }
 
-    /// The midpoint cut is on the MIDPOINT, and 90 degrees is the terminator.
+    /// The day/night cut uses the midpoint, with 90 degrees as the terminator.
     #[test]
     fn night_is_decided_at_the_midpoint() {
         let mut c = mk(0, 0, -15.0, 8.0, 14.097);
@@ -1403,7 +1296,7 @@ mod tests {
     }
 
     /// Doubling the absorption scale must cost exactly the baseline absorption in
-    /// dB - the linearity the whole cache rests on.
+    /// dB, the linearity the cache relies on.
     #[test]
     fn the_absorption_scale_is_linear() {
         let c = mk(0, 0, -15.0, 8.0, 14.097);
@@ -1455,9 +1348,8 @@ mod tests {
         }
     }
 
-    /// The gauge freedom the docs describe really is a freedom: shifting a
-    /// constant from the transmitters to the receivers changes no prediction, so
-    /// the solver must return the CENTRED representative of that family.
+    /// Shifting a constant from the transmitters to the receivers changes no
+    /// prediction, so the solver must return the centred representative.
     #[test]
     fn only_the_sum_of_the_two_effects_is_identified() {
         let mut spots = Vec::new();
@@ -1465,7 +1357,7 @@ mod tests {
         for t in 0..2 {
             for r in 0..2 {
                 spots.push(mk(t, r, -15.0, 5.0, 14.097));
-                // A planted set that is NOT centred: tx offset by +10 throughout.
+                // A planted set that is not centred: tx offset by +10 throughout.
                 #[allow(clippy::cast_precision_loss)]
                 let planted = 10.0 + t as f64 - r as f64;
                 residuals.push(planted);
@@ -1473,14 +1365,14 @@ mod tests {
         }
         let e = StationEffects::solve(&residuals, &spots, 2, 2);
         // The +10 could not be attributed to either end, so it must have landed
-        // in the global term, not in the transmitter effects.
+        // in the global term.
         assert!(e.tx.iter().sum::<f64>().abs() < 1e-9);
         assert!(e.rx.iter().sum::<f64>().abs() < 1e-9);
         assert!((e.global_db - 10.0).abs() < 1e-6, "{}", e.global_db);
     }
 
     /// A station seen a handful of times must be excluded from the reported
-    /// distribution: its "effect" is its own residual and describes nothing.
+    /// distribution, since its "effect" is just its own residual.
     #[test]
     fn the_distribution_excludes_barely_seen_stations() {
         let mut spots = Vec::new();
@@ -1500,19 +1392,16 @@ mod tests {
         assert_eq!(e.tx_counts, vec![12, 2]);
     }
 
-    /// The attenuation the doc comment describes, demonstrated: a PERFECT model
-    /// scores a slope well below 1 against raw measured SNR purely because the
-    /// measurement carries station effects, and scores 1 once they are removed.
-    ///
-    /// This is why the headline number has to be the adjusted slope.
+    /// A perfect model scores a slope well below 1 against raw measured SNR
+    /// because the measurement carries station effects, and 1 once they are
+    /// removed. That is why the headline number is the adjusted slope.
     #[test]
     fn a_perfect_model_still_scores_a_low_raw_slope() {
         let atm = AtmosphericAnchors::default();
         let mut spots = Vec::new();
         let mut residuals = Vec::new();
         // 20 transmitters x 5 receivers. The physics varies through absorption;
-        // the station effects are twice as variable, which is the regime the WSPR
-        // population actually sits in.
+        // the station effects are twice as variable, as in the WSPR population.
         for t in 0..20 {
             for r in 0..5 {
                 #[allow(clippy::cast_precision_loss)]
@@ -1541,23 +1430,13 @@ mod tests {
         assert!(fit.rms_db < 1e-6, "a perfect model has no residual left");
     }
 
-    /// The fit must recover a planted absorption error rather than pushing it
-    /// into the station effects - the whole point of the design.
+    /// The fit must recover a planted absorption error instead of pushing it
+    /// into the station effects.
     ///
-    /// # What this test had to be rewritten to demonstrate
-    ///
-    /// It first planted an absorption that varied with the TRANSMITTER index. The
-    /// fit then recovered nothing at all and left the scale exactly at its prior,
-    /// which was correct behaviour: absorption that is a function of the station
-    /// is perfectly collinear with that station's fixed effect, so the effect
-    /// absorbs it completely and the data contains no information about the scale.
-    ///
-    /// That is the identification condition made concrete. The physics is
-    /// identified only from variation WITHIN a station, so the corpus must have
-    /// each station spanning bands and hours - which is exactly why the corpus
-    /// schedule walks eight UTC hours and ten bands rather than taking a uniform
-    /// sample. The layout below has each TX->RX pair observed on four bands at
-    /// three absorption levels, so the scale is identified within every pair.
+    /// The physics is identified only from variation within a station, so each
+    /// TX->RX pair here is observed on four bands at three absorption levels.
+    /// The same condition is why the corpus schedule walks eight UTC hours and
+    /// ten bands.
     #[test]
     fn the_fit_recovers_a_planted_absorption_error() {
         let atm = AtmosphericAnchors::default();
@@ -1567,12 +1446,9 @@ mod tests {
             for r in 0..5 {
                 for freq in [3.568, 7.038, 14.095, 21.094] {
                     for level in 0..3 {
-                        // Day/night is crossed with the absorption level rather
-                        // than tied to it. Tied together, the noise model's
-                        // day-night anchors can explain part of the absorption
-                        // error and the two are only partly separable - which is
-                        // itself worth knowing, and is why the corpus samples
-                        // every band at every hour rather than one band per hour.
+                        // Day/night is crossed with the absorption level. If the
+                        // two were tied, the noise model's day-night anchors could
+                        // absorb part of the absorption error.
                         for is_day in [false, true] {
                             #[allow(clippy::cast_precision_loss)]
                             let absorption = 2.0 + 4.0 * level as f64 + 3.0 / (freq / 3.568);
@@ -1602,12 +1478,8 @@ mod tests {
         );
     }
 
-    /// The other half of that lesson, pinned so it cannot be forgotten: when the
-    /// planted physics error IS collinear with a station, the fit must leave the
-    /// parameter alone rather than reporting a confident wrong value.
-    ///
-    /// A fit that "recovered" a scale here would be reading the station
-    /// population and calling it absorption.
+    /// When the planted physics error is collinear with a station, the fit must
+    /// leave the parameter at its prior instead of reporting a wrong value.
     #[test]
     fn physics_collinear_with_a_station_stays_unidentified() {
         let atm = AtmosphericAnchors::default();
@@ -1629,30 +1501,20 @@ mod tests {
             "the scale must stay at its prior, got {}",
             params.absorption_scale.value
         );
-        // ...and the station effects will have swallowed the whole thing, leaving
-        // no residual. A tiny residual with an unmoved parameter is the signature
-        // of an unidentified quantity, not of a good fit.
+        // ...and the station effects absorb it, leaving no residual. A tiny
+        // residual with an unmoved parameter marks an unidentified quantity.
         let fit = Fit::of(&spots, params.absorption_scale.value, params.atm, &effects);
         assert!(fit.rms_db < 1e-6, "residual {} dB", fit.rms_db);
     }
 
-    /// The failure the negatives exist to prevent, demonstrated and then fixed.
-    ///
-    /// The absorption scale is identified by how much absorption VARIES, never by
-    /// its mean - a constant amount of absorption is indistinguishable from the
-    /// global offset. So a corpus whose absorption is the same everywhere cannot
-    /// identify the scale at all, however many spots it holds, and the fit
-    /// correctly leaves it at its prior while the offset swallows the difference.
-    ///
-    /// A non-decode breaks that, and is the only thing here that can. It is a
-    /// statement about an ABSOLUTE SNR, so no constant shift satisfies it, and a
-    /// negative carrying a different amount of absorption from the positives
-    /// supplies exactly the variation the positives lacked.
+    /// With constant absorption the positives cannot identify the scale, and
+    /// the fit leaves it at the prior. A non-decode constrains the absolute SNR,
+    /// and one with different absorption supplies the missing variation.
     #[test]
     fn negatives_identify_a_scale_the_positives_cannot() {
         let atm = AtmosphericAnchors::default();
         let truth = 3.0;
-        // Absorption is EXACTLY constant across the positives, so the normal
+        // Absorption is exactly constant across the positives, so the normal
         // equations are singular in the scale direction and only `global` moves.
         let flat_absorption = 10.0;
         let mut spots = Vec::new();
@@ -1707,9 +1569,8 @@ mod tests {
         );
     }
 
-    /// The hinge must be ONE-SIDED. A negative the model already places below
-    /// the threshold has nothing more to say, and pulling it further down would
-    /// be inventing information the corpus explicitly does not contain.
+    /// The hinge must be one-sided: a negative already below the threshold
+    /// costs nothing.
     #[test]
     fn a_negative_already_below_threshold_costs_nothing() {
         let atm = AtmosphericAnchors::default();
@@ -1732,8 +1593,8 @@ mod tests {
         assert!(loud.penalty(1.0, atm, &effects, 0.0) > 0.0);
     }
 
-    /// With no negatives the objective must be bit-identical to the old
-    /// positives-only one, or every earlier result silently changed meaning.
+    /// With no negatives the objective must equal the positives-only one bit
+    /// for bit.
     #[test]
     fn no_negatives_reproduces_the_positives_only_solve() {
         let atm = AtmosphericAnchors::default();
@@ -1754,8 +1615,7 @@ mod tests {
         assert!((s.value - 1.4).abs() < 1e-6, "scale {}", s.value);
     }
 
-    /// A regression against a constant is undefined, and must say so rather than
-    /// return a confident zero.
+    /// A regression against a constant is undefined and must return NaN.
     #[test]
     fn regression_refuses_a_degenerate_input() {
         let (s, r) = regress(&[1.0, 1.0, 1.0, 1.0], &[1.0, 2.0, 3.0, 4.0]);
@@ -1766,8 +1626,8 @@ mod tests {
         assert!((s - 2.0).abs() < 1e-12 && (r - 1.0).abs() < 1e-12);
     }
 
-    /// The false-positive rate is over ALL negatives, not only the ones a path
-    /// was found for - otherwise a model that found nothing would score zero.
+    /// The false-positive rate is taken over all negatives, including those
+    /// where no path was found.
     #[test]
     fn false_positive_rate_is_over_every_negative() {
         let s = NegativeScore {

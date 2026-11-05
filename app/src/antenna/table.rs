@@ -1,16 +1,15 @@
-//! EXTENSION POINT: antennas whose pattern is measured or NEC-modelled data
+//! Extension point: antennas whose pattern is measured or NEC-modelled data
 //! rather than a formula.
 //!
-//! A Yagi, log-periodic, multi-band trap dipole, random wire or loop cannot be
-//! written as a closed form the way the types in [`super::image`] can. Their
-//! patterns depend on element lengths, spacings, trap resonances and feed
-//! geometry, and the honest way to carry them is as tabulated gain against
-//! elevation, per frequency and per height, from a NEC run or a measurement.
+//! A Yagi, log-periodic, multi-band trap dipole, random wire or loop has no
+//! closed form like the types in [`super::image`]; its pattern depends on
+//! element lengths, spacings, trap resonances and feed geometry. It is carried
+//! as tabulated gain against elevation, per frequency and height, from a NEC
+//! run or a measurement.
 //!
-//! This module exists so that adding such a type does not require touching the
-//! solver, the link budget, or any UI code beyond the picker. It is deliberately
-//! NOT wired up: no data ships with the app, and no table-backed antenna appears
-//! in [`super::AntennaKind`] yet.
+//! Adding such a type needs no change to the solver, the link budget, or any UI
+//! code beyond the picker. Nothing is wired up yet: no data ships with the app
+//! and [`super::AntennaKind`] has no table-backed variant.
 //!
 //! # Adding one
 //!
@@ -21,22 +20,19 @@
 //! 3. Add an [`super::AntennaKind`] variant and return the pattern from
 //!    [`super::AntennaConfig::build`].
 //! 4. Write the type's [`super::ElevationPattern::provenance`] to say where the
-//!    data came from and what it excludes - the same standard the closed-form
-//!    types are held to.
+//!    data came from and what it excludes, as the closed-form types do.
 //!
 //! # Interpolation
 //!
 //! Bilinear in `(frequency, height)` between the nearest bracketing blocks, and
 //! linear in elevation within a block, all in dB. Outside the tabulated range
 //! the nearest block is used unchanged and [`TabulatedPattern::in_range`]
-//! reports false, so the UI can say the pattern is being extrapolated rather
-//! than quietly presenting an edge value as if it were data. Real antenna data
-//! is sampled far too coarsely in height and frequency for anything fancier to
-//! be honest.
+//! reports false, so the UI can say the pattern is extrapolated. Real antenna
+//! data is sampled too coarsely in height and frequency to justify anything
+//! more elaborate.
 
-// Unused until the first table-backed antenna ships. That is the point of the
-// module: the machinery is in place and tested, so adding one is a data file
-// plus an `AntennaKind` variant, not a redesign.
+// Unused until the first table-backed antenna ships; adding one is a data file
+// plus an `AntennaKind` variant.
 #![allow(dead_code)]
 
 use super::{ElevationPattern, GainCurve};
@@ -94,8 +90,8 @@ pub struct TabulatedPattern {
 }
 
 impl TabulatedPattern {
-    /// Is `(freq_hz, height_m)` inside the tabulated range, or is the result an
-    /// extrapolation from the nearest block?
+    /// Whether `(freq_hz, height_m)` is inside the tabulated range rather than
+    /// extrapolated from the nearest block.
     #[must_use]
     pub fn in_range(&self, freq_hz: f64, height_m: f64) -> bool {
         let within = |get: fn(&PatternBlock) -> f64, v: f64| {
@@ -115,7 +111,7 @@ impl TabulatedPattern {
     /// Inverse-distance blend of the blocks nearest in `(log frequency, height)`.
     ///
     /// Frequency is weighted logarithmically because pattern shape tracks
-    /// height in WAVELENGTHS, which is a ratio, not a difference.
+    /// height in wavelengths, a ratio.
     fn blend(&self, freq_hz: f64, height_m: f64, elev_deg: f64) -> f64 {
         if self.blocks.is_empty() {
             return super::GAIN_FLOOR_DBI;
@@ -170,9 +166,8 @@ mod tests {
         }
     }
 
-    /// A table-backed antenna must satisfy exactly the same trait as a
-    /// closed-form one, so the solver cannot tell them apart. That is the whole
-    /// point of the extension point.
+    /// A table-backed antenna satisfies the same trait as a closed-form one, so
+    /// the solver cannot tell them apart.
     #[test]
     fn a_tabulated_antenna_is_just_an_elevation_pattern() {
         let ant = TabulatedPattern {
@@ -199,8 +194,8 @@ mod tests {
         assert!((g - 11.0).abs() < 1e-6 && (deg - 20.0).abs() < 0.6);
     }
 
-    /// Off the tabulated range the pattern still answers, but says it is
-    /// extrapolating rather than passing an edge value off as data.
+    /// Off the tabulated range the pattern still answers but reports that it
+    /// is extrapolating.
     #[test]
     fn extrapolation_is_declared() {
         let ant = TabulatedPattern {

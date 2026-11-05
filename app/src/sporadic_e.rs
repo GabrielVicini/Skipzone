@@ -1,37 +1,30 @@
 //! Sporadic E: a thin, intense, intermittent layer near 100 km.
 //!
-//! Es is the reason a 17 m signal is heard at 400 km when the F2 layer has no
-//! solution at that geometry at all. It is also the layer that least resembles
-//! the others, in two ways that both shape this module:
+//! Es explains a 17 m signal heard at 400 km when the F2 layer has no solution
+//! at that geometry. It differs from the other layers in two ways:
 //!
-//! * **It is not photochemical.** Es is metallic ions concentrated into a sheet
-//!   by wind shear, not a production/recombination balance with the solar
-//!   flux. So it gets no Chapman profile and no `Ch(X, chi)`: the shape is a
-//!   [`QuasiParabolicLayer`], thin, which is also the engine's closed-form
-//!   validation target (docs/derivations/analytic-solutions.md).
-//! * **It is probabilistic.** Es either is or is not there. Reporting a path it
-//!   supports as simply "available", next to an F2 path that is available every
-//!   day, would be a false equivalence. So this module produces an OCCURRENCE
-//!   PROBABILITY alongside foEs, and the solver keeps Es-supported paths in a
-//!   separate verdict carrying that probability. They are never folded into the
-//!   deterministic yes/no.
+//! * It is not photochemical. Es is metallic ions concentrated into a sheet by
+//!   wind shear, so it has no Chapman profile and no `Ch(X, chi)`. The shape is
+//!   a thin [`QuasiParabolicLayer`], also the engine's closed-form validation
+//!   target (docs/derivations/analytic-solutions.md).
+//! * It is probabilistic: Es is either there or not. This module gives an
+//!   occurrence probability alongside foEs, and the solver keeps Es-supported
+//!   paths in a separate verdict carrying that probability.
 //!
 //! # Provenance
 //!
-//! Everything below is an ORDER-OF-MAGNITUDE ANCHOR, not a fitted model and not
-//! traceable to a citable table, in the same sense as the D-region anchors in
-//! [`crate::scenario`]. The SHAPE follows the well-documented midlatitude Es
-//! climatology - a strong summer maximum, a diurnal cycle with a mid-morning
-//! and an early-evening peak, a temperate-latitude maximum - and the magnitudes
-//! are chosen to sit in the published ranges (midlatitude summer daytime
-//! occurrence of a few tens of percent, winter night a few percent; foEs
-//! typically 3-10 MHz when present). The TRENDS are the defensible part.
+//! Everything below is an order-of-magnitude anchor, not a fitted model or a
+//! citable table, like the D-region anchors in [`crate::scenario`]. The shape
+//! follows the documented midlatitude Es climatology (a strong summer maximum,
+//! mid-morning and early-evening diurnal peaks, a temperate-latitude maximum),
+//! and the magnitudes sit in the published ranges (summer daytime occurrence of
+//! a few tens of percent, winter night a few percent; foEs typically 3-10 MHz).
+//! The trends are the reliable part.
 //!
-//! Deliberately NOT modelled: equatorial Es (a different mechanism entirely -
-//! the equatorial electrojet - with its own much higher occurrence), auroral
-//! Es, and any spatial patchiness. A real Es cloud is tens to a few hundred km
-//! across; this models a uniform blanket, which is why the occurrence
-//! probability is reported rather than a yes/no.
+//! Not modelled: equatorial Es (a different mechanism, the equatorial
+//! electrojet, with much higher occurrence), auroral Es, and spatial
+//! patchiness. A real Es cloud is tens to a few hundred km across; this models
+//! a uniform blanket, which is why a probability is reported.
 
 use skipzone::constants::SPEED_OF_LIGHT;
 use skipzone::density::{ProfileError, QuasiParabolicLayer, density_at_critical_frequency};
@@ -90,10 +83,8 @@ fn lst_separation(a: f64, b: f64) -> f64 {
 }
 
 /// The shared 0..1 shape that drives both occurrence and foEs: a season factor,
-/// a two-peaked diurnal cycle, and a temperate-latitude weighting. Kept as one
-/// function because foEs and occurrence rise and fall together - when Es is
-/// more likely it is also, on average, stronger - and splitting them would
-/// invite the two to disagree.
+/// a two-peaked diurnal cycle, and a temperate-latitude weighting. One function
+/// because foEs and occurrence rise and fall together.
 fn es_shape(season: Season, lst_h: f64, lat_deg: f64) -> f64 {
     let seasonal = match season {
         Season::Summer => 1.0,
@@ -114,8 +105,8 @@ fn es_shape(season: Season, lst_h: f64, lat_deg: f64) -> f64 {
     seasonal * diurnal * latitude
 }
 
-/// What the Es model says about a place and time. Everything here is reported
-/// in the assumptions panel; nothing is used without being shown.
+/// What the Es model says about a place and time. Everything here is shown in
+/// the assumptions panel.
 #[derive(Clone)]
 pub struct SporadicE {
     /// Critical frequency of the Es layer when it is present, MHz.
@@ -134,10 +125,8 @@ impl SporadicE {
     ///
     /// `foes_max_mhz` and `peak_probability` are the [`ES_FOES_MAX_MHZ`] and
     /// [`ES_PEAK_PROBABILITY`] anchors, passed in rather than read from the
-    /// constants so a calibration run can move them. The SHAPE they scale -
-    /// `es_shape`, the summer maximum, the twin diurnal peaks and the
-    /// temperate-latitude weighting - is the documented climatology and is not a
-    /// calibration target.
+    /// constants so a calibration run can move them. The shape they scale
+    /// (`es_shape`) is the documented climatology and is not calibrated.
     #[must_use]
     pub fn derive(
         season: Season,
@@ -206,20 +195,16 @@ impl SporadicE {
         )
     }
 
-    /// Power fraction that TUNNELS THROUGH the sheet instead of reflecting from
-    /// it, for a ray whose turning point the tracer placed at `apex_alt_km`.
+    /// Power fraction that tunnels through the sheet instead of reflecting, for
+    /// a ray whose turning point the tracer placed at `apex_alt_km`.
     ///
-    /// # Why an Es reflection is not automatically total
+    /// # Why an Es reflection is not total
     ///
-    /// The tracer is a geometric-optics tracer: it turns a ray where the local
-    /// plasma condition is met and calls that a reflection, with no loss at all.
-    /// For a *thick* layer that is right. For a thin sheet it is not, because the
-    /// evanescent region above the turning point has FINITE width - the density
-    /// falls back through the same value on the far side of the peak - so the
-    /// wave does not decay forever. It decays across a barrier and re-emerges
-    /// above the sheet. That transmitted fraction is energy the reflected ray
-    /// never carries, and it is the one reflection loss an Es sheet has that
-    /// follows from the model's own geometry rather than from a fitted constant.
+    /// The geometric-optics tracer reflects a ray where the plasma condition is
+    /// met, with no loss. That is right for a thick layer. In a thin sheet the
+    /// evanescent region above the turning point has finite width (the density
+    /// falls back on the far side of the peak), so part of the wave tunnels
+    /// through and is lost to the reflected ray.
     ///
     /// # Derivation
     ///
@@ -249,27 +234,23 @@ impl SporadicE {
     /// so the barrier opacity is [`Self::barrier_opacity`] and the reflection
     /// loss is `-10 log10(1 - T)`.
     ///
-    /// The one thing needed from the ray is `1 - r^2`, and that is read straight
-    /// off the traced geometry rather than re-derived from a secant law: in the
-    /// parabolic profile `1 - r^2 = u_t^2`, i.e. the turning point's depth below
-    /// the peak measured in semi-thicknesses. So the apex altitude the ENGINE
-    /// reported is the whole input, and no incidence angle has to be
-    /// reconstructed. (`tests::opacity_from_apex_matches_the_frequency_form`
-    /// pins that identity against the `f_v/foEs` route.)
+    /// The only input from the ray is `1 - r^2`, read off the traced geometry:
+    /// in the parabolic profile `1 - r^2 = u_t^2`, the turning point's depth
+    /// below the peak in semi-thicknesses. So the apex altitude the engine
+    /// reports is enough, with no incidence angle to reconstruct
+    /// (`tests::opacity_from_apex_matches_the_frequency_form` checks this
+    /// against the `f_v/foEs` route).
     ///
-    /// # What it measures out at, which is the finding
+    /// # Magnitude
     ///
-    /// `(2 pi^2 / c) foEs a` is about 790 for a 8 MHz sheet 1.5 km semi-thick,
+    /// `(2 pi^2 / c) foEs a` is about 790 for an 8 MHz sheet 1.5 km semi-thick,
     /// so the barrier is hundreds of e-foldings opaque unless the ray turns
     /// within ~0.1 % of the peak density. Over the geometries the tracer
-    /// actually produces this term is therefore ZERO to many decimal places, and
-    /// that is a result rather than a disappointment: **a 1.5 km Es sheet really
-    /// is a near-perfect mirror at HF**, so an Es bias measured against real
-    /// spots cannot be blamed on a missing reflection loss. It has to come from
-    /// the selection rule, from [`Self::foes_mhz`], or from
-    /// [`Self::probability`]. The term is kept because it is derived, costs
-    /// nothing, and makes the Es MUF cut off with the sharpness the sheet
-    /// thickness implies instead of by fiat.
+    /// produces this term is zero to many decimal places: a 1.5 km Es sheet is
+    /// a near-perfect mirror at HF, so an Es bias against real spots must come
+    /// from the selection rule, [`Self::foes_mhz`] or [`Self::probability`].
+    /// The term is kept because it is derived, costs nothing, and gives the Es
+    /// MUF the cut-off sharpness the sheet thickness implies.
     #[must_use]
     pub fn tunnelling_fraction(&self, apex_alt_km: f64) -> f64 {
         (-self.barrier_opacity(apex_alt_km)).exp()
@@ -295,7 +276,7 @@ impl SporadicE {
             * depth
     }
 
-    /// Reflection loss at ONE bounce off the sheet, dB, for a ray the tracer
+    /// Reflection loss at one bounce off the sheet, dB, for a ray the tracer
     /// turned at `apex_alt_km`. See [`Self::tunnelling_fraction`] for the
     /// derivation and for why this is almost always 0.
     #[must_use]
@@ -305,8 +286,8 @@ impl SporadicE {
     }
 
     /// Altitude band a reflection has to sit in to be attributed to Es, km.
-    /// Deliberately wider than the sheet: a ray turns a little below the peak,
-    /// and the QP layer's upper zero sits above it.
+    /// Wider than the sheet: a ray turns a little below the peak, and the QP
+    /// layer's upper zero sits above it.
     #[must_use]
     pub fn attribution_band_km(&self) -> (f64, f64) {
         (
@@ -345,7 +326,7 @@ mod tests {
         );
 
         // Diurnal: both named peaks stand above the small hours, and the
-        // afternoon lull between them is genuinely a lull.
+        // afternoon lull between them is lower.
         let night = at(Season::Summer, 3.0, ES_PEAK_LAT_DEG);
         let morning = at(Season::Summer, ES_MORNING_PEAK_LST_H, ES_PEAK_LAT_DEG);
         let evening = at(Season::Summer, ES_EVENING_PEAK_LST_H, ES_PEAK_LAT_DEG);
@@ -429,8 +410,8 @@ mod tests {
         );
     }
 
-    /// The engine accepts the geometry, and the built layer really is a thin
-    /// sheet at the stated height with the stated critical frequency: a
+    /// The engine accepts the geometry, and the built layer is a thin sheet at
+    /// the stated height with the stated critical frequency: a
     /// vertically incident wave at foEs must find the plasma condition there
     /// and nowhere else.
     #[test]
@@ -493,10 +474,9 @@ mod tests {
 
     /// The barrier opacity read off the traced apex must equal the one derived
     /// from the equivalent vertical frequency. Two routes to `1 - r^2`: the
-    /// turning point's depth below the peak (what the code uses, because the
-    /// engine reports the apex) and `1 - (f_v/foEs)^2` (what the derivation is
-    /// written in). In a parabolic sheet they are the same number, and if they
-    /// ever stop being the same the profile assumption has drifted.
+    /// turning point's depth below the peak (used by the code, since the engine
+    /// reports the apex) and `1 - (f_v/foEs)^2` (used by the derivation). In a
+    /// parabolic sheet they are equal.
     #[test]
     fn opacity_from_apex_matches_the_frequency_form() {
         let es = SporadicE::manual(8.0, 0.4);
@@ -517,11 +497,9 @@ mod tests {
         }
     }
 
-    /// The magnitude that makes this a FINDING rather than a knob: a sheet of
-    /// the modelled thickness is hundreds of e-foldings opaque, so the loss is
-    /// zero everywhere except within a whisker of the peak. If a future change
-    /// to the sheet geometry makes this term start to bite, this test is where
-    /// that shows up.
+    /// A sheet of the modelled thickness is hundreds of e-foldings opaque, so
+    /// the loss is zero except very close to the peak. A sheet geometry change
+    /// that makes this term matter will show up here.
     #[test]
     fn the_sheet_is_an_almost_perfect_mirror() {
         let es = SporadicE::manual(8.0, 0.4);

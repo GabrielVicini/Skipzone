@@ -1,32 +1,27 @@
-//! The app's UNVERIFIED ANCHORS, gathered into one place so that a calibration
-//! run can vary them and an ordinary run can ignore them.
+//! The app's unverified anchors, gathered so a calibration run can vary them
+//! and an ordinary run can ignore them.
 //!
-//! Every value here already existed as a module constant with a physical name, a
-//! unit and a docstring saying what it is and how far it can be trusted - the
-//! D-region and collision anchors in [`crate::scenario`], the foE anchor in
-//! [`crate::fof2`], the sporadic-E climatology in [`crate::sporadic_e`], and the
-//! atmospheric-noise surrogate in [`crate::noise`]. Nothing new is introduced.
-//! What this module adds is the ability to *change* them from outside, plus the
-//! plausible range each one is allowed to move in.
+//! Each value is a module constant documented where it is used: the D-region
+//! and collision anchors in [`crate::scenario`], the foE anchor in
+//! [`crate::fof2`], the sporadic-E climatology in [`crate::sporadic_e`], and
+//! the atmospheric-noise surrogate in [`crate::noise`]. This module makes them
+//! adjustable and gives each a plausible range.
 //!
 //! # Why the bounds live in the code
 //!
-//! A calibration that is free to put the D region eight times denser than any
-//! published value will do exactly that, if that is what minimises its residual,
-//! and it will then report an excellent fit to a model that is physically wrong.
-//! So each anchor carries the range it is defensible over, and a fit that wants
-//! to leave that range is required to say so rather than to quietly widen it -
-//! see [`Bounded::clamped`], which reports whether it had to clamp.
+//! An unbounded calibration will put the D region eight times denser than any
+//! published value if that lowers its residual, and report a good fit to a
+//! physically wrong model. Each anchor carries its defensible range, and
+//! [`Bounded::clamped`] reports when a fit had to clamp.
 //!
-//! A bound being reached is therefore a FINDING: it means the residual the fit
-//! is chasing is not actually produced by the quantity it is pushing, and the
-//! error lies somewhere else in the model.
+//! A bound being reached means the residual the fit is chasing does not come
+//! from the quantity it is pushing, so the error lies elsewhere in the model.
 //!
-//! # What is deliberately absent
+//! # Not calibrated
 //!
-//! Free-space loss, the antenna patterns, the WSPR reference bandwidth and decode
-//! threshold, and everything in the engine crate. Those are either derived
-//! results or load-bearing definitions; none of them is a calibration target.
+//! Free-space loss, the antenna patterns, the WSPR reference bandwidth and
+//! decode threshold, and everything in the engine crate. These are derived
+//! results or definitions.
 
 /// One anchor: a current value and the range it is physically defensible over.
 #[derive(Clone, Copy, Debug)]
@@ -43,7 +38,7 @@ impl Bounded {
     }
 
     /// This anchor moved to `v`, clamped into its range, plus whether the clamp
-    /// bit. A caller that discards the flag has thrown away the finding.
+    /// applied.
     #[must_use]
     pub fn clamped(self, v: f64) -> (Self, bool) {
         let clamped = v.clamp(self.min, self.max);
@@ -89,7 +84,7 @@ impl Bounded {
 /// electron-neutral collision frequency, E-region geometry and foE.
 ///
 /// Ranges are the published spread of each quantity for the mid-latitude
-/// ionosphere, not a convenience window:
+/// ionosphere:
 ///
 /// * D-region peak density 3e8 - 3e9 m^-3 spans quiet night through disturbed
 ///   day at the 80-90 km peak.
@@ -99,9 +94,8 @@ impl Bounded {
 ///   whose neutral-density profile is used; its scale height follows the neutral
 ///   atmosphere, 5-9 km.
 /// * The E peak sits at 100-115 km with a scale height of 5-15 km.
-/// * Overhead quiet-sun foE was taken as 3.0-3.8 MHz from the textbook range;
-///   the lower end is now 2.6, because the anchor has since been MEASURED at
-///   2.99 against ionosonde soundings and the old floor excluded the answer.
+/// * Overhead quiet-sun foE spans 2.6-3.8 MHz. The textbook range starts at
+///   3.0, but the anchor was measured at 2.99 against ionosonde soundings.
 #[derive(Clone, Copy, Debug)]
 pub struct IonosphereAnchors {
     /// Overhead-sun D-region peak electron density, m^-3.
@@ -112,23 +106,19 @@ pub struct IonosphereAnchors {
     pub d_scale_height_km: Bounded,
     /// Residual night-time D-region density, as a fraction of the overhead-sun
     /// peak. See [`crate::chapman::SolarChapmanLayer::with_night_floor`] for why
-    /// an alpha-Chapman layer cannot derive this and must be given it.
+    /// an alpha-Chapman layer needs it as an input.
     pub d_night_floor_fraction: Bounded,
-    /// How much of the photochemical peak RISE the D-region profile takes,
+    /// How much of the photochemical peak rise the D-region profile takes,
     /// 0..1. See [`crate::chapman::SolarChapmanLayer::with_rise_fraction`].
     ///
-    /// This is the only anchor here that changes the model's SHAPE rather than
-    /// one of its levels, and it exists because the shape was measured wrong.
-    /// The layer imposes `A ~ cos^n chi` with `n = 1/2 + f H_D/H_nu`; at the
-    /// shipping `f = 1` that is 1.39 against a measured `n ~ 0.75`, and no
-    /// setting of the two scale heights inside their own bounds reaches 0.75.
-    /// `bin/zenith_probe` measures the whole table.
+    /// The only anchor that changes the model's shape rather than a level. The
+    /// layer imposes `A ~ cos^n chi` with `n = 1/2 + f H_D/H_nu`; at the
+    /// shipping `f = 1` that is 1.39 against a measured `n ~ 0.75`, which no
+    /// setting of the two scale heights within bounds reaches
+    /// (`bin/zenith_probe`).
     ///
-    /// The full range 0..1 is allowed because BOTH endpoints are derived rather
-    /// than arbitrary - 1 is the textbook photochemical layer, 0 is the
-    /// fixed-height limit the lower D region actually sits closer to - so
-    /// neither end is a bound whose being reached would be a finding. What IS a
-    /// finding is the fitted value itself.
+    /// Both endpoints are derived (1 is the textbook photochemical layer, 0 the
+    /// fixed-height limit), so reaching either end is not itself a finding.
     pub d_rise_fraction: Bounded,
     /// Electron-neutral collision frequency at `nu_ref_alt_km`, s^-1.
     pub nu_ref_per_s: Bounded,
@@ -164,11 +154,9 @@ impl Default for IonosphereAnchors {
             nu_scale_height_km: Bounded::new(s::NU_SCALE_HEIGHT_KM, 5.0, 9.0),
             e_peak_alt_km: Bounded::new(s::E_REGION_PEAK_ALT_KM, 100.0, 115.0),
             e_scale_height_km: Bounded::new(s::E_REGION_SCALE_HEIGHT_KM, 5.0, 15.0),
-            // Lower bound was 3.0, which the MEASURED value 2.99 sits just outside.
-            // Widened deliberately and on evidence, not to unstick a fit: see
-            // `fof2::FOE_OVERHEAD_QUIET_MHZ`, measured against 28 952 ionosonde
-            // soundings over four seasons. This is the opposite case to the
-            // atmospheric-noise bounds, which were widened on a theory and put back.
+            // Lower bound below the textbook 3.0 because the measured value is
+            // 2.99 (`fof2::FOE_OVERHEAD_QUIET_MHZ`, from 28 952 ionosonde
+            // soundings over four seasons).
             foe_overhead_quiet_mhz: Bounded::new(crate::fof2::FOE_OVERHEAD_QUIET_MHZ, 2.6, 3.8),
             es_foes_max_mhz: Bounded::new(crate::sporadic_e::ES_FOES_MAX_MHZ, 5.0, 12.0),
             es_peak_probability: Bounded::new(crate::sporadic_e::ES_PEAK_PROBABILITY, 0.10, 0.70),
@@ -178,12 +166,11 @@ impl Default for IonosphereAnchors {
 
 /// The anchors of the atmospheric-noise surrogate in [`crate::noise`].
 ///
-/// The SHAPE - log-linear in frequency, with additive day/night, season and
-/// latitude terms - follows the published P.372 curves and is NOT a calibration
-/// target here. These are its absolute anchors, which the module documentation
-/// already flags as unverified.
+/// The shape (log-linear in frequency, with additive day/night, season and
+/// latitude terms) follows the published P.372 curves and is not calibrated
+/// here. These are its unverified absolute anchors.
 ///
-/// Ranges are wide because the quantity really is uncertain by that much: the
+/// Ranges are wide because the quantity is that uncertain: the
 /// P.372 atmospheric maps span roughly 40 dB of `Fa` at 1 MHz between a quiet
 /// polar winter night and an equatorial summer night.
 #[derive(Clone, Copy, Debug)]
@@ -197,7 +184,7 @@ pub struct AtmosphericAnchors {
     /// step on the day curve rather than a second independent line.
     pub step_1mhz_db: Bounded,
     /// Linear frequency dependence of that step, dB per decade. Negative narrows
-    /// the step with rising frequency; POSITIVE inverts it.
+    /// the step with rising frequency; positive inverts it.
     pub step_slope_db: Bounded,
     /// Curvature of the step in `log10(f)`, dB per decade squared.
     pub step_curve_db: Bounded,
@@ -215,58 +202,38 @@ impl Default for AtmosphericAnchors {
         Self {
             f1_day_db: Bounded::new(n::ATM_1MHZ_DAY_DB, 55.0, 90.0),
             slope_day_db: Bounded::new(n::ATM_SLOPE_DAY_DB, 30.0, 60.0),
-            // The three step bounds are drawn around a CONTRAST, not around an
-            // absolute level, which is the whole point of the reparameterisation.
+            // The three step bounds are drawn around a contrast rather than an
+            // absolute level. Level-shaped bounds (80..110 dB at 1 MHz,
+            // 35..65 dB/decade for the night line) made the fit rail every one,
+            // and widening the night slope ceiling to 90 only moved RMS from 7.81
+            // to 7.83 dB.
             //
-            // Do not restore level-shaped bounds here. The old night anchors were
-            // boxed by what an absolute atmospheric Fa may plausibly be
-            // (80..110 dB at 1 MHz, 35..65 dB/decade), and the fit railed all of
-            // them because it was steering a DIFFERENCE through boxes drawn around
-            // LEVELS. Raising the night slope ceiling from 65 to 90 was tried on
-            // the whole corpus: it railed again, Fa night stayed pinned, the
-            // absorption scale stayed pinned, and RMS with station effects removed
-            // moved 7.81 -> 7.83 dB. The extra range was not the missing thing.
-            //
-            // 0 dB of step is allowed deliberately: "no day/night contrast at all"
-            // has to be reachable, or the surrogate cannot represent a band whose
-            // floor is set by the man-made and galactic curves underneath it,
-            // which above ~10 MHz is every band.
+            // A 0 dB step must be reachable for bands whose floor is set by the
+            // man-made and galactic curves, which above ~10 MHz is every band.
             step_1mhz_db: Bounded::new(n::ATM_STEP_1MHZ_DB, 0.0, 40.0),
-            // Spans both signs. Negative is the published behaviour - the day and
-            // night atmospheric curves converge as frequency rises. Positive is an
-            // INVERTED step, unreachable under the old bounds, and the measured
-            // step over 7-14 MHz is the reason it must be reachable.
+            // Spans both signs. Negative is the published behaviour (day and
+            // night curves converge as frequency rises); positive, an inverted
+            // step, is needed for the measured step over 7-14 MHz.
             step_slope_db: Bounded::new(n::ATM_STEP_SLOPE_DB, -45.0, 25.0),
-            // Curvature, so the step may bend rather than being forced straight.
-            // The corpus carries six bands with a legal cell on both sides of the
-            // terminator, so three step parameters are comfortably identified -
-            // but see `THE STEP AT THE TERMINATOR`: the three lowest of those six
-            // have a daytime side made almost entirely of E-layer paths, which
-            // carry a defect of their own. Do not add a fourth step parameter to
-            // chase them.
+            // Curvature, so the step may bend. Six corpus bands have a cell on
+            // both sides of the terminator, enough for three step parameters. The
+            // lowest three have a daytime side made almost entirely of E-layer
+            // paths with their own defect (see `THE STEP AT THE TERMINATOR`), so a
+            // fourth step parameter would only chase that.
             step_curve_db: Bounded::new(n::ATM_STEP_CURVE_DB, -25.0, 25.0),
-            // MEASURED, and the reason not to keep tuning this surrogate.
-            //
-            // Three noise parameterisations were fitted to the full 9126-spot
-            // corpus: the original two lines; the same with the night slope
-            // ceiling raised 65 -> 90; and this step form, which the fit drove to
-            // a FLAT INVERTED step of about -8 dB (night quieter than day on every
-            // band) by railing all three step parameters at once. Their day/night
-            // steps differ by more than 20 dB. They score:
+            // Measured: further tuning of this surrogate does not help. Three
+            // noise parameterisations fitted to the 9126-spot corpus (two
+            // independent lines; the same with the night slope ceiling at 90; and
+            // this step form, which the fit drove to a flat inverted step of about
+            // -8 dB) have day/night steps more than 20 dB apart and score:
             //
             //   RMS, effects removed   7.81   7.83   7.88 dB
             //   AUC decode/non-decode  0.771  0.776  0.775
             //
-            // The objective is FLAT along this whole direction. The step form did
-            // what it was built to do - it more than halved the spread of the
-            // residual's day/night structure across bands, from a 21 dB range to
-            // 9 dB - and the model got no better at predicting anything.
-            //
-            // That is the AUC section's warning arriving: with IQR ~10.4 dB about
-            // the residual, this model is limited by per-path SPREAD, not by any
-            // smooth systematic term. Fitting more smooth systematic parameters
-            // cannot move it. Anything further spent here is spent on the wrong
-            // thing.
+            // The step form cut the residual's day/night spread across bands from
+            // 21 dB to 9 dB without improving prediction. With IQR ~10.4 dB in the
+            // residual, the model is limited by per-path spread rather than any
+            // smooth systematic term.
             season_swing_db: Bounded::new(n::ATM_SEASON_SWING_DB, 0.0, 15.0),
             tropical_boost_db: Bounded::new(n::ATM_TROPICAL_BOOST_DB, 0.0, 30.0),
             polar_offset_db: Bounded::new(n::ATM_POLAR_OFFSET_DB, 0.0, 15.0),
@@ -277,10 +244,9 @@ impl Default for AtmosphericAnchors {
 /// Everything a calibration may move, in one value carried on
 /// [`Inputs`](crate::scenario::Inputs).
 ///
-/// `Default` reproduces the module constants exactly, so a default `Inputs` is
-/// bit-identical to the pre-calibration model. `tests::default_anchors_match_the_module_constants`
-/// pins that, which is what makes it safe for the GUI to carry this without
-/// knowing it exists.
+/// `Default` reproduces the module constants exactly
+/// (`tests::default_anchors_match_the_module_constants`), so the GUI can carry
+/// this without using it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Anchors {
     pub ionosphere: IonosphereAnchors,
@@ -445,9 +411,8 @@ impl Anchors {
 mod tests {
     use super::*;
 
-    /// The default anchors must BE the module constants. If this drifts, every
-    /// run of the GUI silently stops matching the values its own assumptions
-    /// panel prints.
+    /// The default anchors must equal the module constants, or the GUI stops
+    /// matching the values its assumptions panel prints.
     #[test]
     fn default_anchors_match_the_module_constants() {
         let a = Anchors::default();
@@ -484,9 +449,8 @@ mod tests {
         assert!((n.step_1mhz_db.value - crate::noise::ATM_STEP_1MHZ_DB).abs() < 1e-12);
         assert!((n.step_slope_db.value - crate::noise::ATM_STEP_SLOPE_DB).abs() < 1e-12);
         assert!((n.step_curve_db.value - crate::noise::ATM_STEP_CURVE_DB).abs() < 1e-12);
-        // The step constants are the OLD night anchors, re-expressed. If either
-        // side of that identity is edited alone the surrogate silently stops
-        // reproducing the two-line form it replaced.
+        // The step constants are derived from the night anchors; editing one
+        // side alone would break the identity.
         assert!(
             (n.f1_day_db.value + n.step_1mhz_db.value - crate::noise::ATM_1MHZ_NIGHT_DB).abs()
                 < 1e-12
@@ -500,24 +464,14 @@ mod tests {
         assert!((n.polar_offset_db.value - crate::noise::ATM_POLAR_OFFSET_DB).abs() < 1e-12);
     }
 
-    /// Every default value must sit INSIDE its own stated range. A prior that
-    /// starts on a bound cannot be reported as "hit the bound" meaningfully.
+    /// Every default value must sit strictly inside its stated range, so that
+    /// "hit the bound" is meaningful.
     ///
-    /// # The one exemption, and why it is not a loophole
-    ///
-    /// `d_rise_fraction` starts ON its upper bound, because for that anchor the
-    /// bound and the prior are the same object: 1.0 is both the physical maximum
-    /// (a profile cannot take more than all of its own photochemical rise) and
-    /// the incumbent model (the textbook alpha-Chapman layer every earlier run
-    /// used). They coincide by construction, not by an oversight in choosing the
-    /// range.
-    ///
-    /// The rationale above still holds for it in the direction that matters.
-    /// "Hit the upper bound" is not a finding here - it is the null result, and
-    /// means the corpus found no reason to leave the textbook layer. The
-    /// informative outcome is a fitted value strictly inside, and that direction
-    /// is fully open. The exemption is by NAME so that any other anchor drifting
-    /// onto a bound still fails this test.
+    /// The exception is `d_rise_fraction`, whose prior 1.0 is also its physical
+    /// maximum (a profile cannot take more than all of its photochemical rise).
+    /// Staying there means the corpus found no reason to leave the textbook
+    /// layer. The exemption is by name so any other anchor on a bound still
+    /// fails.
     #[test]
     fn every_prior_sits_inside_its_range() {
         /// The prior legitimately equals a bound here; see the doc comment.
@@ -527,8 +481,8 @@ mod tests {
         for (name, get, _) in Anchors::ionosphere_fields() {
             let b = get(&a.ionosphere);
             if AT_BOUND_BY_CONSTRUCTION.contains(&name) {
-                // Still has to be within the range, and still has to have a
-                // real interval to move in - only the strictness is relaxed.
+                // Still within the range and with a real interval to move in;
+                // only the strictness is relaxed.
                 assert!(
                     b.value >= b.min && b.value <= b.max && b.min < b.max,
                     "{name}: exempt prior {} is still outside [{}, {}]",
@@ -558,8 +512,7 @@ mod tests {
         }
     }
 
-    /// Clamping must REPORT that it clamped, or a fit can leave its physical
-    /// range without anyone finding out.
+    /// Clamping must report that it clamped.
     #[test]
     fn clamping_reports_itself() {
         let b = Bounded::new(1.0e9, 3.0e8, 3.0e9);

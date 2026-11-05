@@ -1,36 +1,31 @@
 //! Antenna elevation patterns: gain in dBi as a function of take-off angle.
 //!
-//! This module replaces the app's former isotropic assumption. Every antenna
-//! type is a [`ElevationPattern`] implementor that, given a height above ground
-//! and an operating frequency, produces a [`GainCurve`] - gain in dBi sampled
-//! against elevation angle. The solver evaluates that curve at the launch
-//! elevation of the first hop and the arrival elevation of the last, and both
-//! numbers enter the link budget.
+//! Every antenna type is an [`ElevationPattern`] that, given a height above
+//! ground and an operating frequency, produces a [`GainCurve`]: gain in dBi
+//! against elevation angle. The solver reads the curve at the launch elevation
+//! of the first hop and the arrival elevation of the last, and both gains
+//! enter the link budget.
 //!
-//! # Why a curve, and not just a function
+//! # Why a curve
 //!
-//! The brief interface is `(elevation, height, frequency) -> dB`, and
-//! [`ElevationPattern::gain_dbi`] is exactly that. But the REQUIRED method is
-//! [`ElevationPattern::curve`], for two reasons:
+//! [`ElevationPattern::gain_dbi`] gives `(elevation, height, frequency) -> dB`,
+//! but the required method is [`ElevationPattern::curve`] because:
 //!
-//!   * the closed-form types normalise their pattern by numerically integrating
-//!     radiated power over the hemisphere (see `image`), which costs far more
-//!     than one sample - doing it per angle would be wasteful;
-//!   * a gain-vs-elevation curve is also precisely what a LOOKUP-TABLE antenna
-//!     has. A future Yagi, log-periodic, trap dipole, random wire or loop
-//!     arrives as measured or NEC-modelled samples, not as a formula.
+//!   * the closed-form types normalise their pattern by integrating radiated
+//!     power over the hemisphere (see `image`), far too costly per angle;
+//!   * a lookup-table antenna (Yagi, log-periodic, trap dipole, random wire,
+//!     loop) arrives as measured or NEC-modelled samples, i.e. as a curve.
 //!
-//! So the curve is the common currency: closed-form types compute it, table
-//! types interpolate it, and nothing downstream of this module can tell which
-//! it got. [`table::TabulatedPattern`] is the extension point - the type exists
-//! and interpolates, but ships no data and is not offered in the UI yet.
+//! Closed-form types compute the curve and table types interpolate it.
+//! [`table::TabulatedPattern`] is the extension point; it ships no data and is
+//! not offered in the UI yet.
 //!
 //! # What the closed-form types assume
 //!
 //! Provenance and hand-checks live in `image`. In summary: image theory over
 //! a flat lossy half-space, with the antenna's own radiated power computed
 //! exactly (for the assumed sinusoidal current) over a perfect conductor. The
-//! model does NOT include conductor loss, ground-screen / radial I^2 R loss,
+//! model does not include conductor loss, ground-screen / radial I^2 R loss,
 //! near-field Sommerfeld ground loss, terrain, or nearby structures. Checked
 //! against NEC-4 it runs 0.3-0.6 dB optimistic; see `image` for the numbers.
 
@@ -40,10 +35,9 @@ mod image;
 mod table;
 
 pub use image::{Ground, HorizontalWire, Polarization, VerticalMonopole, fresnel_coefficient};
-// The lookup-table extension point. Deliberately not referenced anywhere
-// else yet: no table-backed antenna is offered until real data exists to
-// back one. Re-exported so adding one is a change to `AntennaConfig::build`
-// and nothing more.
+// The lookup-table extension point, unused until real data exists for a
+// table-backed antenna. Re-exported so adding one only touches
+// `AntennaConfig::build`.
 #[allow(unused_imports)]
 pub use table::{PatternBlock, TabulatedPattern};
 
@@ -53,16 +47,15 @@ pub const CURVE_STEP_DEG: f64 = 0.5;
 pub const CURVE_SAMPLES: usize = 181;
 
 /// Gain floor, dBi. Real patterns have true nulls (a horizontal dipole over a
-/// perfect conductor radiates nothing along the horizon); carrying `-inf` into
-/// a link budget would poison every downstream number, so nulls are clamped
-/// here. -60 dBi is far below any angle that could produce a usable path.
+/// perfect conductor radiates nothing along the horizon), and `-inf` would
+/// break every downstream sum, so nulls are clamped. -60 dBi is far below any
+/// usable path.
 pub const GAIN_FLOOR_DBI: f64 = -60.0;
 
 /// Gain in dBi against elevation angle, sampled on a fixed 0..90 deg grid.
 ///
-/// Interpolation is linear in dB. That is the convention pattern data is
-/// published and interpolated in, and on a 0.5 deg grid the difference from
-/// interpolating in power is far below the model's own accuracy.
+/// Interpolation is linear in dB, the convention for published pattern data;
+/// on a 0.5 deg grid the difference from interpolating in power is negligible.
 #[derive(Clone)]
 pub struct GainCurve {
     label: String,
@@ -71,10 +64,10 @@ pub struct GainCurve {
 }
 
 impl GainCurve {
-    /// Build from a closure taking elevation in RADIANS and returning dBi.
-    /// Samples are independent, and each costs an azimuth quadrature, so they
-    /// are evaluated across the pool. `map` keeps input order, so the curve is
-    /// bit-for-bit the one the serial loop produced.
+    /// Build from a closure taking elevation in radians and returning dBi.
+    /// Samples are independent and each costs an azimuth quadrature, so they
+    /// are evaluated across the pool; `map` keeps input order, so the result
+    /// matches a serial loop bit for bit.
     pub fn from_fn(label: impl Into<String>, f: impl Fn(f64) -> f64 + Sync) -> Self {
         let samples = (0..CURVE_SAMPLES)
             .into_par_iter()
@@ -90,8 +83,7 @@ impl GainCurve {
         }
     }
 
-    /// A flat pattern at `gain_dbi` - the isotropic radiator, and the baseline
-    /// the app used before this module existed.
+    /// A flat pattern at `gain_dbi`, e.g. the isotropic radiator.
     #[must_use]
     pub fn flat(label: impl Into<String>, gain_dbi: f64) -> Self {
         Self {
@@ -151,20 +143,17 @@ pub trait ElevationPattern: Send + Sync {
     /// Human-readable name, including the parameters that shaped the pattern.
     fn label(&self, height_m: f64, freq_hz: f64) -> String;
 
-    /// Where the numbers come from, stated plainly for the UI. This project
-    /// surfaces the provenance of every physical model rather than presenting
-    /// all of them with equal confidence.
+    /// Where the numbers come from, for the UI.
     fn provenance(&self) -> &'static str;
 
-    /// REQUIRED: the gain-vs-elevation curve at one height and frequency.
+    /// The gain-vs-elevation curve at one height and frequency.
     fn curve(&self, height_m: f64, freq_hz: f64) -> GainCurve;
 
-    /// The interface in the brief: `(elevation, height, frequency) -> dBi`.
+    /// `(elevation, height, frequency) -> dBi`.
     ///
-    /// Correct but not cheap for closed-form types, which rebuild the whole
-    /// normalised curve per call. The solver calls [`Self::curve`] once per
-    /// scenario and samples that instead - which is why this method carries no
-    /// non-test caller and is marked accordingly.
+    /// Closed-form types rebuild the whole normalised curve per call, so the
+    /// solver calls [`Self::curve`] once per scenario instead; this method has
+    /// only test callers.
     #[allow(dead_code)]
     fn gain_dbi(&self, elevation_rad: f64, height_m: f64, freq_hz: f64) -> f64 {
         self.curve(height_m, freq_hz).gain_dbi(elevation_rad)
@@ -173,9 +162,8 @@ pub trait ElevationPattern: Send + Sync {
 
 /// A perfectly isotropic radiator: 0 dBi at every angle.
 ///
-/// Physically unrealisable, and retained deliberately - it is the baseline the
-/// link budget used before patterns existed, so selecting it at both ends
-/// reproduces the app's previous numbers exactly.
+/// Physically unrealisable, but a useful reference: selecting it at both ends
+/// removes antenna gain from the link budget.
 pub struct Isotropic;
 
 impl ElevationPattern for Isotropic {
@@ -195,8 +183,8 @@ impl ElevationPattern for Isotropic {
 
 /// Insertion loss of a typical 49:1 EFHW transformer, dB.
 ///
-/// ENGINEERING FIGURE, NOT A CITED STANDARD - the same status as the operating
-/// mode presets in [`crate::noise`]. Published measurements of 49:1 ununs on
+/// An engineering figure, not a cited standard, like the operating mode
+/// presets in [`crate::noise`]. Published measurements of 49:1 ununs on
 /// FT240-43 cores into a matched load scatter over roughly 0.3-0.8 dB across
 /// HF, rising at the top of the band. A single flat 0.5 dB is used because
 /// this model has no basis for a frequency shape.
@@ -249,14 +237,14 @@ impl AntennaKind {
 
 /// One end of the link: an antenna type plus the parameters it needs.
 ///
-/// Type-specific parameters live HERE, not in the `gain_dbi` call, which is
-/// what keeps the `(elevation, height, frequency)` interface uniform across
+/// Type-specific parameters live here rather than in the `gain_dbi` call, which
+/// keeps the `(elevation, height, frequency)` interface uniform across
 /// closed-form and table-backed types.
 #[derive(Clone, Copy, PartialEq)]
 pub struct AntennaConfig {
     pub kind: AntennaKind,
     /// Height above ground (m). For the vertical this is the height of the
-    /// BASE: 0 is a ground-mounted vertical, the usual case.
+    /// base: 0 is a ground-mounted vertical, the usual case.
     pub height_m: f64,
     /// EFHW design frequency (MHz): the wire is a half-wave here, and `n`
     /// half-waves at `n` times this. Ignored by the other types.
@@ -329,7 +317,7 @@ mod tests {
         assert!(c.gain_dbi(0.5).is_finite());
     }
 
-    /// The default configuration is the reference antenna named in the brief.
+    /// The default configuration is the reference antenna.
     #[test]
     fn default_is_a_horizontal_dipole() {
         let d = AntennaConfig::default();

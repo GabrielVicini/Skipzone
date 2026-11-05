@@ -2,30 +2,22 @@
 //! or land, from the Natural Earth 1:50m `land` and `lakes` polygon datasets
 //! shipped alongside this crate's source, under `app/src/assets/`.
 //!
-//! This is a *geographic* classification only. It answers "is this point on
-//! land, in a lake, or at sea?" and nothing else - notably it says nothing
-//! about soil moisture, because the datasets carry no such attribute. The
-//! electrical constants themselves are never invented here: every answer is one
-//! of the existing [`GroundType`] presets, so auto-detection can only pick
-//! between values the operator could have picked by hand.
+//! This is a geographic classification only; the datasets say nothing about
+//! soil moisture. Every answer is one of the existing [`GroundType`] presets,
+//! so auto-detection only picks values the operator could pick by hand.
 //!
-//! The shapefiles are read once, on first use, with the `shapefile` crate (no
-//! hand-rolled parsing). Only the `.shp` geometry stream is read - there is no
-//! `.dbf`/`.shx` beside them and none is needed, since nothing but the rings
-//! matters here.
+//! The shapefiles are read once, on first use, with the `shapefile` crate.
+//! Only the `.shp` geometry stream is needed.
 //!
-//! Resolution is the honest limit here: at 1:50m the coastline is generalised
-//! to roughly a kilometre or two, so a point that close to the shore can land
-//! on the wrong side of it (Plymouth and Lisbon, both sitting up generalised-
-//! away estuaries, read as sea). That is immaterial for its actual use - a
-//! ground reflection sits hundreds of kilometres from the previous one, and the
-//! sea/land contrast it is resolving is enormous - but it means this is not a
-//! shoreline authority and must not be used as one.
+//! At 1:50m the coastline is generalised to a kilometre or two, so a point that
+//! close to the shore can land on the wrong side (Plymouth and Lisbon, on
+//! generalised-away estuaries, read as sea). That does not matter for ground
+//! reflections hundreds of kilometres apart, but this is not a shoreline
+//! authority.
 //!
-//! Point-in-polygon is the standard even-odd ray crossing test, run against
-//! *all* rings of a shape at once. That handles holes for free: a point inside
-//! a lake-island hole crosses the outer ring and the inner ring, an even count,
-//! and so reads as outside - which is what the data means.
+//! Point-in-polygon is the even-odd ray crossing test over all rings of a shape
+//! at once, which handles holes: a point inside a lake-island hole crosses two
+//! rings and reads as outside.
 
 use std::sync::OnceLock;
 
@@ -34,11 +26,8 @@ use crate::scenario::GroundType;
 /// The two datasets, compiled into the binary rather than read from disk at
 /// startup.
 ///
-/// They used to be opened by path under `CARGO_MANIFEST_DIR`, which meant the
-/// build machine's source tree had to still exist at the same path when the app
-/// ran. Embedding removes that (and is what makes the data reachable at all in
-/// the web build, where there is no filesystem to read). About 1.4 MB together -
-/// the same bytes that were being read at startup anyway.
+/// Embedding means the app does not depend on the build machine's source tree
+/// and works in the web build, which has no filesystem. About 1.4 MB together.
 const LAND_FILE: &str = "ne_50m_land.shp";
 const LAKES_FILE: &str = "ne_50m_lakes.shp";
 const LAND_BYTES: &[u8] = include_bytes!("assets/ne_50m_land.shp");
@@ -47,13 +36,10 @@ const LAKES_BYTES: &[u8] = include_bytes!("assets/ne_50m_lakes.shp");
 /// How far a ring is allowed to move when it is thinned for drawing, degrees.
 ///
 /// The classification always uses the full-detail rings; only the drawing is
-/// thinned. This used to be a target *point count* reached by keeping every
-/// n-th vertex, which is the wrong rule: dropping vertices by index takes no
-/// account of where they are, so a fjord coast with its points bunched together
-/// survived and a long smooth coast with them spread out got cut across. The
-/// rule is now a distance: keep a vertex if it is at least this far from the
-/// last one kept, so the thinned ring is everywhere within about this much of
-/// the real one.
+/// thinned. A vertex is kept if it is at least this far from the last one kept,
+/// so the thinned ring stays within about this distance of the real one.
+/// Thinning by vertex index instead would keep dense fjord coasts and cut
+/// across sparse smooth ones.
 ///
 /// 0.12 degrees is roughly 13 km - below one texel of the basemap raster, which
 /// is filled from these same rings. Under that the picture cannot tell the
@@ -170,12 +156,8 @@ impl Coastline {
 
     /// Land shapes for drawing: thinned rings, grouped by shape.
     ///
-    /// The basemap raster is filled from exactly these, and the shoreline is
-    /// stroked from exactly these. That is deliberate and load-bearing. When the
-    /// fill came from the full-detail rings and the stroke from the thinned
-    /// ones, the two were different polygons and the coastline visibly did not
-    /// follow the land underneath it. One geometry, drawn twice, cannot
-    /// disagree with itself.
+    /// The basemap raster is filled and the shoreline stroked from these same
+    /// rings, so the coastline follows the land underneath it.
     #[must_use]
     pub fn land_outlines(&self) -> &[OutlineShape] {
         &self.land_outlines
@@ -405,8 +387,8 @@ mod tests {
             for (ring, outline) in poly.rings.iter().zip(shape) {
                 full += ring.len();
                 thinned += outline.points.len();
-                // The cached bounds must actually bound the ring, or culling
-                // would silently drop rings that are on screen.
+                // The cached bounds must bound the ring, or culling would drop
+                // rings that are on screen.
                 for &(lon, lat) in &outline.points {
                     assert!(lon >= outline.bounds.0 && lon <= outline.bounds.2);
                     assert!(lat >= outline.bounds.1 && lat <= outline.bounds.3);

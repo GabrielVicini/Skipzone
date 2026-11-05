@@ -1,6 +1,6 @@
 //! Closed-form elevation patterns from image theory over a flat lossy ground.
 //!
-//! # The model, stated in full
+//! # The model
 //!
 //! An antenna at height `h` above a flat half-space radiates a direct ray and a
 //! ground-reflected ray. At elevation angle `d` (radians above the horizon) the
@@ -13,7 +13,7 @@
 //!
 //! where `R` is the Fresnel reflection coefficient of the ground for the
 //! antenna's polarisation. Multiplying by the free-space element factor `F`
-//! gives the far field. The radiated POWER pattern is
+//! gives the far field. The radiated power pattern is
 //!
 //! ```text
 //!   U(d, a) = |F(d, a)|^2 * AF(d)^2                     [W/sr, unnormalised]
@@ -27,49 +27,45 @@
 //!   P_rad   = int_0^{2pi} int_0^{pi/2} U_pec(d, a) cos d  d(d) d(a)     (W)
 //! ```
 //!
-//! Note the `cos d` (not `sin d`): `d` is measured from the HORIZON, so the
+//! The factor is `cos d` because `d` is measured from the horizon, so the
 //! solid-angle element is `dOmega = cos d dd da`.
 //!
-//! ## Why `P_rad` is evaluated over a PERFECT conductor
+//! ## Why `P_rad` is evaluated over a perfect conductor
 //!
-//! Over a perfect conductor `|R| = 1`, image theory is EXACT (for the assumed
-//! current distribution), and the hemispherical integral of `U` is exactly the
-//! power the antenna radiates - including the way mutual coupling to the image
-//! changes radiation resistance with height. So `P_rad` from the PEC pattern is
-//! the right denominator, and over PEC the formula reduces to true directivity.
+//! Over a perfect conductor `|R| = 1` and image theory is exact for the assumed
+//! current distribution, so the hemispherical integral of `U` is the power the
+//! antenna radiates, including the change in radiation resistance from mutual
+//! coupling to the image. Over PEC the formula reduces to true directivity.
 //!
 //! Over real ground the numerator uses the lossy `R`, so the shortfall against
-//! the PEC result is genuine ground-reflection loss. This is the standard
-//! treatment - it is what produces the pseudo-Brewster collapse of a vertical's
-//! low-angle gain over poor soil.
+//! the PEC result is ground-reflection loss. This standard treatment produces
+//! the pseudo-Brewster collapse of a vertical's low-angle gain over poor soil.
 //!
 //! ## Element factors
 //!
 //! A wire carrying a sinusoidal standing wave `n` half-wavelengths long has the
-//! classical pattern, with `p` the angle from the WIRE AXIS:
+//! classical pattern, with `p` the angle from the wire axis:
 //!
 //! ```text
 //!   F_n(p) = [ cos(n pi/2 cos p) - cos(n pi/2) ] / sin p
 //! ```
 //!
 //! `n = 1` is the half-wave dipole (and the half-wave radiator of an EFHW, whose
-//! current distribution is the same as a centre-fed dipole's - only the feed
-//! point differs). `n = 2, 3, 4...` are the harmonic cases an EFHW is actually
-//! used on. A quarter-wave monopole over ground is the top half of an `n = 1`
-//! dipole about the VERTICAL axis, which is why it reuses the same function.
+//! current distribution is the same as a centre-fed dipole's; only the feed
+//! point differs). `n = 2, 3, 4...` are the harmonic cases an EFHW is used on.
+//! A quarter-wave monopole over ground is the top half of an `n = 1` dipole
+//! about the vertical axis, so it reuses the same function.
 //!
 //! ## Azimuth
 //!
-//! The brief's interface is gain against ELEVATION alone, so at each elevation
-//! this module reports the maximum over azimuth - "the antenna is aimed at the
-//! path". For a half-wave dipole that is exactly the broadside plane at every
-//! elevation. It matters for the EFHW harmonic cases: a wire 2 wavelengths long
-//! (`n = 4`) has an exact NULL broadside, so a fixed broadside convention would
-//! report a null where the antenna in fact has 9 dBi lobes. Azimuth-resolved
-//! gain is a clean extension - the pattern is already evaluated over azimuth
-//! here; only the reduction would change.
+//! The interface is gain against elevation alone, so each elevation reports
+//! the maximum over azimuth (the antenna is aimed at the path). For a half-wave
+//! dipole that is the broadside plane. For EFHW harmonics it matters: a wire 2
+//! wavelengths long (`n = 4`) has an exact null broadside where the antenna has
+//! 9 dBi lobes elsewhere. The pattern is already evaluated over azimuth, so
+//! azimuth-resolved gain would only change the reduction.
 //!
-//! # What is NOT modelled
+//! # Not modelled
 //!
 //! Conductor and matching loss (except the EFHW's explicit transformer term),
 //! ground-screen / radial I^2 R loss, near-field Sommerfeld ground loss,
@@ -128,8 +124,7 @@ const EPS0_F_PER_M: f64 = 8.854_187_8e-12;
 ///   R_v = (eps_c sin d - w_t) / (eps_c sin d + w_t)
 /// ```
 ///
-/// Same coefficients [`crate::solve`] uses for mid-path ground bounces; shared
-/// from here so the two cannot drift apart.
+/// [`crate::solve`] uses the same function for mid-path ground bounces.
 #[must_use]
 pub fn fresnel_coefficient(
     elev_rad: f64,
@@ -165,7 +160,7 @@ impl Ground {
     }
 }
 
-/// `|1 + R exp(-j 2 k h sin d)|^2`, the two-ray array factor in POWER.
+/// `|1 + R exp(-j 2 k h sin d)|^2`, the two-ray array factor in power.
 fn array_factor_sq(
     elev_rad: f64,
     height_m: f64,
@@ -182,8 +177,8 @@ fn array_factor_sq(
 /// Standing-wave wire element factor `F_n(p)`, `p` measured from the wire axis.
 ///
 /// At `sin p = 0` the numerator vanishes too for every integer `n` (a wire does
-/// not radiate along its own axis), so the removable singularity is a genuine
-/// null and returns 0.
+/// not radiate along its own axis), so the removable singularity is a null and
+/// returns 0.
 fn wire_element(psi_rad: f64, half_waves: f64) -> f64 {
     let s = psi_rad.sin();
     if s.abs() < 1e-12 {
@@ -193,7 +188,7 @@ fn wire_element(psi_rad: f64, half_waves: f64) -> f64 {
     ((a * psi_rad.cos()).cos() - a.cos()) / s
 }
 
-/// Shape of an antenna's free-space element factor, in POWER, as a function of
+/// Shape of an antenna's free-space element factor, in power, as a function of
 /// elevation and azimuth.
 #[derive(Clone, Copy)]
 enum Element {
@@ -270,11 +265,9 @@ fn normalised_curve(
     const INT_STEPS: usize = 900;
     #[allow(clippy::cast_precision_loss)]
     let d_step = (PI / 2.0) / INT_STEPS as f64;
-    // Each elevation of this quadrature carries an azimuth quadrature inside
-    // it, which made building the two curves the most expensive non-tracing
-    // step of a solve - 12.6 ms of the 86 ms it took. The terms are
-    // independent, so they are formed across the pool and then summed IN
-    // ORDER: the addition sequence, and so the result, is the serial loop's.
+    // Each elevation carries an azimuth quadrature, making this the most
+    // expensive non-tracing step of a solve. The terms are formed across the
+    // pool and summed in order, so the result matches a serial loop.
     let terms: Vec<f64> = (0..=INT_STEPS)
         .into_par_iter()
         .map(|i| {
@@ -314,7 +307,7 @@ pub struct HorizontalWire {
     /// `None` means "always resonant": a dipole cut for whatever band is in
     /// use, which is how a dipole is normally described. `Some(f0)` fixes a
     /// physical wire length, so at `f` the wire is `round(f / f0)` half-waves
-    /// long - the harmonic operation an EFHW is bought for.
+    /// long, the harmonic operation an EFHW is used for.
     pub design_hz: Option<f64>,
     /// Flat loss subtracted at every angle (dB): the EFHW's transformer.
     pub fixed_loss_db: f64,
@@ -403,10 +396,10 @@ impl ElevationPattern for HorizontalWire {
 
 /// A quarter-wave vertical monopole worked against ground.
 ///
-/// `height_m` is the height of the BASE above ground: 0 is the ordinary
+/// `height_m` is the height of the base above ground: 0 is the ordinary
 /// ground-mounted vertical. Non-zero heights model the earth reflection of an
-/// elevated vertical but NOT the elevated radial screen itself, which is a
-/// materially different antenna; the UI says so.
+/// elevated vertical but not the elevated radial screen, which is a different
+/// antenna; the UI says so.
 pub struct VerticalMonopole {
     pub ground: Ground,
 }
@@ -478,9 +471,8 @@ mod tests {
 
     /// ANCHOR 2 (exact, asymptotic). As height grows, a horizontal dipole's
     /// lowest lobe tends to the free-space 2.15 dBi plus the 20 log10(2) =
-    /// 6.02 dB of a perfect two-element image array. Reaching this limit is
-    /// what proves the power normalisation is right: get the denominator wrong
-    /// and every gain is offset by a constant.
+    /// 6.02 dB of a perfect two-element image array. Reaching this limit checks
+    /// the power normalisation, since a wrong denominator offsets every gain.
     #[test]
     fn tall_dipole_over_perfect_ground_tends_to_8_17_dbi() {
         for h_lambda in [4.0, 8.0, 16.0] {
@@ -498,8 +490,8 @@ mod tests {
     /// single lobe peaks where 2 pi (h/lambda) sin d = pi/2, i.e. sin d = 1/2,
     /// d = 30 deg exactly. The peak value 8.42 dBi is this model's own, and
     /// exceeds the 8.17 asymptote because mutual coupling to the image lowers
-    /// radiation resistance at this height - an effect the exact power
-    /// integral captures and naive "free-space gain + 6 dB" does not.
+    /// radiation resistance at this height, which the exact power integral
+    /// captures and "free-space gain + 6 dB" does not.
     #[test]
     fn half_wave_height_peaks_at_30_degrees() {
         let f = 14.1e6;
@@ -518,7 +510,7 @@ mod tests {
 
     /// ANCHOR 4 (published NEC-4). EZNEC double-precision NEC-4 with the
     /// Sommerfeld ground algorithm, 3.7 MHz, 2 mm copper, over ground with
-    /// eps_r = 13 and sigma = 0.001 S/m, gain of the LOWEST elevation lobe
+    /// eps_r = 13 and sigma = 0.001 S/m, gain of the lowest elevation lobe
     /// (VOACAP, "Squeezing the decibels out of a simple dipole", Table 4):
     ///
     /// ```text
@@ -529,11 +521,11 @@ mod tests {
     ///     2.1 wl      7.92 dBi @  7    8.17 dBi @  7.0   (+0.25 dB)
     /// ```
     ///
-    /// This model is consistently optimistic, which is the expected signature:
-    /// the flat-earth Fresnel reflection omits the near-field Sommerfeld ground
-    /// loss NEC-4 accounts for, and the wire is assumed lossless. The bias
-    /// grows as the antenna gets lower and couples harder to the ground, which
-    /// is again the right direction. Elevation angles agree within 0.5 deg.
+    /// This model is consistently optimistic, as expected: the flat-earth
+    /// Fresnel reflection omits the near-field Sommerfeld ground loss NEC-4
+    /// includes, and the wire is lossless. The bias grows as the antenna gets
+    /// lower and couples harder to the ground. Elevation angles agree within
+    /// 0.5 deg.
     #[test]
     fn dipole_tracks_nec4_over_real_ground() {
         let f = 3.7e6;
@@ -634,11 +626,9 @@ mod tests {
         assert!(dry_a > 25.0, "dry ground peak at {dry_a} deg");
     }
 
-    /// An EFHW at its design frequency is the same radiator as a dipole - same
-    /// standing-wave current, same pattern - so the two must differ by exactly
-    /// the transformer loss and nothing else. This is a real result, not a
-    /// modelling shortcut, and worth pinning: the EFHW's advantage is the feed
-    /// point, not the pattern.
+    /// An EFHW at its design frequency is the same radiator as a dipole (same
+    /// standing-wave current, same pattern), so the two differ by exactly the
+    /// transformer loss. The EFHW's advantage is the feed point.
     #[test]
     fn efhw_at_design_frequency_is_a_dipole_minus_the_unun() {
         let ground = Ground::Lossy {
@@ -658,7 +648,7 @@ mod tests {
         }
     }
 
-    /// The EFHW's actual distinguishing feature: on harmonics the wire is
+    /// The EFHW's distinguishing feature: on harmonics the wire is
     /// several half-waves long and the pattern changes completely. An EFHW cut
     /// for 40 m is a high-angle antenna on 40 m (short in wavelengths at any
     /// practical height) but develops strong low-angle lobes on 20/15/10 m.
@@ -674,8 +664,8 @@ mod tests {
         assert!((ant.half_waves(7.1e6) - 1.0).abs() < 1e-9);
         assert!((ant.half_waves(14.2e6) - 2.0).abs() < 1e-9);
         assert!((ant.half_waves(28.4e6) - 4.0).abs() < 1e-9);
-        // Below the design band it floors at a half-wave rather than reporting
-        // nonsense for a wire that is electrically short.
+        // Below the design band it floors at a half-wave, since an electrically
+        // short wire is outside the model.
         assert!((ant.half_waves(3.5e6) - 1.0).abs() < 1e-9);
 
         let low_angle = |f: f64| ant.curve(12.0, f).gain_dbi(f64::to_radians(10.0));
@@ -695,9 +685,8 @@ mod tests {
     }
 
     /// A 2-wavelength wire (EFHW 4th harmonic) has an exact null broadside, so
-    /// a fixed-broadside convention would report a null where the antenna
-    /// actually has strong lobes. This pins the azimuth-maximum reduction the
-    /// module docs describe.
+    /// a fixed-broadside convention would report a null where the antenna has
+    /// strong lobes. Checks the azimuth-maximum reduction from the module docs.
     #[test]
     fn azimuth_maximum_avoids_the_broadside_null_of_even_harmonics() {
         // Broadside element factor: cos(0) - cos(n pi/2) = 1 - cos(n pi/2).
@@ -729,7 +718,7 @@ mod tests {
 
     /// The shared Fresnel coefficient must reproduce the limits the solver's
     /// ground-bounce term relies on: near-perfect reflection off sea water, and
-    /// R -> -1 at grazing incidence for BOTH polarisations.
+    /// R -> -1 at grazing incidence for both polarisations.
     #[test]
     fn fresnel_coefficient_has_the_right_limits() {
         let f = 14e6;
@@ -761,8 +750,7 @@ mod tests {
         assert!(vmin < 0.35, "vertical Brewster minimum |R| = {vmin}");
     }
 
-    /// Gain must be a genuine function of all three interface arguments, or the
-    /// pattern is not really wired to anything.
+    /// Gain must depend on all three interface arguments.
     #[test]
     fn gain_responds_to_elevation_height_and_frequency() {
         let ground = Ground::Lossy {

@@ -1,32 +1,26 @@
 //! WSPR spot ingest and model-versus-measurement scoring.
 //!
-//! A WSPR spot is an unusually good validation datum for this model: a measured
-//! SNR, on a known frequency, over a known path, at a known instant, from a
-//! known transmitter power. There is no operator judgment in it.
+//! A WSPR spot is a good validation datum: a measured SNR on a known
+//! frequency, over a known path, at a known instant, from a known transmitter
+//! power, with no operator judgment.
 //!
-//! # What the comparison can and cannot mean
+//! # What the comparison means
 //!
-//! WSPR reports SNR in a **2500 Hz reference bandwidth** even though the signal
-//! occupies about 6 Hz, which is why reported values cluster well below 0 dB and
-//! why the decode threshold is around -29 dB. Comparing anything else against
-//! those numbers is meaningless, so [`WsprSpot::inputs_for`] pins the receiver
-//! bandwidth to 2500 Hz and the threshold to -29 dB regardless of what the
-//! interactive session is set to.
+//! WSPR reports SNR in a 2500 Hz reference bandwidth although the signal
+//! occupies about 6 Hz, so reported values sit well below 0 dB and the decode
+//! threshold is around -29 dB. [`WsprSpot::inputs_for`] therefore pins the
+//! receiver bandwidth to 2500 Hz and the threshold to -29 dB.
 //!
-//! Two known one-sided biases, stated rather than corrected for:
+//! Two known one-sided biases, not corrected for:
 //!
-//! * **Antennas are assumed, not known.** A spot carries no antenna
-//!   information. The harness uses whatever [`Inputs`] carries, which for both
-//!   ends is a default. Real WSPR stations are frequently worse than that, so
-//!   the model will tend to over-predict.
-//! * **A spot is a SUCCESS, and only successes are published.** The database has
-//!   no record of the times the same path did not decode. So the hit rate below
-//!   is "of the openings that were observed, how many does the model find" - it
-//!   says nothing about false positives, and it cannot. A model that predicted
-//!   every path would score a perfect hit rate here.
+//! * Antennas are assumed. A spot carries no antenna information, so the
+//!   harness uses the [`Inputs`] defaults. Real WSPR stations are often worse,
+//!   so the model tends to over-predict.
+//! * Only successful decodes are published, so the hit rate below says how
+//!   many observed openings the model finds and nothing about false positives.
+//!   A model that predicted every path would score a perfect hit rate.
 //!
-//! Both of those mean the harness measures BIAS AND SPREAD, which is what it is
-//! for, and not skill.
+//! So the harness measures bias and spread, not skill.
 
 use crate::grid;
 use crate::noise::OperatingMode;
@@ -76,20 +70,15 @@ impl WsprSpot {
     /// Scenario inputs for this spot: everything the spot states is taken from
     /// it, everything it does not state is left to `base`.
     ///
-    /// The bandwidth and threshold are overridden unconditionally, because a
-    /// WSPR SNR only means anything in 2500 Hz. Those two are properties of the
-    /// measurement and are not negotiable.
+    /// The bandwidth and threshold are always overridden, because a WSPR SNR is
+    /// defined in 2500 Hz.
     ///
-    /// The receiver's NOISE ENVIRONMENT is not in that category and is left to
-    /// `base`. It used to be pinned to [`crate::noise::NoiseEnvironment::Rural`] here, next to
-    /// the bandwidth, which put an assumption about every receiver's local noise
-    /// in the same place as a fact about the measurement and made it unreachable
-    /// from any harness. It is worth roughly 10 dB between city and quiet rural,
-    /// it is chosen rather than known, and a calibration must be able to say so
-    /// out loud rather than fitting around it. Note that it is also very nearly
-    /// UNIDENTIFIABLE from WSPR: the environment is a constant per receiver, so a
-    /// two-way fixed-effects fit absorbs it into that receiver's effect almost
-    /// exactly (see [`crate::fit`]).
+    /// The receiver's noise environment (for example
+    /// [`crate::noise::NoiseEnvironment::Rural`]) is an assumption rather than
+    /// part of the measurement, so it comes from `base`. It is worth roughly
+    /// 10 dB between city and quiet rural. It is also nearly unidentifiable from
+    /// WSPR: being constant per receiver, a two-way fixed-effects fit absorbs it
+    /// into that receiver's effect (see [`crate::fit`]).
     #[must_use]
     pub fn inputs_for(&self, base: &Inputs) -> Inputs {
         Inputs {
@@ -123,9 +112,8 @@ impl WsprSpot {
 /// `YYYY-MM-DD HH:MM` and `YYYY-MM-DD_HH:MM`; since the field separator is a
 /// tab, a space inside the timestamp is unambiguous.
 ///
-/// A malformed row is REPORTED, not skipped. A validation harness that silently
-/// drops rows it cannot read reports a bias measured over an unknown subset of
-/// the data, which is worse than reporting no bias at all.
+/// A malformed row is reported, not skipped, so a bias is never measured over
+/// an unknown subset of the data.
 #[must_use]
 pub fn parse_spots(text: &str) -> (Vec<WsprSpot>, Vec<String>) {
     let mut spots = Vec::new();
@@ -207,7 +195,7 @@ pub struct SpotResult {
     /// Great-circle range the solver computed, km. Compared against the spot's
     /// own reported distance as a cross-check on the grid decode.
     pub solved_km: f64,
-    /// Modelled SNR of the best DETERMINISTIC path, dB; `None` if none closed.
+    /// Modelled SNR of the best deterministic path, dB; `None` if none closed.
     pub deterministic_snr_db: Option<f64>,
     /// Best sporadic-E path as `(SNR dB, occurrence probability)`; `None` if
     /// none closed.
@@ -215,11 +203,9 @@ pub struct SpotResult {
     /// The layer behind `modelled_snr_db`.
     pub layer: Option<&'static str>,
     /// Combined antenna gain the model credited this path with, dB (both ends
-    /// summed, read at the launch and arrival elevations the ray actually
-    /// used). Carried because it is an ASSUMPTION, not a measurement - the spot
-    /// says nothing about either station's antenna - and a report that quotes
-    /// a bias without also quoting the gain it handed itself is not showing
-    /// where that bias came from.
+    /// summed, read at the launch and arrival elevations the ray used). Carried
+    /// because it is an assumption (the spot says nothing about either antenna)
+    /// and a reported bias should show the gain behind it.
     pub assumed_gain_db: Option<f64>,
     /// Noise floor the model scored against, dBm. Also an assumption: the
     /// receiver's noise environment is chosen, not known.
@@ -233,8 +219,7 @@ pub struct SpotResult {
 }
 
 impl SpotResult {
-    /// Did the model find any path at all, for a spot that demonstrably
-    /// happened?
+    /// Whether the model found any path for a spot that happened.
     #[must_use]
     pub fn closed(&self) -> bool {
         self.modelled_snr_db.is_some()
@@ -265,9 +250,7 @@ impl Summary {
     /// Score a set of results.
     ///
     /// Only spots whose path closed contribute to the error statistics; the
-    /// ones that did not are counted in `hit_rate`, which is the honest place
-    /// for them. Averaging in a "miss" as though it were an error of some
-    /// particular size would invent a number.
+    /// others are counted in `hit_rate`, since a miss has no error size.
     #[must_use]
     pub fn of(results: &[SpotResult]) -> Self {
         let mut errors: Vec<f64> = results.iter().filter_map(|r| r.error_db).collect();
@@ -306,7 +289,7 @@ impl Summary {
     }
 }
 
-/// Linearly interpolated percentile of a SORTED slice; NaN when empty.
+/// Linearly interpolated percentile of a sorted slice; NaN when empty.
 fn percentile(sorted: &[f64], q: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;
@@ -378,9 +361,8 @@ mod tests {
         let got = spots[0].inputs_for(&base);
         assert!((got.bandwidth_hz - WSPR_REFERENCE_BANDWIDTH_HZ).abs() < 1e-9);
         assert!((got.snr_threshold_db - WSPR_DECODE_THRESHOLD_DB).abs() < 1e-9);
-        // The noise environment is an ASSUMPTION about the receiver, not a
-        // property of the measurement, so it must come from the caller and be
-        // changeable. Pinning it here would hide a ~10 dB choice.
+        // The noise environment is an assumption about the receiver, so it must
+        // come from the caller.
         let city = Inputs {
             noise_env: NoiseEnvironment::City,
             ..base.clone()

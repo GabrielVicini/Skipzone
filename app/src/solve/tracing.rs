@@ -24,18 +24,15 @@ use super::types::{HopDetail, LayerMode, NearMiss, Solution, mode_label};
 const MAX_POLY_POINTS: usize = 400;
 
 /// Practical homing miss tolerance for interactive HF prediction, m. The
-/// engine default (30 m) is set for its own validation and, near a skip-zone
-/// edge / caustic, the bisection legitimately stalls at a few hundred metres
-/// after the iteration budget - a miss that is already a match for any HF use
-/// (< ~0.1 % of path length). Accepting it here turns those "practically a
-/// match" cases into the connections they are, instead of reporting no path.
+/// engine default (30 m) is set for its own validation; near a skip-zone edge
+/// or caustic the bisection stalls at a few hundred metres, already a match for
+/// any HF use (< ~0.1 % of path length), so those cases count as connections.
 const PRACTICAL_MISS_TOLERANCE_M: f64 = 2000.0;
 
 /// How the surface at a ground reflection is decided for this solve.
 ///
-/// `Fixed` is the historical behaviour and stays bit-for-bit what it was: one
-/// operator-chosen surface applied to every bounce. `Auto` defers the choice to
-/// the reflection point's own position, hop by hop.
+/// `Fixed` applies one operator-chosen surface to every bounce. `Auto` decides
+/// from each reflection point's position, hop by hop.
 #[derive(Clone, Copy)]
 pub(super) enum GroundModel {
     Fixed(GroundType),
@@ -162,13 +159,12 @@ fn outcome_label(o: Outcome) -> &'static str {
 
 /// Step-control settings for one density stack.
 ///
-/// The deterministic stack uses the engine's defaults and is unchanged. The
-/// sporadic-E stack cannot: the engine's `QuasiParabolicLayer` is C0 with a
-/// documented GRADIENT KINK at each of its zeros, and an Es sheet is only about
-/// 3 km thick, so at the default `rtol` of 1e-10 the step controller refines
-/// into that kink until it hits `min_step` and the trace fails outright with
-/// "step collapsed". Measured over an elevation sweep on a real Es geometry
-/// (18.1 MHz, foEs 8.7 MHz, 400 km):
+/// The deterministic stack uses the engine's defaults. The sporadic-E stack
+/// cannot: the engine's `QuasiParabolicLayer` is C0 with a gradient kink at
+/// each zero, and an Es sheet is only about 3 km thick, so at the default
+/// `rtol` of 1e-10 the step controller refines into the kink until it hits
+/// `min_step` and the trace fails with "step collapsed". Measured over an
+/// elevation sweep on a real Es geometry (18.1 MHz, foEs 8.7 MHz, 400 km):
 ///
 /// | rtol  | step cap | landings | trace failures | max drift |
 /// |-------|----------|----------|----------------|-----------|
@@ -178,12 +174,10 @@ fn outcome_label(o: Outcome) -> &'static str {
 /// | 3e-9  | 1.5 km   | 23       | 0              | 1.1e-6    |
 /// | 1e-8  | 1.5 km   | 23       | 0              | 3.5e-6    |
 ///
-/// So the Es stack takes `rtol = 3e-9` (the loosest-but-one that clears every
-/// failure) and a step cap below the sheet thickness, which stops a single step
-/// straddling the whole layer unseen. Both are settings on the engine's own
-/// public `TraceConfig`; no physics is changed, and the resulting Hamiltonian
-/// drift is still reported per solution so the cost is visible rather than
-/// assumed away.
+/// So the Es stack takes `rtol = 3e-9` (the tightest value that clears every
+/// failure) and a step cap below the sheet thickness, so no single step
+/// straddles the layer. Both are `TraceConfig` settings, and the resulting
+/// Hamiltonian drift is still reported per solution.
 #[derive(Clone, Copy)]
 pub(super) struct StepTuning {
     pub rtol: Option<f64>,
@@ -204,19 +198,15 @@ impl StepTuning {
     /// Relative tolerance the sporadic-E stack needs; see the type docs.
     pub const ES_RTOL: f64 = 3e-9;
 
-    /// Relative tolerance for the BRACKETING scan only.
+    /// Relative tolerance for the bracketing scan only.
     ///
-    /// The scan does not produce any reported number. Its entire output is a
-    /// set of one-degree elevation intervals over which the along-track error
-    /// changes sign; everything the operator sees comes from the engine's
-    /// refinement and from `propagate`, both of which stay at the engine
-    /// default. So the scan can run as loosely as it can while still choosing
-    /// the same intervals, and 1e-8 is measured (three geometries, every hop
-    /// count, `check_scan_rtol`) to choose exactly the intervals the 1e-10 scan
-    /// does, with landing ranges shifted by at most 0.5 m over paths of
-    /// 2500-7500 km. For the sign of `range - target` to flip at that margin the
-    /// target would have to fall within half a metre of a scanned ray's landing
-    /// point; the range-vs-elevation slope there is >100 km per degree.
+    /// The scan's only output is a set of one-degree elevation intervals where
+    /// the along-track error changes sign; reported numbers come from the
+    /// refinement and `propagate` at the engine default. At 1e-8 the scan picks
+    /// the same intervals as at 1e-10 (three geometries, every hop count,
+    /// `check_scan_rtol`), with landing ranges shifted by at most 0.5 m over
+    /// 2500-7500 km paths. A sign flip would need the target within half a
+    /// metre of a scanned landing, where range changes >100 km per degree.
     pub const SCAN_RTOL: f64 = 1e-8;
 
     /// Settings for a stack containing a sheet of the given semi-thickness.
@@ -229,11 +219,9 @@ impl StepTuning {
     }
 
     /// The same settings, relaxed for the bracketing scan. A stack that already
-    /// names its own tolerance keeps it: the sporadic-E stack's 3e-9 is chosen
-    /// against a documented failure mode of that stack, not for accuracy, and
-    /// is looser than `SCAN_RTOL` anyway. The step cap always survives - it is
-    /// there so no single step straddles a thin sheet unseen, which the scan
-    /// needs just as much as the refinement does.
+    /// names its own tolerance keeps it: the sporadic-E stack's 3e-9 avoids a
+    /// failure mode of that stack. The step cap is always kept, since the scan
+    /// also must not step over a thin sheet.
     pub fn for_scan(self) -> Self {
         Self {
             rtol: Some(
@@ -248,15 +236,13 @@ impl StepTuning {
         }
     }
 
-    /// Relative tolerance for the terminal homing SEARCH.
+    /// Relative tolerance for the terminal homing search.
     ///
     /// The engine's 1e-10 default resolves a landing point to about 10 cm over
-    /// a 1000 km path. The search does not need that: it is looking for a
-    /// launch elevation, and it is followed by a polish pass on the reporting
-    /// tracer at full tolerance, so its only job is to land in the polish
-    /// pass's basin of convergence. 1e-8 still resolves the landing to metres -
-    /// three orders inside the kilometre-scale acceptance bound - while the
-    /// step count falls as roughly `rtol^(-1/5)`.
+    /// a 1000 km path. The search only has to find a launch elevation for the
+    /// full-tolerance reporting trace, and 1e-8 still resolves the landing to
+    /// metres, well inside the kilometre-scale acceptance bound, while the step
+    /// count falls roughly as `rtol^(-1/5)`.
     pub const SEARCH_RTOL: f64 = 1e-8;
 
     /// Settings for the traces the terminal homing search throws away: looser
@@ -312,17 +298,14 @@ pub(super) fn make_tracer<'a>(
     )
 }
 
-/// How close the END of the whole path must come to the receiver to count as a
+/// How close the end of the whole path must come to the receiver to count as a
 /// connection, m.
 ///
-/// Scaled with path length rather than fixed, because the quantity being homed
-/// is the accumulated result of N hops: the same launch precision that puts a
-/// 400 km path within metres puts a 10 000 km one within a few km. The floor is
-/// the single-hop [`PRACTICAL_MISS_TOLERANCE_M`], so a multi-hop path is never
-/// held to a tighter standard than the one-hop homing that seeds it, and the
-/// 0.05 % term keeps a long path's allowance proportionate (3.8 km at 7500 km).
-/// Either way this is orders of magnitude below what used to get through: paths
-/// missing by 800-1500 km were being reported as connections.
+/// Scaled with path length because the error accumulates over N hops: launch
+/// precision that puts a 400 km path within metres puts a 10 000 km one within
+/// a few km. The floor is the single-hop [`PRACTICAL_MISS_TOLERANCE_M`], and the
+/// 0.05 % term keeps a long path's allowance proportionate (3.8 km at
+/// 7500 km).
 pub(super) fn terminal_tolerance_m(great_circle_km: f64) -> f64 {
     PRACTICAL_MISS_TOLERANCE_M.max(0.000_5 * great_circle_km * 1e3)
 }
@@ -340,16 +323,16 @@ const TERMINAL_FD_STEP: f64 = 1e-4;
 /// undamped secant will throw the launch outside the physical range entirely.
 const TERMINAL_MAX_CORRECTION: f64 = 0.017_453_292_519_943_295;
 
-/// A launch that puts the END of the whole multi-hop path on the receiver.
+/// A launch that puts the end of the whole multi-hop path on the receiver.
 pub(super) struct TerminalHomed {
     pub elevation: Radians,
     pub azimuth: Radians,
 }
 
-/// Where an N-hop path launched at `(elev, az)` actually ends, or `None` if it
-/// never got there - a hop escaped through the top of the domain, or a trace
-/// failed. Deliberately lighter than [`propagate`]: no polyline, no per-hop
-/// record, no ground lookups, because this runs inside a search loop.
+/// Where an N-hop path launched at `(elev, az)` ends, or `None` if a hop
+/// escaped through the top of the domain or a trace failed. Lighter than
+/// [`propagate`] (no polyline, per-hop record or ground lookups) because it
+/// runs inside a search loop.
 fn propagate_terminal<D, B, C>(
     tracer: &Tracer<'_, D, B, C>,
     tx: &SphericalPoint,
@@ -398,26 +381,19 @@ where
     Some((along.get() - target, cross.get()))
 }
 
-/// Drive the END of the whole multi-hop path onto the receiver.
+/// Drive the end of the whole multi-hop path onto the receiver.
 ///
-/// The engine's homing solves ONE hop. For an N-hop path the app was homing a
-/// single hop to 1/N of the great-circle arc and then propagating N hops by
-/// specular reflection, assuming the remaining N-1 hops would repeat the first.
-/// In a horizontally varying ionosphere they do not. Each ground reflection
-/// returns the ray at a slightly different elevation than it left, the error
-/// compounds, and the measured consequences were severe: paths landing 800 to
-/// 1500 km from the receiver and still being reported as connections, and - near
-/// a layer's maximum range, where d(range)/d(elevation) is enormous - paths
-/// whose third hop flattened out until it penetrated the layer and left the
-/// planet. The equal-hop miss was recorded as `terminal_miss_km` and shown, but
-/// nothing acted on it.
+/// The engine's homing solves one hop. Homing a single hop to 1/N of the arc
+/// assumes the remaining hops repeat the first, which fails in a horizontally
+/// varying ionosphere: each reflection returns the ray at a slightly different
+/// elevation, the error compounds, and paths can land hundreds of km from the
+/// receiver or, near a layer's maximum range, penetrate on a later hop.
 ///
-/// So the app homes what it actually cares about: the terminal point. The
-/// single-hop solution seeds it, and a damped secant on launch elevation
-/// (against the along-track error of the FULL path) plus the engine's own
-/// cross-track azimuth correction closes it. Each evaluation is N traces with
-/// no allocation; the polyline-building [`propagate`] runs once, at the end, on
-/// the launch this converged to.
+/// So the terminal point is homed directly. The single-hop solution seeds a
+/// damped secant on launch elevation (against the along-track error of the
+/// full path) plus the engine's cross-track azimuth correction. Each
+/// evaluation is N traces with no allocation; the polyline-building
+/// [`propagate`] runs once on the converged launch.
 pub(super) fn home_terminal<D, B, C>(
     tracer: &Tracer<'_, D, B, C>,
     tx: &SphericalPoint,
@@ -434,35 +410,27 @@ where
 {
     let r0 = tx.r.get();
     let (mut e, mut az) = (seed_elev, bearing(tx, rx).get());
-    // The search is bounded by the SCANNED elevation range, not by the bracket.
-    // The bracket comes from the equal-hop assumption, and the whole point of
-    // homing the terminal point is that that assumption is wrong: on a
-    // Denver-Buenos Aires path the true hops run 2533/2392/2357/2266 km, and
-    // the launch elevation that lands the last one on the receiver sits outside
-    // the interval the equal-hop scan bracketed. Clamping to the bracket threw
-    // exactly those solutions away. The scan limits are a real bound - outside
-    // them the app does not model the geometry at all - so they are the ones to
-    // hold the secant to.
+    // The search is bounded by the scanned elevation range, not the bracket,
+    // which comes from the equal-hop assumption. On a Denver-Buenos Aires path
+    // the hops run 2533/2392/2357/2266 km, and the launch that lands the last
+    // one on the receiver lies outside the equal-hop bracket. The scan limits
+    // are a real bound: outside them the geometry is not modelled.
     let (lo, hi) = limits;
-    // Converge comfortably inside the acceptance bound rather than stopping the
-    // moment it is met - a path that merely scrapes in is not the same as one
-    // that lands on the receiver - but no further. Chasing the last few metres
-    // is what this loop was doing before, and it cost the full iteration budget
-    // on paths that were already inside a hundred metres of a two-kilometre
-    // bound. Each of those iterations is a full N-hop propagation on the
-    // critical path of the whole solve.
+    // Converge well inside the acceptance bound, but no further: each iteration
+    // is a full N-hop propagation, and chasing the last few metres would spend
+    // the iteration budget on paths already within a hundred metres of a 2 km
+    // bound.
     let tight = tolerance_m * 0.05;
     let mut best: Option<(f64, f64, f64)> = None;
-    // The previous iterate, which is the second point of the secant. Only the
-    // FIRST step has to spend a finite-difference probe to get a slope; after
-    // that the point the last step already paid for supplies it, halving the
-    // full N-hop propagations this loop performs.
+    // The previous iterate, the second point of the secant. Only the first step
+    // needs a finite-difference probe for a slope, which halves the N-hop
+    // propagations.
     let mut prev: Option<(f64, f64)> = None;
     for _ in 0..TERMINAL_MAX_ITERS {
         let Some((along, cross)) = terminal_errors(tracer, tx, rx, hops, e, az) else {
             // The trial launch no longer completes the path. Retreat halfway to
             // the best launch found so far; with nothing to retreat to, this
-            // ray simply has no complete path near it.
+            // ray has no complete path near it.
             let (be, ba, _) = best?;
             e = 0.5 * (e + be);
             az = 0.5 * (az + ba);
@@ -474,8 +442,7 @@ where
         if best.is_none_or(|(_, _, m)| miss < m) {
             best = Some((e, az, miss));
         }
-        // Stop when it is as close as it is going to get, or when a further
-        // step is no longer buying anything.
+        // Stop when converged or when a further step no longer helps.
         if miss < tight || (!improved && best.is_some_and(|(_, _, m)| m < tolerance_m)) {
             break;
         }
@@ -520,20 +487,17 @@ const REFLECT_ALT_MIN_KM: f64 = 60.0;
 
 /// Highest altitude any modelled layer reflects from, km.
 ///
-/// Deliberately far above the F2 peak (~300 km). This bound only ever has to be
-/// an OVER-estimate: it decides the shallowest launch that could serve a hop, and
-/// too generous a value costs a few wasted traces while too tight a one silently
-/// deletes a real ray.
+/// Far above the F2 peak (~300 km) because it only needs to be an
+/// overestimate: it sets the shallowest launch that could serve a hop, and too
+/// generous a value costs a few traces while too tight a one loses a real ray.
 const REFLECT_ALT_MAX_KM: f64 = 800.0;
 
 /// Padding on each end of the computed window, degrees.
 ///
-/// The window is derived from a MIRROR at a fixed altitude, and a real refracted
-/// ray is not a mirror: it turns gradually, so it travels further than the mirror
-/// geometry says for the same apex, and its launch angle for a given range sits a
-/// little outside the mirror's answer. This pad plus the deliberately high
-/// [`REFLECT_ALT_MAX_KM`] absorbs that difference. `solve_digest` is the check
-/// that it does.
+/// The window is derived from a mirror at a fixed altitude. A refracted ray
+/// turns gradually and travels further for the same apex, so its launch angle
+/// for a given range sits a little outside the mirror's. This pad plus the high
+/// [`REFLECT_ALT_MAX_KM`] covers the difference; `solve_digest` checks it.
 const WINDOW_PAD_DEG: f64 = 8.0;
 
 /// The launch-elevation band, in degrees, that could serve one hop spanning
@@ -552,12 +516,11 @@ const WINDOW_PAD_DEG: f64 = 8.0;
 /// `eps` rises monotonically with `h` - reaching the same ground range off a
 /// higher layer needs a steeper climb - so the reachable band is bracketed by
 /// evaluating the two altitude extremes. A negative numerator at
-/// [`REFLECT_ALT_MAX_KM`] means the arc is over the horizon for every layer the
-/// model has, which is a statement about geometry alone and cannot be undone by
-/// any ionospheric condition.
+/// [`REFLECT_ALT_MAX_KM`] means the arc is over the horizon for every modelled
+/// layer, whatever the ionosphere.
 ///
-/// This replaces discovering the same fact by tracing: the profiler measured a
-/// 1-hop 7540 km target costing 152 traces to conclude no elevation brackets it.
+/// Finding this by tracing is expensive: a 1-hop 7540 km target took 152 traces
+/// to conclude that no elevation brackets it.
 pub(super) fn hop_elevation_window_deg(hop_arc_rad: f64) -> Option<(f64, f64)> {
     if !hop_arc_rad.is_finite() || hop_arc_rad <= 0.0 {
         return None;
@@ -597,15 +560,13 @@ pub(super) fn hop_elevation_window_deg(hop_arc_rad: f64) -> Option<(f64, f64)> {
 /// great-circle bearing to find the intervals where the along-track error
 /// changes sign. That scan does not depend on the hop count: the launch point,
 /// the launch bearing, the tracer and the scanned elevations are the same for a
-/// 1-hop target as for a 4-hop one, and only the target arc that the landing
-/// ranges are COMPARED against differs. Calling `home_scan` once per hop count
-/// therefore re-traced the identical fan of rays `max_hops` times - measured at
-/// 77 traces each, 74 % of all the tracing a solve did.
+/// 1-hop target as for a 4-hop one; only the target arc differs. Calling
+/// `home_scan` per hop count would re-trace the same fan `max_hops` times
+/// (77 traces each, 74 % of a solve's tracing).
 ///
-/// This type traces the fan once and then answers "which elevation intervals
-/// bracket THIS target arc" arithmetically. Each interval it reports is one
-/// candidate ray, handed to [`home_terminal`] to be refined against the end of
-/// the whole multi-hop path.
+/// This type traces the fan once and then finds the intervals bracketing a
+/// given target arc arithmetically. Each interval is one candidate ray for
+/// [`home_terminal`] to refine against the end of the multi-hop path.
 pub(super) struct ElevationScan {
     /// `(elevation, along-track angle)` per scanned elevation, in scan order.
     /// The angle is `None` where the ray escaped or the trace failed - which is
@@ -618,21 +579,15 @@ impl ElevationScan {
     /// target at `target_arc` radians. Mirrors the engine's `scan_brackets`
     /// bracketing rule exactly, on rays that were already traced.
     ///
-    /// # Do not "improve" the caller's midpoint seed
+    /// # Keep the caller's midpoint seed
     ///
-    /// The obvious optimisation is to hand back a secant estimate of the root -
-    /// the scan already knows the along-track error at both ends, so linear
-    /// interpolation is free and starts Newton much closer. It was tried, and
-    /// `solve_digest` measured the result over 936 scenarios: **22 solutions
-    /// disappeared, 24 new ones appeared, and SNR moved by up to 13.8 dB**, with
-    /// launch elevations moving 8.7 deg and apex altitudes 43 km.
-    ///
-    /// A one-degree bracket is not guaranteed to hold exactly one root, and the
-    /// terminal homing is a Newton iteration with no bracket invariant - from a
-    /// different start inside the same interval it converges to a different ray.
-    /// The midpoint is therefore load-bearing, not arbitrary: it is the seed the
-    /// reported solution set was defined against and the calibration was fitted
-    /// to. Changing it is a physics change wearing a performance costume.
+    /// Seeding Newton with a secant estimate of the root instead of the
+    /// midpoint changes the results: over 936 `solve_digest` scenarios, 22
+    /// solutions disappeared, 24 appeared, and SNR moved by up to 13.8 dB.
+    /// A one-degree bracket may hold more than one root, and the terminal
+    /// homing has no bracket invariant, so a different start converges to a
+    /// different ray. The reported solutions and the calibration depend on the
+    /// midpoint seed.
     pub fn brackets(&self, target_arc: f64) -> Vec<(f64, f64)> {
         let mut brackets = Vec::new();
         let mut prev: Option<(f64, f64)> = None;
@@ -672,9 +627,9 @@ where
     );
     // The elevations are enumerated by the same accumulation the engine's own
     // scan uses, so the values handed back are the ones its narrowed re-scan
-    // would produce; only the tracing of them is fanned out. Rays are entirely
-    // independent - the tracer holds no mutable state - and `map` preserves
-    // input order, so the scan is bit-for-bit what the serial loop produced.
+    // would produce; only the tracing is fanned out. Rays are independent (the
+    // tracer holds no mutable state) and `map` preserves input order, so the
+    // result matches a serial loop bit for bit.
     let mut elevations = Vec::new();
     let mut e = e0;
     while e <= e1 {
@@ -742,7 +697,7 @@ where
         // A ground reflection happens where this hop lands only if another hop
         // follows; the final hop arrives at the receiver with no reflection.
         // The surface is looked up at the landing point, so with auto-detection
-        // each bounce gets the ground it actually happens over.
+        // each bounce gets the ground under it.
         let end_lat_lon = to_lat_lon(&res.end);
         let reflects = res.outcome == Outcome::Landed && i + 1 < hops;
         let (ground_type, ground_reason) = if reflects {
@@ -843,11 +798,10 @@ pub(super) fn assemble(
         u32::try_from(details.iter().filter(|h| h.ground_loss_db > 0.0).count()).unwrap_or(0);
     let total_system_loss_db = free_space_loss_db + total_absorption_db + ground_reflection_loss_db;
 
-    // Antenna gain. Each end is read at the angle the ray actually uses: the
-    // transmitter at the launch elevation of the first hop, the receiver at the
-    // arrival elevation of the last. This is what makes the pattern change
-    // which mode wins rather than scaling every solution equally - a steep
-    // 4-hop path and a shallow 2-hop path see different parts of the pattern.
+    // Antenna gain at the angles the ray uses: the transmitter at the first
+    // hop's launch elevation, the receiver at the last hop's arrival. A steep
+    // 4-hop path and a shallow 2-hop path see different parts of the pattern,
+    // so the pattern can change which mode wins.
     let tx_elev_deg = details.first().map_or(0.0, |h| h.launch_elev_deg);
     let rx_elev_deg = details.last().map_or(0.0, |h| h.arrival_elev_deg);
     let tx_gain_dbi = link_settings.tx_antenna.gain_dbi(tx_elev_deg.to_radians());
@@ -913,7 +867,7 @@ where
 {
     // The sweep itself does not depend on the hop count - only the target range
     // each landing is measured against does - so it is traced once and then
-    // reduced per hop count, instead of once per hop count as it used to be.
+    // reduced per hop count.
     let mut elevations = Vec::new();
     let mut elev = 3.0_f64;
     while elev <= 88.0 {

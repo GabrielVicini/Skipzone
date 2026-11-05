@@ -1,21 +1,17 @@
 //! General-purpose parallel compute layer for the app.
 //!
-//! The engine crate is single-threaded by design and stays untouched. This
-//! module is a thin, reusable *execution* wrapper on top of it: given a batch of
-//! independent work items (candidate frequencies today; anything else tomorrow),
-//! it runs a closure over each one across all CPU cores using `rayon`, and hands
-//! back the results *in input order* plus timing for the run.
+//! The engine crate is single-threaded. This module runs a closure over a batch
+//! of independent work items (candidate frequencies, coverage grid points)
+//! across all CPU cores with `rayon`, and returns the results in input order
+//! plus timing.
 //!
-//! It implements no physics and shares no mutable state between items: each call
-//! into the engine is independent, so parallelism needs no locks. The only thing
-//! this layer decides is *where* each closure runs.
+//! Items share no mutable state, so no locks are needed; this layer only
+//! decides where each closure runs.
 //!
-//! Two properties make it drop-in swappable:
-//!   * [`Execution::Sequential`] runs the exact same closures on the calling
-//!     thread, so any parallel result can be checked against the single-threaded
-//!     engine for free (see the equivalence test in `sweep`).
-//!   * Every map returns a [`Timing`] with per-item and total wall-clock, so a
-//!     claimed speedup can be measured rather than assumed.
+//!   * [`Execution::Sequential`] runs the same closures on the calling thread,
+//!     so a parallel result can be checked against a serial one (see the
+//!     equivalence test in `sweep`).
+//!   * Every map returns a [`Timing`] with per-item and total wall-clock time.
 
 use std::time::{Duration, Instant};
 
@@ -26,8 +22,8 @@ use rayon::prelude::*;
 pub enum Execution {
     /// Fan the batch out across the pool's worker threads.
     Parallel,
-    /// Run every item on the calling thread, in order. The swappable fallback
-    /// used for testing, comparison, and reproducing the old behaviour exactly.
+    /// Run every item on the calling thread, in order. Used as the fallback and
+    /// for comparison in tests.
     Sequential,
 }
 
@@ -54,9 +50,8 @@ impl Default for PoolConfig {
 /// Wall-clock timing for one [`ComputePool::map`] call.
 ///
 /// `total` is the elapsed time of the whole batch. `per_item[i]` is how long the
-/// closure took on item `i` (in input order). Comparing the sum of `per_item`
-/// against `total` is exactly the parallel speedup: the sum is the serial work
-/// performed, `total` is how long it actually took.
+/// closure took on item `i` (in input order). The sum of `per_item` divided by
+/// `total` is the parallel speedup.
 #[derive(Clone, Debug)]
 pub struct Timing {
     pub total: Duration,
@@ -99,8 +94,8 @@ impl Timing {
 /// chosen execution mode. Build it once and keep it alive; each `map` reuses the
 /// same worker threads rather than paying pool-spawn cost per batch.
 ///
-/// It is deliberately generic (not sweep-specific) so any batch of independent
-/// engine solves — a coverage grid, a multi-path scan — can share one pool.
+/// Generic so any batch of independent engine solves (a coverage grid, a
+/// multi-path scan) can use it.
 pub struct ComputePool {
     /// `None` in sequential mode: no worker threads are spawned at all.
     pool: Option<rayon::ThreadPool>,
@@ -143,8 +138,7 @@ impl ComputePool {
     ///
     /// # Errors
     /// See [`ComputePool::new`].
-    // Part of the reusable pool API; exercised by tests and future batch callers
-    // beyond the sweep, so the non-test build sees it as unused.
+    // Used only by tests so far.
     #[allow(dead_code)]
     pub fn all_cores() -> Result<Self, String> {
         Self::new(PoolConfig::default())
@@ -166,7 +160,7 @@ impl ComputePool {
     /// Each item is timed individually; there is no shared mutable state, so the
     /// closure needs only `Sync` (it is called from several threads at once in
     /// parallel mode). Order is preserved even though completion order is not.
-    // Progress-free convenience wrapper; used by tests and future batch callers.
+    // Progress-free convenience wrapper, used only by tests so far.
     #[allow(dead_code)]
     pub fn map<T, R, F>(&self, items: &[T], f: F) -> (Vec<R>, Timing)
     where
@@ -178,7 +172,7 @@ impl ComputePool {
     }
 
     /// Like [`ComputePool::map`], but invokes `on_each(index, &result)` as each
-    /// item finishes — used to stream progress to the UI. `on_each` fires in
+    /// item finishes, to stream progress to the UI. `on_each` fires in
     /// completion order (arbitrary under parallelism), not input order, and must
     /// be `Sync` because several threads may call it concurrently; the returned
     /// results are still ordered by input index.

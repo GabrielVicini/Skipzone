@@ -87,8 +87,8 @@ pub struct UiState {
     /// Draw the live day/night terminator shading on the map.
     pub show_terminator: bool,
     /// Debug view for coastline auto-detection: draw the land and lake polygon
-    /// outlines the classifier actually tests against, so a hop's verdict can be
-    /// checked against the data by eye instead of taken on trust.
+    /// outlines the classifier tests against, so a hop's verdict can be checked
+    /// by eye.
     pub show_coastlines: bool,
     /// Fill opacity of the area coverage tiles, 0-255. A display control only:
     /// it changes how much basemap shows through, never a computed value.

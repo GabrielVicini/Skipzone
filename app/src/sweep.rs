@@ -3,7 +3,7 @@
 //!
 //! Two job kinds share one worker thread and one result channel:
 //!   * `Job::Main`  - the single point-to-point solve behind RUN TRACE.
-//!   * `Job::Sweep` - the frequency sweep behind FIND BEST FREQUENCY: it
+//!   * `Job::Sweep` - the frequency sweep behind "Find best frequency": it
 //!     reuses `solve()` verbatim at each candidate frequency (no duplicated
 //!     ray logic) and streams one `SweepProgress` per frequency so the UI can
 //!     advance a progress bar and redraw the live band chart.
@@ -11,10 +11,9 @@
 //! Nothing here implements physics: it clones the `Inputs`, rebuilds the engine
 //! models once per job, and calls the existing `scenario`/`solve` API.
 //!
-//! Nothing here mentions egui either. This is the computation layer, and the
-//! one thing it needs from the view is "there is something new to draw" - which
-//! it takes as a [`Wake`] callback rather than an `egui::Context`, so the whole
-//! module can be driven headlessly by the harnesses in `src/bin`.
+//! It does not depend on egui: the view is notified through a [`Wake`]
+//! callback rather than an `egui::Context`, so the harnesses in `src/bin` can
+//! drive the module headlessly.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -30,7 +29,7 @@ use crate::noise::PathState;
 use crate::scenario::{self, Assumptions, Inputs, Models, ProfileRow};
 use crate::solve::{self, SolveOutcome};
 
-/// HF band swept by FIND BEST FREQUENCY. The scan is coarse-to-fine: a cheap
+/// HF band swept by "Find best frequency". The scan is coarse-to-fine: a cheap
 /// 1 MHz pass locates the good region (and stops early once it is clearly past
 /// the optimum and getting worse), then a fine pass refines around the best.
 pub const SWEEP_MIN_MHZ: f64 = 2.0;
@@ -66,9 +65,8 @@ pub fn fine_freqs(center: f64) -> Vec<f64> {
 
 /// One frequency's outcome, cached for the chart and the best-frequency pick.
 ///
-/// `state` is the three-way verdict that replaced the old `connects` boolean:
-/// a path that closes geometrically is not the same claim as a path anyone can
-/// hear, and the sweep now distinguishes them.
+/// `state` is a three-way verdict, because a path that closes geometrically may
+/// still be too weak to hear.
 #[derive(Clone, Copy)]
 pub struct SweepPoint {
     pub freq_mhz: f64,
@@ -92,11 +90,10 @@ pub struct SweepPoint {
 }
 
 impl SweepPoint {
-    /// 0 (best) to 1 (worst), used for the shade WITHIN a state's colour band.
+    /// 0 (best) to 1 (worst), used for the shade within a state's colour band.
     /// Usable points are graded by how far above the threshold they sit,
     /// below-threshold points by how far under it, and no-path points by
-    /// near-miss - so the chart still shows structure inside each of the three
-    /// bands rather than three flat colours.
+    /// near-miss, so the chart shows structure inside each band.
     #[must_use]
     pub fn badness(self) -> f32 {
         const MARGIN_FULL_DB: f64 = 20.0;
@@ -201,7 +198,7 @@ pub enum Msg {
         cell: Box<CoverageCell>,
     },
     CoverageDone {
-        /// True when the run stopped early because CANCEL was pressed. The
+        /// True when the run stopped early because Cancel was pressed. The
         /// cells already streamed stay on the map either way.
         cancelled: bool,
     },
@@ -210,9 +207,8 @@ pub enum Msg {
 
 /// Reduce a full solve to the cached summary for one frequency.
 ///
-/// Among the modes found, the one with the strongest SNR is kept: that is the
-/// signal an operator would actually hear, and it is what the three-state
-/// verdict must be based on.
+/// The mode with the strongest SNR is kept, since that is what an operator
+/// would hear.
 fn summarize(freq_mhz: f64, out: &SolveOutcome) -> SweepPoint {
     if let Some(best) = solve::best_by_snr(out) {
         SweepPoint {
@@ -250,9 +246,8 @@ fn summarize(freq_mhz: f64, out: &SolveOutcome) -> SweepPoint {
 /// Best-frequency rule: any frequency with a path beats any without one; among
 /// those with a path the strongest SNR wins; among the rest the smallest miss.
 ///
-/// SNR replaced absorption as the ranking key here because absorption is only
-/// one term of the loss and says nothing about the noise the signal has to beat
-/// - ranking by it could name a "best" frequency that is inaudible.
+/// Ranking is by SNR rather than absorption, which is only one loss term and
+/// ignores the noise the signal has to beat.
 #[must_use]
 pub fn better(a: SweepPoint, b: SweepPoint) -> SweepPoint {
     match (a.found_path(), b.found_path()) {
@@ -333,10 +328,10 @@ impl SolverService {
 
     /// Ask the in-flight job to stop without queuing anything in its place.
     ///
-    /// The epoch is deliberately NOT bumped: work already finished has been
-    /// delivered under the current epoch, and the job's own closing message must
-    /// still arrive so the UI learns the run ended. Remaining items stop at the
-    /// next flag check, which for a coverage grid is before each grid point.
+    /// The epoch is not bumped: finished work was delivered under the current
+    /// epoch, and the job's closing message must still arrive so the UI learns
+    /// the run ended. Remaining items stop at the next flag check, which for a
+    /// coverage grid is before each grid point.
     pub fn cancel(&mut self) {
         if let Some(c) = self.current_cancel.take() {
             c.store(true, Ordering::Relaxed);
@@ -378,9 +373,8 @@ fn worker(
     wake: &Wake,
 ) {
     // One pool per job kind for the worker's whole lifetime: sizing a rayon pool
-    // costs a thread spawn per worker, so we pay it once and reuse it. The two
-    // are separate because they are deliberately sized differently (see
-    // `sweep_pool_config` and `coverage_pool_config`).
+    // costs a thread spawn per worker, so it is paid once. The two are sized
+    // differently (see `sweep_pool_config` and `coverage_pool_config`).
     let pool = build_pool("sweep", sweep_pool_config());
     let coverage_pool = build_pool("coverage", coverage_pool_config());
     while let Ok((epoch, job, cancel)) = job_rx.recv() {
@@ -396,16 +390,14 @@ fn worker(
 /// Execution config for the sweep's compute pool, overridable by environment so
 /// the parallel layer can be capped or switched off entirely without a rebuild
 /// (for A/B timing or debugging a suspected parallelism bug):
-///   * `SKIPZONE_COMPUTE=sequential` - single-threaded fallback (the old path).
+///   * `SKIPZONE_COMPUTE=sequential` - single-threaded fallback.
 ///   * `SKIPZONE_COMPUTE_THREADS=N`   - cap worker threads at N.
 ///
 /// Default: parallel, but holding two cores back.
 ///
-/// The sweep is the *incidental* background job - it runs while the operator
-/// carries on panning the map, dragging stations and reading panels, and the
-/// tile fetcher and the UI thread both want CPU while it does. Reserving two
-/// cores keeps the interface responsive for the whole minute-plus it takes. The
-/// coverage grid is the opposite case and is sized accordingly.
+/// The sweep runs in the background while the operator keeps using the map and
+/// panels, so two cores are reserved to keep the interface responsive for the
+/// minute or more it takes.
 fn sweep_pool_config() -> PoolConfig {
     let cores = available_cores();
     PoolConfig {
@@ -416,10 +408,8 @@ fn sweep_pool_config() -> PoolConfig {
 
 /// The coverage grid gets every core.
 ///
-/// It is a deliberate, bounded, one-off run the operator starts and then
-/// watches fill in - there is no other work competing for the machine, and the
-/// only thing they are waiting on is this. So unlike the sweep it holds nothing
-/// back.
+/// It is a one-off run the operator starts and then watches fill in, with
+/// nothing else competing for the machine.
 fn coverage_pool_config() -> PoolConfig {
     PoolConfig {
         execution: execution_from_env(),
@@ -541,11 +531,10 @@ fn fold_best(seed: Option<SweepPoint>, points: &[SweepPoint]) -> Option<SweepPoi
 }
 
 /// Parallel path: evaluate each phase's whole frequency grid at once across the
-/// pool. Because every candidate is dispatched together there is no uphill
-/// early-stop (that was purely a way to save *sequential* time); the parallel
-/// path instead evaluates the complete coarse grid, which is a superset of what
-/// the sequential path would, so the per-frequency results are identical and the
-/// winner is never worse.
+/// pool. With every candidate dispatched together there is no uphill early
+/// stop, which only saves sequential time; the complete coarse grid is a
+/// superset of what the sequential path evaluates, so per-frequency results are
+/// identical and the winner is never worse.
 #[allow(clippy::too_many_arguments)]
 fn run_sweep_parallel(
     epoch: u64,
@@ -628,10 +617,8 @@ fn run_sweep_parallel(
     wake();
 }
 
-/// Single-threaded path: the original coarse-with-uphill-early-stop then fine
-/// scan, preserved verbatim as the swappable fallback and the equivalence
-/// baseline. Kept here so turning parallelism off reproduces the old behaviour
-/// exactly, including which frequencies the early-stop skips.
+/// Single-threaded path: a coarse scan with an uphill early stop, then a fine
+/// scan. The fallback when parallelism is off, and the equivalence baseline.
 fn run_sweep_sequential(
     epoch: u64,
     inputs: &Inputs,
@@ -719,9 +706,8 @@ fn run_sweep_sequential(
 /// solve at every grid point across the coverage pool, streaming each finished
 /// cell the moment it lands.
 ///
-/// This is a loop of traces and nothing more - there is no coverage-specific
-/// physics anywhere in it. `crate::coverage::solve_cell` is the whole unit of
-/// work; see that module for why one `Models` is valid for every grid point.
+/// `crate::coverage::solve_cell` is the unit of work; see that module for why
+/// one `Models` is valid for every grid point.
 #[allow(clippy::too_many_arguments)]
 fn run_coverage(
     epoch: u64,
@@ -755,7 +741,7 @@ fn run_coverage(
     let (_cells, timing) = pool.map_reporting(
         &points,
         |&(lat, lon)| {
-            // Checked per grid point, so pressing CANCEL stops the remaining
+            // Checked per grid point, so pressing Cancel stops the remaining
             // calculations rather than letting the whole grid drain.
             if cancel.load(Ordering::Relaxed) {
                 return None;
@@ -799,9 +785,8 @@ fn run_coverage(
     wake();
 }
 
-/// One-line timing summary combining the coarse and fine phases. This is the
-/// instrumentation that confirms where sweep time actually goes and lets the
-/// measured speedup be checked, rather than assumed.
+/// One-line timing summary combining the coarse and fine phases, so the
+/// speedup can be measured.
 fn log_sweep_timing(label: &str, coarse: &Timing, fine: &Timing) {
     let mut per_item = coarse.per_item.clone();
     per_item.extend_from_slice(&fine.per_item);
@@ -832,7 +817,7 @@ mod tests {
 
     /// Two `SweepPoint`s are the same result when every field is bit-identical.
     /// The per-frequency solve is a pure function, so the parallel path must
-    /// reproduce the sequential path exactly - not just approximately.
+    /// reproduce the sequential path exactly.
     fn same_point(a: SweepPoint, b: SweepPoint) -> bool {
         a.freq_mhz.to_bits() == b.freq_mhz.to_bits()
             && a.state == b.state
@@ -846,11 +831,9 @@ mod tests {
             && a.mode == b.mode
     }
 
-    /// The load-bearing check for this whole change: running the *same* set of
-    /// candidate frequencies across all cores must produce bit-identical
-    /// per-frequency results to running them one at a time, and it prints the
-    /// before/after timing and the thread count so the speedup is measured, not
-    /// assumed. Run with:
+    /// Running the same candidate frequencies across all cores must give
+    /// bit-identical per-frequency results to running them one at a time. It
+    /// prints both timings and the thread count. Run with:
     ///   cargo test -p skipzone-app --release parallel_matches_sequential -- --nocapture
     #[test]
     fn parallel_matches_sequential_and_reports_timing() {
@@ -934,8 +917,8 @@ mod tests {
     }
 
     /// The coverage run's three behavioural promises, checked without a window:
-    /// every grid point is streamed as its own message (that is what makes the
-    /// map fill in progressively rather than appearing at the end), the run
+    /// every grid point is streamed as its own message (so the map fills in
+    /// progressively), the run
     /// reports the thread count it is using, and a cancel mid-run stops the
     /// remaining calculations while keeping everything already delivered.
     #[test]
@@ -980,8 +963,7 @@ mod tests {
         assert_eq!(streamed, expected, "one message per computed grid point");
         assert_eq!(finished, Some(false));
 
-        // The coverage pool must be the more aggressive of the two: the sweep
-        // deliberately holds cores back, this run does not.
+        // The coverage pool must be the larger: the sweep holds cores back.
         let sweep_threads = build_pool("sweep-test", sweep_pool_config()).threads();
         if available_cores() > 2 && threads_from_env().is_none() {
             assert!(
@@ -1082,8 +1064,7 @@ mod tests {
         // Any found path beats a miss regardless of how near the miss was.
         assert!(better(weak, miss_small).found_path());
         assert!(better(miss_small, weak).found_path());
-        // Among found paths, the strongest SNR wins - even though the weak one
-        // would have tied on absorption under the old rule.
+        // Among found paths the strongest SNR wins, even when absorption ties.
         assert!((better(weak, strong).snr_db - 18.0).abs() < 1e-12);
         assert!((better(strong, weak).snr_db - 18.0).abs() < 1e-12);
         // Among misses, the smallest miss wins.
@@ -1137,13 +1118,9 @@ mod tests {
             hit.snr_db.is_finite() && hit.noise_dbm.is_finite(),
             "a found path must carry a real SNR and noise floor"
         );
-        // SNR is `Prx - Pnoise` LESS the calibrated model bias, and the gap must be
-        // exactly that bias and nothing else. This is the invariant that keeps the
-        // correction honest: it is applied to the SNR alone, so `rx_power_dbm` and
-        // every loss term still report what the propagation produced and a measured
-        // fudge cannot hide inside the budget panel. Before the bias was applied by
-        // default this read as a plain equality; the difference between the two is
-        // the whole point, so it is asserted rather than relaxed to a tolerance.
+        // SNR is `Prx - Pnoise` less the calibrated model bias, and the gap must
+        // be exactly that bias. The correction applies to the SNR alone, so
+        // `rx_power_dbm` and the loss terms still report pure propagation.
         assert!(
             (hit.snr_db - (hit.rx_power_dbm - hit.noise_dbm - scenario::MEASURED_MODEL_BIAS_DB))
                 .abs()

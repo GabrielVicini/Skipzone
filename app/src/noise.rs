@@ -1,14 +1,13 @@
 //! Radio-noise floor and the received-signal / SNR judgment layer.
 //!
-//! This module answers the question the ray tracer cannot: *given that a path
-//! geometrically closes, would anyone actually hear it?* It touches no
-//! ray-tracing, absorption or ground-reflection maths - it consumes the total
-//! system loss those produce and adds a transmitter power and a noise floor.
+//! Given that a path closes geometrically, this decides whether it would be
+//! heard. It takes the total system loss from the solver and adds a
+//! transmitter power and a noise floor.
 //!
-//! # Provenance of every formula here
+//! # Provenance
 //!
-//! VERIFIED against Recommendation ITU-R P.372-9 (Radio noise, 08/2007), whose
-//! text was read directly, not recalled:
+//! Checked against the text of Recommendation ITU-R P.372-9 (Radio noise,
+//! 08/2007):
 //!
 //!   * Eq. (2): the external noise factor `fa = pn / (k t0 b)`, with `pn` the
 //!     available noise power (W) from an equivalent lossless antenna,
@@ -23,18 +22,16 @@
 //!     (72.5, 27.7), Rural (67.2, 27.7), Quiet rural (53.6, 28.6), Galactic
 //!     noise (52.0, 23.0).
 //!
-//! NOT from any reference - a documented approximation of my own construction:
+//! Not from any reference, an approximation built for this project:
 //!
-//!   * The ATMOSPHERIC noise term. P.372 supplies atmospheric noise as a set of
-//!     world maps of `Fam` at 1 MHz (four-hour time blocks x season, derived
-//!     from CCIR Report 322) plus separate frequency-dependence curves. There
-//!     is NO closed-form equation for it in the Recommendation, and this
-//!     project does not ship the map coefficient data. What
-//!     [`atmospheric_noise_figure_db`] implements is a log-linear surrogate
-//!     with day/night, season and latitude terms whose SHAPE follows the
-//!     published curves but whose absolute anchors are unverified. Treat its
-//!     magnitudes as indicative; the day/night, seasonal and frequency TRENDS
-//!     are the defensible part. This is surfaced in the UI on every run.
+//!   * The atmospheric noise term. P.372 gives atmospheric noise as world maps
+//!     of `Fam` at 1 MHz (four-hour time blocks x season, from CCIR Report 322)
+//!     plus frequency-dependence curves, with no closed-form equation, and the
+//!     map data is not bundled. [`atmospheric_noise_figure_db`] is a log-linear
+//!     surrogate with day/night, season and latitude terms whose shape follows
+//!     the published curves but whose absolute anchors are unverified. Its
+//!     magnitudes are indicative; the trends are the reliable part. The UI
+//!     says so on every run.
 //!
 //! Everything is combined on a power basis and converted once, explicitly, at
 //! the boundaries - see [`dbm_from_watts`] and [`noise_power_dbm`].
@@ -52,9 +49,8 @@ pub const REFERENCE_TEMP_K: f64 = 290.0;
 /// `10 log10(k t0)` in dBW, i.e. the `-204` of P.372-9 eq. (6) computed rather
 /// than pasted in:
 ///   `k t0 = 1.38e-23 * 290 = 4.002e-21 W/Hz`  ->  `10 log10 = -203.978 dBW`.
-/// The Recommendation rounds this to -204; we keep the exact figure so the
-/// unit chain is visible, and `tests::kt0_matches_p372_minus_204` pins it to
-/// the published constant.
+/// The Recommendation rounds this to -204;
+/// `tests::kt0_matches_p372_minus_204` checks it against that.
 #[must_use]
 pub fn kt0_dbw() -> f64 {
     10.0 * (BOLTZMANN_J_PER_K * REFERENCE_TEMP_K).log10()
@@ -75,8 +71,8 @@ pub fn dbm_from_watts(power_w: f64) -> f64 {
 ///   `Pn(dBW) = Fa + 10 log10(b) + 10 log10(k t0)`
 ///   `Pn(dBm) = Pn(dBW) + 30`
 /// With `Fa = 0` and `b = 1 Hz` this is `-203.98 + 30 = -173.98 dBm`, the
-/// familiar `kT0 = -174 dBm/Hz` thermal floor - an independent cross-check
-/// that the constant and the unit conversion are both right.
+/// familiar `kT0 = -174 dBm/Hz` thermal floor, a cross-check on both the
+/// constant and the unit conversion.
 #[must_use]
 pub fn noise_power_dbm(fa_db: f64, bandwidth_hz: f64) -> f64 {
     fa_db + 10.0 * bandwidth_hz.max(1e-12).log10() + kt0_dbw() + 30.0
@@ -123,8 +119,8 @@ pub const MAN_MADE_VALID_MIN_MHZ: f64 = 0.3;
 pub const MAN_MADE_VALID_MAX_MHZ: f64 = 250.0;
 
 /// Is `f_mhz` inside the range P.372-9 declares eq. (11) valid over?
-/// Outside it the man-made and galactic figures are extrapolations of the fit,
-/// which the UI says out loud rather than hiding.
+/// Outside it the man-made and galactic figures are extrapolations, and the UI
+/// says so.
 #[must_use]
 pub fn man_made_range_is_valid(f_mhz: f64) -> bool {
     (MAN_MADE_VALID_MIN_MHZ..=MAN_MADE_VALID_MAX_MHZ).contains(&f_mhz)
@@ -151,21 +147,20 @@ pub fn galactic_noise_figure_db(f_mhz: f64) -> f64 {
     GALACTIC_C - GALACTIC_D * f_mhz.max(1e-6).log10()
 }
 
-// --- Atmospheric noise: APPROXIMATION, NOT ITU-R P.372 MAP DATA -----------
+// Atmospheric noise: an approximation, not ITU-R P.372 map data.
 //
 // P.372 gives atmospheric noise as world maps of Fam at 1 MHz for six 4-hour
 // time blocks x four seasons (CCIR Report 322), plus frequency-dependence
 // curves; there is no equation to quote, and the coefficient files are not in
-// this repo. The form below is log-linear in frequency, which is roughly how
-// those published curves behave across HF, with additive day/night, season and
-// latitude terms. The ANCHOR VALUES are order-of-magnitude choices, NOT read
-// off the maps and NOT traceable to any table. They are surfaced in the UI.
+// this repo. The form below is log-linear in frequency, roughly how those
+// curves behave across HF, with additive day/night, season and latitude terms.
+// The anchor values are order-of-magnitude choices, not read off the maps.
+// They are shown in the UI.
 
 /// Atmospheric `Fa` at 1 MHz, night, mid-latitude, equinox (dB). Anchor.
 ///
-/// Retained as the DERIVATION of [`ATM_STEP_1MHZ_DB`], not as a parameter: the
-/// night curve is now expressed as the day curve plus a step. See
-/// [`atmospheric_noise_figure_db`] for why.
+/// Used only to derive [`ATM_STEP_1MHZ_DB`]: the night curve is the day curve
+/// plus a step (see [`atmospheric_noise_figure_db`]).
 pub const ATM_1MHZ_NIGHT_DB: f64 = 95.0;
 /// Atmospheric `Fa` at 1 MHz, day, mid-latitude, equinox (dB). Anchor.
 pub const ATM_1MHZ_DAY_DB: f64 = 70.0;
@@ -175,32 +170,29 @@ pub const ATM_SLOPE_NIGHT_DB: f64 = 50.0;
 /// Day fall-off of atmospheric noise with frequency, dB per decade. Anchor.
 pub const ATM_SLOPE_DAY_DB: f64 = 45.0;
 
-// --- The day -> night STEP, which is what the calibration actually identifies -
+// The day -> night step, which is what the calibration identifies.
 //
-// The three constants below are the old night anchors re-expressed as a
-// difference from the day curve. They are DERIVED from the four above rather
-// than written down independently, so the default surrogate is bit-identical to
-// the two-line version it replaces and the identity is visible instead of
-// asserted. `tests::the_step_form_reproduces_the_two_line_form` pins it.
+// The constants below express the night anchors as a difference from the day
+// curve. They are derived from the four above, so the default surrogate equals
+// two independent day and night lines exactly;
+// `tests::the_step_form_reproduces_the_two_line_form` checks it.
 
 /// Day -> night step at 1 MHz (dB): how much louder the model makes a band at
 /// night, before any frequency dependence.
 pub const ATM_STEP_1MHZ_DB: f64 = ATM_1MHZ_NIGHT_DB - ATM_1MHZ_DAY_DB;
 /// Linear frequency dependence of that step, dB per decade.
 ///
-/// NEGATIVE narrows the step as frequency rises, which is how two independent
-/// log-linear curves with a steeper night slope behave. POSITIVE widens it - an
-/// INVERTED step, which the two-line form could only reach by making the night
-/// curve shallower than the day curve, and which its bounds excluded.
+/// Negative narrows the step as frequency rises, as two log-linear curves with
+/// a steeper night slope do. Positive widens it (an inverted step).
 pub const ATM_STEP_SLOPE_DB: f64 = ATM_SLOPE_DAY_DB - ATM_SLOPE_NIGHT_DB;
 /// Curvature of the step in `log10(f)`, dB per decade squared. Zero by default,
-/// which is exactly the straight-line step the two-line form was locked into.
+/// a straight-line step.
 pub const ATM_STEP_CURVE_DB: f64 = 0.0;
 /// Summer / winter offset about the equinox value (dB). Anchor: thunderstorm
 /// activity is the source, so the local summer hemisphere is noisier.
 pub const ATM_SEASON_SWING_DB: f64 = 8.0;
 /// Equatorial excess over the polar value (dB), applied as `boost * cos^3(lat)`
-/// so it concentrates in the tropics where lightning actually is. Anchor.
+/// so it concentrates in the tropics where the lightning is. Anchor.
 pub const ATM_TROPICAL_BOOST_DB: f64 = 18.0;
 /// Polar offset subtracted everywhere, so `cos(lat) -> 0` lands below the
 /// mid-latitude value rather than at it (dB). Anchor.
@@ -215,42 +207,31 @@ pub const ATM_POLAR_OFFSET_DB: f64 = 6.0;
 /// step(L)  = step_1MHz + step_slope * L + step_curve * L^2
 /// ```
 ///
-/// **Approximation - see the module docs. Not P.372 map data.**
+/// An approximation (see the module docs), not P.372 map data.
 ///
-/// # Why the night curve is a STEP and not a second line
+/// # Why the night curve is a step
 ///
-/// This replaced a pair of independent log-linear curves, one per day/night
-/// state, and the reason is a measurement rather than a preference.
+/// A WSPR corpus cannot see a noise floor's level, which is constant per
+/// station and absorbed into its fixed effect, only the day-night difference
+/// band by band. With two independent curves that difference is
+/// `(F1_n - F1_d) - (S_n - S_d) L`, reachable only by moving two absolute
+/// levels inside bounds meant for levels, and the fit railed all of them.
 ///
-/// What a WSPR corpus identifies about a noise floor is never its level - that is
-/// constant per station and absorbed exactly into that station's fixed effect -
-/// but the DIFFERENCE between day and night, band by band. Under two independent
-/// curves that difference is not a parameter at all: it is
-/// `(F1_n - F1_d) - (S_n - S_d) L`, an emergent quantity reached only by moving
-/// two absolute levels, each carrying its own bound justified by what an absolute
-/// atmospheric level may plausibly be. So the fit was being asked to steer a
-/// difference through boxes drawn around levels, and it railed every one of them:
-/// widening the night slope ceiling from 65 to 90 dB/decade moved the fit's RMS
-/// by 0.02 dB and the parameter simply railed again.
+/// Parameterising the step directly:
 ///
-/// Writing the step down directly fixes three things:
+/// * bounds it as a contrast, which is what the published maps constrain and
+///   what the corpus can see;
+/// * lets `step_slope` be negative, zero or positive, so the step may narrow,
+///   stay flat or invert with frequency;
+/// * lets `step_curve` bend it. The measured step is ~+4 to +6 dB at 7-14 MHz,
+///   and a straight line through it and the low bands cannot also fit the top
+///   of HF (see `THE STEP AT THE TERMINATOR` in the calibrator).
 ///
-/// * it is bounded as a CONTRAST, which is what the published maps actually
-///   constrain and what this corpus can actually see;
-/// * `step_slope` may be negative, zero or POSITIVE, so the step may narrow with
-///   frequency, stay flat, or invert. The old form could only invert by making
-///   the night curve shallower than the day curve, and its bounds forbade that;
-/// * `step_curve` lets the step bend. The measured step is ~+4 to +6 dB at
-///   7-14 MHz, and a straight line through it and the low bands cannot also
-///   satisfy the top of HF - see `THE STEP AT THE TERMINATOR` in the calibrator.
-///
-/// The default anchors reproduce the two-line form EXACTLY, because the step
-/// constants are derived from the old night anchors rather than re-chosen; see
+/// The default anchors give the same values as two independent lines; see
 /// [`ATM_STEP_1MHZ_DB`] and `tests::the_step_form_reproduces_the_two_line_form`.
 ///
-/// The remaining SHAPE - log-linear day curve, additive season and latitude
-/// terms, a day/night state that is a boolean - is not a calibration target and
-/// stays hard-coded here.
+/// The rest of the shape (log-linear day curve, additive season and latitude
+/// terms, boolean day/night) is not a calibration target.
 #[must_use]
 pub fn atmospheric_noise_figure_db(
     f_mhz: f64,
@@ -277,10 +258,9 @@ pub fn atmospheric_noise_figure_db(
 
 /// The day -> night step of the atmospheric surrogate at one frequency (dB).
 ///
-/// Exposed on its own because it is the quantity the calibration identifies and
-/// the quantity the report has to be able to print: a step the model applies but
-/// reality does not take shows up, one for one, as a jump in `modelled - measured`
-/// across the terminator.
+/// Exposed because the calibration identifies it and the report prints it: a
+/// wrong step shows up as a jump in `modelled - measured` across the
+/// terminator.
 #[must_use]
 pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) -> f64 {
     let l = f_mhz.max(1e-6).log10();
@@ -291,17 +271,16 @@ pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) ->
 
 /// Total predictive spread of a modelled SNR, dB, 1 sigma.
 ///
-/// MEASURED, not chosen. Two numbers bracket it:
+/// Measured. Two numbers bracket it:
 ///
-///  * 3.5 dB is the target's OWN noise - the same transmitter, receiver and band
+///  * 3.5 dB is the target's own noise: the same transmitter, receiver and band
 ///    measured twice inside ten minutes differ by that much (129 pairs from the
 ///    WSPR corpus). No model can beat it.
-///  * 7.32 dB is this model's error on 4 909 spots the fit never saw, with the
-///    fit-to-hold-out gap at -0.02 dB, so it is honest out-of-sample performance
-///    and not an in-sample flatter.
+///  * 7.32 dB is this model's error on 4 909 spots the fit never saw, with a
+///    fit-to-hold-out gap of -0.02 dB.
 ///
-/// `wspr_calibrate` also FITS a spread against decodes and non-decodes and gets
-/// about 15 dB. This value is the 7.32 dB one, and the choice is NOT settled -
+/// `wspr_calibrate` also fits a spread against decodes and non-decodes and gets
+/// about 15 dB. This value is the 7.32 dB one, and the choice is not settled;
 /// the calibrator scores both and neither is calibrated:
 ///
 /// | bin | gap at sigma 15 | gap at sigma 7.3 |
@@ -310,58 +289,46 @@ pub fn atmospheric_day_night_step_db(f_mhz: f64, anchors: AtmosphericAnchors) ->
 /// | 0.5 - 0.7 | +0.00 | -0.24 |
 /// | mean NLL | 0.329 | 0.398 |
 ///
-/// So 15 dB is over-optimistic below a half and 7.3 dB is under-confident in the
-/// middle, by a LARGER margin, and 15 dB wins on both aggregate scores. The wide
-/// value is not simply contamination either: the constructed negatives include
-/// collisions and off-beam arrivals, and an operator asking "will I be heard" is
-/// genuinely exposed to those, so ~15 dB may be the honest OPERATIONAL spread
+/// 15 dB is over-optimistic below a half, 7.3 dB is under-confident in the
+/// middle by a larger margin, and 15 dB wins on both aggregate scores. The
+/// constructed negatives include collisions and off-beam arrivals, which an
+/// operator is also exposed to, so ~15 dB may be the operational spread
 /// against 7.3 dB of physics.
 ///
 /// # Why the level cannot be settled from this corpus
 ///
-/// The calibrator fits an intercept alongside sigma, and the two trade off
-/// against a base rate that is an artefact: the corpus is decodes plus a thin
-/// constructed negative sample, about 85 % positive, which is nothing like the
-/// prior of an arbitrary path opening. Worse, the app's operating point is not on
-/// either fitted curve - `wspr_calibrate` zeroes `model_bias_db` while the app
-/// applies it, which in the calibrator's frame puts the app at an intercept of
-/// about -5.1 dB against a best fit of -2.0 (sigma 7.3) or +5.29 (sigma 15).
+/// The calibrator fits an intercept alongside sigma, and both trade off against
+/// an artificial base rate: the corpus is about 85 % positive (decodes plus a
+/// thin constructed negative sample). The app's operating point is also on
+/// neither fitted curve: `wspr_calibrate` zeroes `model_bias_db` while the app
+/// applies it, which puts the app at an intercept of about -5.1 dB against a
+/// best fit of -2.0 (sigma 7.3) or +5.29 (sigma 15).
 ///
-/// So the ORDERING this produces is validated (AUC about 0.75) and the LEVEL is
-/// not. That is why [`LinkBudget::confidence_label`] exists and why the UI shows
-/// the word rather than a percentage: printing "68 %" would claim a precision
-/// this corpus cannot support. Fixing it needs a corpus whose class balance is
-/// real, not a different constant here.
+/// So the ordering is validated (AUC about 0.75) and the level is not, which is
+/// why [`LinkBudget::confidence_label`] exists and the UI shows a word rather
+/// than a percentage. Fixing it needs a corpus with a real class balance.
 pub const PREDICTIVE_SPREAD_DB: f64 = 7.3;
 
 /// Probability that a path with this median margin actually decodes.
 ///
 /// # Why a probability at all
 ///
-/// The rest of this module produces one SNR, and [`PathState`] turns it into a
-/// yes/no against a threshold. That is the wrong shape of answer, and the WSPR
-/// corpus says so quantitatively: the SAME path, same transmitter, same receiver,
-/// same band, measured twice within ten minutes, differs with a standard
-/// deviation of 3.5 dB, and the model's own out-of-sample error is 7.3 dB. A
-/// hard threshold applied to a quantity with that much spread turns a coin-flip
-/// into a confident verdict.
+/// [`PathState`] turns one SNR into a yes/no against a threshold. The same
+/// path measured twice within ten minutes differs by 3.5 dB (1 sigma), and the
+/// model's out-of-sample error is 7.3 dB, so a hard threshold overstates
+/// confidence near the margin.
 ///
-/// So: treat the modelled SNR as the MEDIAN of a fading distribution, take it as
-/// log-normal (Gaussian in dB, which is what a Rayleigh-fading envelope looks
-/// like once averaged over a WSPR transmission), and report
+/// The modelled SNR is treated as the median of a log-normal fading
+/// distribution (Gaussian in dB, as a Rayleigh-fading envelope looks once
+/// averaged over a WSPR transmission), giving
 /// `P(instantaneous SNR > threshold) = Phi(margin / sigma)`.
 ///
-/// `sigma_db` is the total predictive spread, NOT just the fading: the operator's
-/// uncertainty about being heard includes the model's own error, so the honest
-/// sigma is the one fitted against measured decodes and non-decodes together.
-/// `wspr_calibrate`'s `PREDICTED DECODE PROBABILITY` section fits and reports it.
+/// `sigma_db` is the total predictive spread, including the model's own error,
+/// so it is fitted against measured decodes and non-decodes together.
+/// `wspr_calibrate`'s `PREDICTED DECODE PROBABILITY` section reports it.
 ///
-/// # What this cannot fix
-///
-/// It is a MONOTONE transform of the margin, so it cannot change the ROC curve
-/// or the AUC by even a rounding error. It buys CALIBRATION - "70 %" meaning
-/// seventy per cent - and nothing else. Anyone expecting better discrimination
-/// from it has misread what it is.
+/// This is a monotone transform of the margin, so it cannot change the ROC
+/// curve or the AUC. It only affects calibration.
 #[must_use]
 pub fn decode_probability(margin_db: f64, sigma_db: f64) -> f64 {
     if sigma_db <= 0.0 {
@@ -372,10 +339,9 @@ pub fn decode_probability(margin_db: f64, sigma_db: f64) -> f64 {
 
 /// Standard normal CDF, `Phi(z)`.
 ///
-/// Built from [`crate::chapman::erfcx`] rather than from a fresh polynomial
-/// approximation: that function is already in the codebase, already tested, and
-/// already the accuracy this needs. `Phi(z) = erfc(-z / sqrt 2) / 2`, and
-/// `erfc(t) = e^{-t^2} erfcx(t)` for `t >= 0` with `erfc(-t) = 2 - erfc(t)`.
+/// Built from the existing, tested [`crate::chapman::erfcx`]:
+/// `Phi(z) = erfc(-z / sqrt 2) / 2`, and `erfc(t) = e^{-t^2} erfcx(t)` for
+/// `t >= 0` with `erfc(-t) = 2 - erfc(t)`.
 #[must_use]
 pub fn normal_cdf(z: f64) -> f64 {
     let t = -z / std::f64::consts::SQRT_2;
@@ -387,10 +353,10 @@ pub fn normal_cdf(z: f64) -> f64 {
     half_erfc.clamp(0.0, 1.0)
 }
 
-/// Combine independent noise sources. Noise POWERS add, so the figures are
+/// Combine independent noise sources. Noise powers add, so the figures are
 /// converted out of dB, summed, and converted back:
 ///   `Fa_total = 10 log10( sum_i 10^(Fa_i / 10) )`.
-/// Two equal sources therefore give `+3.01 dB`, as they must.
+/// Two equal sources give `+3.01 dB`.
 #[must_use]
 pub fn combine_noise_figures_db(figures: &[f64]) -> f64 {
     let sum: f64 = figures.iter().map(|f| 10.0_f64.powf(f / 10.0)).sum();
@@ -401,7 +367,7 @@ pub fn combine_noise_figures_db(figures: &[f64]) -> f64 {
 /// so the debug panel can show where the floor came from.
 #[derive(Clone, Copy)]
 pub struct NoiseFloor {
-    /// Atmospheric noise figure [dB above kT0b]. APPROXIMATION.
+    /// Atmospheric noise figure [dB above kT0b]. Approximation.
     pub atmospheric_db: f64,
     /// Man-made noise figure [dB above kT0b]. P.372-9 Table 1.
     pub man_made_db: f64,
@@ -444,14 +410,13 @@ impl NoiseFloor {
 }
 
 /// Operating mode preset: an occupied noise bandwidth and the SNR needed in
-/// THAT bandwidth for the mode to be copyable.
+/// that bandwidth for the mode to be copyable.
 ///
-/// These are engineering conventions from operating practice, not a cited
-/// standard, which is exactly why both numbers stay editable in the UI - the
-/// threshold is a setting, never a constant baked into the verdict.
+/// These are conventions from operating practice, not a cited standard, so
+/// both numbers stay editable in the UI.
 ///
-/// The FT8 figure deserves its conversion shown: FT8's famous "-21 dB" decode
-/// threshold is quoted in a 2500 Hz reference bandwidth. Referred to its own
+/// FT8's "-21 dB" decode threshold is quoted in a 2500 Hz reference
+/// bandwidth. Referred to its own
 /// ~50 Hz occupied bandwidth that is
 ///   `-21 + 10 log10(2500 / 50) = -21 + 16.99 = -4.0 dB`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -487,9 +452,8 @@ impl OperatingMode {
     }
 }
 
-/// What the sweep and the status chip report per frequency. Replaces the old
-/// two-state "connects" boolean: geometry closing is necessary but not
-/// sufficient for a signal to be heard.
+/// What the sweep and the status chip report per frequency. A path that closes
+/// geometrically may still be too weak to hear.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PathState {
     /// Ray tracing found no path at all.
@@ -520,26 +484,21 @@ impl PathState {
 /// Carried into the solution assembler so the loss terms stay untouched and
 /// only the verdict is added on top.
 ///
-/// The two antenna curves live here rather than being passed separately
-/// because they are exactly that: inputs to the verdict that the ray tracer
-/// knows nothing about. The tracer supplies the launch and arrival elevations;
-/// the assembler reads each curve at the matching angle.
+/// The antenna curves live here because the tracer knows nothing about them:
+/// it supplies the launch and arrival elevations, and the assembler reads each
+/// curve at the matching angle.
 #[derive(Clone, Copy)]
 pub struct LinkSettings<'a> {
     pub tx_power_w: f64,
     pub noise: NoiseFloor,
     pub threshold_db: f64,
-    /// Calibrated model bias, dB, SUBTRACTED from the predicted SNR.
+    /// Calibrated model bias, dB, subtracted from the predicted SNR.
     ///
-    /// This is the part of the model's error that a calibration measured but
-    /// could not attribute to any station: positive means the model reads high.
-    /// It is deliberately not folded into any loss term, because it is not a
-    /// loss: it is an empirical correction, and burying it in the propagation
-    /// budget would make a measured fudge look like physics.
-    ///
-    /// Zero by default, so an uncalibrated run is unchanged. See
-    /// [`crate::fit::StationEffects::global_db`], which is what a calibration
-    /// reports and what belongs here.
+    /// The part of the model's error a calibration measured but could not
+    /// attribute to any station; positive means the model reads high. It is
+    /// kept out of the loss terms because it is an empirical correction rather
+    /// than propagation physics. A calibration reports it as
+    /// [`crate::fit::StationEffects::global_db`].
     pub model_bias_db: f64,
     /// Transmitting antenna gain against elevation, at this frequency.
     pub tx_antenna: &'a GainCurve,
@@ -561,8 +520,8 @@ pub struct LinkBudget {
     pub snr_db: f64,
     /// Threshold this SNR was judged against (dB).
     pub threshold_db: f64,
-    /// Calibrated bias subtracted from `snr_db`, dB. Carried so the UI can say
-    /// that a correction was applied rather than silently applying one.
+    /// Calibrated bias subtracted from `snr_db`, dB, so the UI can show that a
+    /// correction was applied.
     pub model_bias_db: f64,
 }
 
@@ -570,7 +529,7 @@ impl LinkBudget {
     /// Combine a traced path's total system loss with the transmitter power and
     /// the noise floor.
     ///
-    /// Unit chain, kept explicit:
+    /// Unit chain:
     ///   `P_tx(dBm) = 30 + 10 log10 P(W)`
     ///   `P_rx(dBm) = P_tx(dBm) - L_total(dB)`
     ///   `P_n(dBm)  = Fa(dB) + 10 log10 b(Hz) + 10 log10(k t0) + 30`
@@ -597,14 +556,13 @@ impl LinkBudget {
     /// Same as [`LinkBudget::new`], reading the scenario-level settings from a
     /// [`LinkSettings`].
     ///
-    /// `total_system_loss_db` here is the loss NET of antenna gain: the caller
+    /// `total_system_loss_db` here is the loss net of antenna gain: the caller
     /// has already subtracted `G_tx + G_rx` from the propagation loss.
     #[must_use]
     pub fn from_settings(s: LinkSettings<'_>, total_system_loss_db: f64) -> Self {
         let mut lb = Self::new(s.tx_power_w, total_system_loss_db, s.noise, s.threshold_db);
-        // Applied to the SNR alone. `rx_power_dbm` and every loss term stay
-        // exactly what the propagation produced, so the panel that shows the
-        // budget still shows physics and this correction cannot hide inside it.
+        // Applied to the SNR only, so `rx_power_dbm` and the loss terms shown
+        // in the budget panel stay pure propagation.
         lb.snr_db -= s.model_bias_db;
         lb.model_bias_db = s.model_bias_db;
         lb
@@ -628,11 +586,9 @@ impl LinkBudget {
     /// Probability that this path actually decodes, at the measured predictive
     /// spread [`PREDICTIVE_SPREAD_DB`].
     ///
-    /// [`Self::state`] answers the same question with a hard threshold, and keeps
-    /// doing so - 34 call sites depend on that enum and it is still the right
-    /// summary for a table. But a yes/no on a quantity with 7 dB of spread hides
-    /// how close the call was, so this is the number to show beside it: a path 1 dB
-    /// over threshold is a coin flip, not a verdict.
+    /// [`Self::state`] gives the hard-threshold answer, which suits a table.
+    /// With 7 dB of spread a yes/no hides how close the call was, so this is
+    /// shown beside it: a path 1 dB over threshold is close to a coin flip.
     #[must_use]
     pub fn decode_probability(self) -> f64 {
         decode_probability(self.margin_db(), PREDICTIVE_SPREAD_DB)
@@ -640,9 +596,9 @@ impl LinkBudget {
 
     /// A word for [`Self::decode_probability`], for a UI that has room for one.
     ///
-    /// The bands are deliberately coarse. Anything finer would imply the
-    /// probability is calibrated to a few per cent, and the reliability table in
-    /// `wspr_calibrate` says it is trustworthy above a half and optimistic below.
+    /// The bands are coarse because the reliability table in `wspr_calibrate`
+    /// shows the probability is trustworthy above a half and optimistic below,
+    /// not calibrated to a few per cent.
     #[must_use]
     pub fn confidence_label(self) -> &'static str {
         match self.decode_probability() {
@@ -676,7 +632,7 @@ mod tests {
         );
     }
 
-    /// Independent cross-check of the constant AND the dBW->dBm conversion:
+    /// Cross-check of the constant and the dBW->dBm conversion:
     /// a 0 dB noise figure in 1 Hz is the textbook -174 dBm/Hz thermal floor.
     #[test]
     fn thermal_floor_is_minus_174_dbm_per_hz() {
@@ -779,13 +735,9 @@ mod tests {
         assert!((31.5..32.0).contains(&total), "{total}");
     }
 
-    /// The step form must be the two-line form, exactly, at the default anchors.
-    ///
-    /// This is the whole safety argument for the reparameterisation: the night
-    /// curve stopped being an independent pair of numbers and became the day
-    /// curve plus a step, and nothing about the shipped model may move because of
-    /// it. Checked against the two lines written out longhand, at frequencies
-    /// spanning the corpus, in both seasons and at three latitudes.
+    /// At the default anchors the step form must equal two independent day and
+    /// night lines written out longhand, across the corpus frequencies, in both
+    /// seasons and at three latitudes.
     #[test]
     fn the_step_form_reproduces_the_two_line_form() {
         let a = AtmosphericAnchors::default();
@@ -799,7 +751,7 @@ mod tests {
                     };
                     let cos_lat = lat.to_radians().cos().abs();
                     let lat_db = ATM_TROPICAL_BOOST_DB * cos_lat.powi(3) - ATM_POLAR_OFFSET_DB;
-                    // The two independent log-linear curves this replaced.
+                    // The two independent log-linear curves.
                     let want_day =
                         ATM_1MHZ_DAY_DB + season_db + lat_db - ATM_SLOPE_DAY_DB * f.log10();
                     let want_night =
@@ -824,9 +776,7 @@ mod tests {
         }
     }
 
-    /// The freedom the reparameterisation exists to provide: a step that is flat
-    /// in frequency, and one that INVERTS. Neither was reachable under the old
-    /// bounds, which boxed two absolute levels rather than their difference.
+    /// The step form can be flat in frequency or invert.
     #[test]
     fn the_step_can_be_flat_or_inverted() {
         let mut a = AtmosphericAnchors::default();
@@ -838,8 +788,7 @@ mod tests {
         assert!((lo - hi).abs() < 1e-12, "flat step: {lo} vs {hi}");
         assert!((lo - ATM_STEP_1MHZ_DB).abs() < 1e-12);
 
-        // Inverted: the contrast GROWS with frequency, which two log-linear
-        // curves could only do with the night curve shallower than the day one.
+        // Inverted: the contrast grows with frequency.
         a.step_slope_db.value = 8.0;
         let lo = atmospheric_day_night_step_db(1.8, a);
         let hi = atmospheric_day_night_step_db(28.0, a);
@@ -848,8 +797,8 @@ mod tests {
             "inverted step: {lo} at 1.8 MHz, {hi} at 28 MHz"
         );
 
-        // And the night floor still exceeds the day floor at both ends, so an
-        // inverted SLOPE is not silently an inverted SIGN.
+        // The night floor still exceeds the day floor at both ends: an inverted
+        // slope is not an inverted sign.
         for f in [1.8, 28.0] {
             assert!(
                 atmospheric_noise_figure_db(f, false, Season::Equinox, 45.0, a)
@@ -891,8 +840,7 @@ mod tests {
         assert!(normal_cdf(40.0) >= 1.0 - 1e-12);
         assert!(normal_cdf(-40.0) <= 1e-12);
 
-        // At the threshold it is exactly a coin flip whatever the spread is -
-        // which is the whole point of reporting a probability there.
+        // At the threshold it is exactly a half, whatever the spread.
         for sigma in [1.0_f64, 3.5, 7.3, 20.0] {
             assert!((decode_probability(0.0, sigma) - 0.5).abs() < 1e-12);
         }
@@ -907,20 +855,14 @@ mod tests {
             assert!(p >= prev, "not monotone at {m}");
             prev = p;
         }
-        // A zero spread degenerates to the old hard threshold, so the two
-        // behaviours are one family rather than two code paths.
+        // A zero spread degenerates to the hard threshold.
         assert!((decode_probability(0.1, 0.0) - 1.0).abs() < 1e-12);
         assert!((decode_probability(-0.1, 0.0) - 0.0).abs() < 1e-12);
     }
 
-    /// The calibrated bias must reach the PROBABILITY, not just the SNR readout.
-    ///
-    /// These two corrections were added together and they compose in a way that is
-    /// easy to get wrong: `model_bias_db` is subtracted from `snr_db`, `margin_db`
-    /// derives from `snr_db`, and `decode_probability` derives from `margin_db`. If
-    /// any link in that chain used the uncorrected power instead, the headline SNR
-    /// would be corrected while the probability quietly was not - and the
-    /// probability is the number a user is being asked to trust.
+    /// The calibrated bias must reach the probability as well as the SNR:
+    /// `model_bias_db` is subtracted from `snr_db`, `margin_db` derives from
+    /// `snr_db`, and `decode_probability` from `margin_db`.
     #[test]
     fn the_calibrated_bias_reaches_the_decode_probability() {
         let noise = NoiseFloor::compute(
@@ -941,7 +883,7 @@ mod tests {
             tx_antenna: &flat,
             rx_antenna: &flat,
         };
-        // A loss that lands the UNCORRECTED path a little over threshold.
+        // A loss that lands the uncorrected path a little over threshold.
         let loss =
             dbm_from_watts(5.0) - noise.power_dbm - crate::wspr::WSPR_DECODE_THRESHOLD_DB - 2.0;
         let raw = LinkBudget::from_settings(settings(0.0), loss);
@@ -956,8 +898,7 @@ mod tests {
             corrected.decode_probability(),
             raw.decode_probability()
         );
-        // And it must NOT be hidden in the received power, or the budget panel
-        // would stop showing physics.
+        // The received power stays uncorrected.
         assert!((raw.rx_power_dbm - corrected.rx_power_dbm).abs() < 1e-12);
 
         // The uncorrected path reads as over threshold; 5.1 dB of measured
@@ -968,7 +909,7 @@ mod tests {
     }
 
     /// The atmospheric surrogate has no reference value to check against, so
-    /// only its documented BEHAVIOUR is pinned: falling with frequency, louder
+    /// only its documented behaviour is checked: falling with frequency, louder
     /// at night, louder in summer, louder in the tropics.
     #[test]
     fn atmospheric_trends_are_as_documented() {
@@ -1058,10 +999,9 @@ mod tests {
         assert!((n - s).abs() < 1e-12);
     }
 
-    /// The one qualitative claim the composed floor must get right: at the low
-    /// end of HF the floor is atmospheric, at the top of HF it is galactic (in
-    /// a quiet-rural location). If the surrogate's slope were badly wrong this
-    /// crossover would land outside the band.
+    /// At the low end of HF the floor is atmospheric and at the top it is
+    /// galactic (quiet rural). A badly wrong surrogate slope would move this
+    /// crossover outside the band.
     #[test]
     fn atmospheric_dominates_low_hf_galactic_dominates_high_hf() {
         let env = NoiseEnvironment::QuietRural;
@@ -1127,8 +1067,8 @@ mod tests {
         assert_eq!(lb.state(), PathState::Usable);
     }
 
-    /// The state boundary is exactly the threshold, and more loss eventually
-    /// pushes a found path below it - the behaviour the whole change exists for.
+    /// The state boundary is exactly the threshold, and enough loss pushes a
+    /// found path below it.
     #[test]
     fn threshold_decides_usable_versus_below() {
         let noise = NoiseFloor::compute(

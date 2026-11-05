@@ -3,29 +3,27 @@
 //!
 //! Formulas used, and how much each is worth trusting:
 //!
-//! * **Declination** — Cooper's equation (P. I. Cooper, "The absorption of
+//! * Declination: Cooper's equation (P. I. Cooper, "The absorption of
 //!   solar radiation in solar stills", *Solar Energy* 12(3), 1969):
 //!   `delta = 23.45 deg * sin(360 deg * (284 + n) / 365)`, with `n` the day of
 //!   year. This is the standard low-precision approximation used throughout
 //!   the solar-engineering literature; it is accurate to a few tenths of a
 //!   degree, which is far below the accuracy of anything else in this tool.
-//! * **Hour angle** — `H = 15 deg/h * (LST - 12 h)`, exact by the definition
+//! * Hour angle: `H = 15 deg/h * (LST - 12 h)`, exact by the definition
 //!   of mean solar time, with `LST = UTC + longitude/15`.
-//! * **Zenith angle** — `cos(chi) = sin(phi) sin(delta) + cos(phi) cos(delta) cos(H)`,
+//! * Zenith angle: `cos(chi) = sin(phi) sin(delta) + cos(phi) cos(delta) cos(H)`,
 //!   the spherical law of cosines applied to the observer/pole/sun triangle.
 //!   Exact given delta and H.
 //!
-//! Deliberately omitted: the equation of time (apparent minus mean solar
-//! time, up to about +/-16 minutes, i.e. +/-4 deg of hour angle) and
-//! atmospheric refraction. Both are small next to the coarse ionospheric
-//! climatology this feeds, and adding them would imply a precision the rest
-//! of the model does not have.
+//! Omitted: the equation of time (apparent minus mean solar time, up to about
+//! +/-16 minutes, i.e. +/-4 deg of hour angle) and atmospheric refraction. Both
+//! are small next to the uncertainty of the ionospheric climatology this feeds.
 
 /// Cumulative days before the start of each month, non-leap year. Leap years
 /// are not modelled: one day of offset moves the declination by under 0.4 deg.
 const DAYS_BEFORE_MONTH: [u32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 
-/// Season at a place, in the LOCAL hemisphere's sense: `Summer` always means
+/// Season at a place, in the local hemisphere's sense: `Summer` always means
 /// the local summer, so a southern-hemisphere January is `Summer`.
 ///
 /// Lives here, in the conversion layer, because both the ionospheric model

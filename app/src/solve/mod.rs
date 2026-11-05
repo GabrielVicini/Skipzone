@@ -6,9 +6,9 @@
 //! Multi-hop handling: the engine's homing solves a single hop. For an N-hop
 //! path we home one hop of 1/N the great-circle arc (exact when the medium is
 //! height-only), then actually propagate N hops by specular ground reflection
-//! and report where the ray really lands. With a magnetic field the medium is
-//! not spherically symmetric, so the terminal miss is a genuine diagnostic of
-//! the equal-hop assumption rather than something to hide.
+//! and report where the ray lands. With a magnetic field the medium is not
+//! spherically symmetric, so the terminal miss measures the error of the
+//! equal-hop assumption.
 //!
 //! The work is split by concern across the submodules: `types` holds the
 //! result structs the UI renders, `link_budget` the free-space and ground
@@ -22,13 +22,12 @@ mod types;
 
 pub use types::{LayerMode, LayerStatus, ModeReport, Solution, SolveOutcome, mode_label};
 
-/// The mode a listener would actually hear over a DETERMINISTIC path: the
-/// strongest SNR among the F2/E solutions, or `None` when none connected.
+/// The mode a listener would hear over a deterministic path: the strongest SNR
+/// among the F2/E solutions, or `None` when none connected.
 ///
-/// Shared by every caller that has to reduce a whole solve to one number - the
-/// frequency sweep and the coverage grid - so the two can never disagree about
-/// which mode a scenario is being judged by. Sporadic E is deliberately not
-/// considered here; see [`best_with_es_fallback`].
+/// Shared by the frequency sweep and the coverage grid so they judge a
+/// scenario by the same mode. Sporadic E is excluded; see
+/// [`best_with_es_fallback`].
 #[must_use]
 pub fn best_by_snr(out: &SolveOutcome) -> Option<&Solution> {
     out.solutions
@@ -46,33 +45,23 @@ pub fn best_es(out: &SolveOutcome) -> Option<&Solution> {
         .max_by(|a, b| a.link.snr_db.total_cmp(&b.link.snr_db))
 }
 
-/// The path to report when a single answer is needed: the best DETERMINISTIC
-/// path if one closed, and only otherwise the best Es-supported one.
+/// The path to report when a single answer is needed: the best deterministic
+/// path if one closed, otherwise the best Es-supported one.
 ///
-/// # Why this is not simply the strongest SNR of the two lists
+/// # Why this is not the strongest SNR of the two lists
 ///
-/// It used to be, and that was a selection bug rather than a preference. An Es
-/// reflection at 100 km has a shorter ray path than the F2 alternative, less
-/// spreading loss, and a shorter slant transit of the absorbing D region, so on
-/// raw SNR it wins **by construction** wherever it is geometrically possible -
-/// not because the ionosphere favoured it. Ordering the two lists together by
-/// SNR therefore does not compare two hypotheses; it just prefers the lower
-/// layer, and it does so while silently discarding the one piece of information
-/// that distinguishes them, namely that F2 is there every day and Es is there
-/// [`SporadicE::probability`](crate::sporadic_e::SporadicE) of the time.
+/// An Es reflection at 100 km has a shorter ray path than the F2 alternative,
+/// less spreading loss and a shorter slant through the absorbing D region, so
+/// on raw SNR it always wins where it is geometrically possible. Ranking both
+/// lists by SNR would just prefer the lower layer and ignore that Es is present
+/// only [`SporadicE::probability`](crate::sporadic_e::SporadicE) of the time.
+/// Folding that probability into a dB figure would mix a likelihood with a
+/// power. So the rule is ordinal: a path that is always there outranks one
+/// that might be, and Es is used only when nothing deterministic closed (for
+/// example a 17 m signal at 400 km, where F2 has no solution).
 ///
-/// Folding that probability into the SNR is not the fix either - it would put a
-/// likelihood into a quantity measured in dB, which is the false equivalence the
-/// two separate solution lists exist to prevent. So the rule is ordinal instead:
-/// a path that is simply there outranks a path that might be there, and Es is
-/// consulted only when nothing deterministic closed at all. That is also the
-/// case Es was added for - a 17 m signal at 400 km, where F2 genuinely has no
-/// solution - so the fallback keeps the capability it was built for while
-/// removing its ability to outbid a perfectly good F2 path.
-///
-/// Callers must still carry the winner's `probability`: an Es answer returned
-/// here is a "maybe", and reporting it as an opening without its occurrence
-/// figure is the same conflation one step further down.
+/// Callers must carry the winner's `probability`, since an Es answer is a
+/// "maybe".
 #[must_use]
 pub fn best_with_es_fallback(out: &SolveOutcome) -> Option<&Solution> {
     best_by_snr(out).or_else(|| best_es(out))
@@ -105,8 +94,8 @@ struct StackOutcome {
     /// `NoBracket`, i.e. rays reflect but none lands at the target.
     saw_no_bracket: bool,
     /// True when a trace failed outright inside homing refinement. Tracked
-    /// separately so a numerical failure is never reported to the operator as
-    /// a physical "nothing reflects" - the two used to be indistinguishable.
+    /// separately so a numerical failure is not reported as a physical
+    /// "nothing reflects".
     saw_trace_failure: bool,
     /// Diagnostics from this pass, kept per outcome so that the modes can be
     /// run in parallel and their messages still merged in a fixed order.
@@ -125,9 +114,9 @@ enum Candidate {
     Failed(String),
 }
 
-/// Two launches this close in elevation are the same ray found twice, not
-/// multipath: real multipath branches (low ray / high ray, E / F2) are degrees
-/// apart, and the terminal homing converges to well under a milli-degree.
+/// Two launches this close in elevation are the same ray found twice: real
+/// multipath branches (low ray / high ray, E / F2) are degrees apart, and the
+/// terminal homing converges to well under a milli-degree.
 const SAME_RAY_ELEV_DEG: f64 = 1e-3;
 
 /// Do these two solutions describe the same propagation mode?
@@ -171,17 +160,16 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
         GroundModel::Fixed(inputs.ground_type)
     };
 
-    // The judgment layer's inputs, fixed for this solve. Computed at THIS
-    // frequency (not the tuned one) so the frequency sweep, which re-solves
-    // against one `Assumptions`, gets the right floor at every candidate.
+    // The judgment layer's inputs, computed at this solve's frequency so the
+    // frequency sweep, which re-solves against one `Assumptions`, gets the
+    // right floor at every candidate.
     let noise = scenario::noise_floor_at(inputs, a, inputs.freq_mhz);
 
     // Antenna patterns, built once per solve. Each curve costs a hemispherical
     // power integral (see `crate::antenna::image`), so it is computed here and
-    // sampled per solution rather than recomputed per angle. Both ends stand
-    // over the scenario's ground type - and when that is auto-detected, over
-    // the surface at each station's own coordinates, which is the same lookup
-    // the bounces use rather than a second rule.
+    // sampled per solution. Both ends stand over the scenario's ground type,
+    // or when auto-detected, over the surface at each station's coordinates
+    // using the same lookup as the bounces.
     let ground_under = |lat: f64, lon: f64| match ground {
         GroundModel::Fixed(g) => g,
         GroundModel::Auto { land_fallback } => crate::coastline::get().map_or(land_fallback, |c| {
@@ -206,18 +194,16 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
         rx_antenna: &rx_antenna,
     };
 
-    // Without a field, O and X are bit-identical by construction, so tracing
-    // both would just draw the same path twice.
+    // Without a field, O and X are bit-identical, so trace only one.
     let modes: &[Mode] = if inputs.use_field {
         &[Mode::Ordinary, Mode::Extraordinary]
     } else {
         &[Mode::Ordinary]
     };
 
-    // One pass over the homing against one density stack. Factored out because
-    // it now runs twice: once against the deterministic layers, and once with a
-    // sporadic-E sheet added. Two passes, not one merged stack, is what keeps
-    // the probabilistic answer separable from the deterministic one.
+    // One pass over the homing against one density stack. It runs once against
+    // the deterministic layers and once with a sporadic-E sheet added, which
+    // keeps the probabilistic answer separate from the deterministic one.
     let run_stack = |density: &(dyn ElectronDensity + Sync),
                      tuning: StepTuning,
                      errors: &mut Vec<String>|
@@ -255,7 +241,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                         tuning.for_search(),
                     );
                     let base_config = homing_config(inputs.use_field);
-                    // The elevation fan, traced ONCE for this (mode, stack), on its own
+                    // The elevation fan, traced once for this (mode, stack), on its own
                     // tracer at the bracketing tolerance. Every hop count below brackets
                     // against the same rays; see `ElevationScan` and `StepTuning::for_scan`.
                     let scan_tracer = make_tracer(
@@ -267,19 +253,14 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                         a,
                         tuning.for_scan(),
                     );
-                    // Narrow the SCAN to the elevations that could serve any hop
+                    // Narrow the scan to the elevations that could serve any hop
                     // count here. The fan is 4..=80 deg in 1 deg steps regardless of
-                    // geometry, and most of it is wasted: a 7540 km target cannot be
-                    // reached with a 60 deg launch off any layer the model has, and a
-                    // 300 km one cannot be reached with a 5 deg launch.
+                    // geometry: a 7540 km target cannot be reached with a 60 deg
+                    // launch off any modelled layer, nor a 300 km one with 5 deg.
                     //
-                    // Only the scan is narrowed. `base_config` still supplies the
-                    // Newton limits below at their full range, so even a mis-sized
-                    // window cannot clamp a refinement that is converging - the worst
-                    // it could do is fail to offer a bracket, which `solve_digest`
-                    // exists to rule out.
-                    // A fresh config rather than a copy of `base_config`: that one is
-                    // consumed by the Newton limits below and must keep its full range.
+                    // Only the scan is narrowed. `base_config` keeps the Newton
+                    // limits below at full range, so a mis-sized window can at worst
+                    // miss a bracket, which `solve_digest` checks for.
                     let mut scan_config = homing_config(inputs.use_field);
                     if let Some((lo, hi)) = (1..=inputs.max_hops)
                         .filter_map(|hops| {
@@ -289,21 +270,12 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                             Some(acc.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))))
                         })
                     {
-                        // SNAP to the original fan's own grid, outward. The scan finds
-                        // brackets by looking for a sign change between CONSECUTIVE
-                        // sampled elevations, so the set of samples is part of the
-                        // answer, not just their range: starting the fan at 16.0 deg
-                        // instead of 4.0 shifts every sample by a fraction of a degree
-                        // and makes the scan find sign changes the old grid stepped
-                        // over. Measured - `solve_digest` reported brackets appearing
-                        // and launch elevations moving in the 6th decimal.
-                        //
-                        // Snapping outward to a whole number of steps from the original
-                        // `elev_min` makes the scanned elevations a strict SUBSET of the
-                        // ones the full fan would have used. Every bracket inside the
-                        // window is then found identically, and the only ones that can
-                        // be lost lie entirely outside a band already padded well beyond
-                        // what any modelled layer can reach.
+                        // Snap outward to the full fan's grid. Brackets come from sign
+                        // changes between consecutive samples, so shifting the samples
+                        // (say starting at 16.0 deg instead of 4.0) changes which
+                        // brackets are found. Whole steps from `elev_min` keep the
+                        // scanned elevations a subset of the full fan's, so every
+                        // bracket inside the padded window is found identically.
                         let full_lo = base_config.elev_min.get().to_degrees();
                         let full_hi = base_config.elev_max.get().to_degrees();
                         let step = base_config.elev_step.get().to_degrees();
@@ -323,19 +295,15 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                     // Every (hop count, bracket) pair is one independent candidate
                     // ray: its own terminal homing search and its own propagation, with
                     // nothing shared but the read-only models. They are enumerated
-                    // first and then run across the pool, and the results are folded
-                    // back IN ORDER, so the solution list and the error list come out
-                    // the same whatever order the threads finish in. The parallelism
-                    // seam stays outside the ODE loop, and outside the engine
-                    // entirely: the engine traces one ray at a time.
+                    // first, run across the pool, and folded back in order so the
+                    // solution and error lists do not depend on thread timing. The
+                    // engine itself traces one ray at a time.
                     let mut work = Vec::new();
                     for hops in 1..=inputs.max_hops {
                         // A hop count whose per-hop arc is over the horizon for every
-                        // layer in the model cannot produce a ray, and no amount of
-                        // tracing will change that. Skipping it here is not the same
-                        // as finding no bracket - `saw_no_bracket` means "rays reflect
-                        // but none lands at this range", which the per-layer report
-                        // distinguishes - so this deliberately does NOT set that flag.
+                        // modelled layer cannot produce a ray. This does not set
+                        // `saw_no_bracket`, which means "rays reflect but none lands at
+                        // this range" in the per-layer report.
                         if hop_elevation_window_deg(total_arc.get() / f64::from(hops)).is_none() {
                             continue;
                         }
@@ -348,16 +316,14 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                                 Radians::new(total_arc.get() / f64::from(hops)),
                             )
                         };
-                        // The scan brackets against ONE hop of 1/N of the arc: that is
-                        // what makes it a cheap way to enumerate the distinct rays
-                        // (low ray, high ray, E and F2 branches) that could serve this
-                        // hop count. Which of them actually reaches the receiver, and at
-                        // what launch angle, is settled by `home_terminal`.
+                        // The scan brackets against one hop of 1/N of the arc, a cheap
+                        // way to enumerate the distinct rays (low/high, E/F2) that could
+                        // serve this hop count. `home_terminal` decides which of them
+                        // reaches the receiver.
                         let brackets = scan.brackets(central_angle(&tx, &target).get());
                         if brackets.is_empty() {
-                            // Recorded rather than swallowed: "rays reflect but none
-                            // lands here" is a different answer from "nothing reflects",
-                            // and the per-layer report has to be able to say which.
+                            // "Rays reflect but none lands here" differs from "nothing
+                            // reflects", and the per-layer report says which.
                             saw_no_bracket = true;
                             continue;
                         }
@@ -370,20 +336,16 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                     let outcomes: Vec<Candidate> = work
                         .par_iter()
                         .map(|&(hops, bracket)| {
-                            // The search runs on the loose tracer. Nothing it computes
-                            // is reported: it returns a launch elevation, and the path
-                            // that gets measured is the one `propagate` traces at the
-                            // engine's own tolerance below. The acceptance test is
-                            // applied to THAT path's terminal miss rather than to the
-                            // search's estimate of it, so the guarantee - this ray ends
-                            // at the receiver - is made on the trajectory whose numbers
-                            // the operator actually sees.
+                            // The search runs on the loose tracer and only returns a
+                            // launch elevation. Acceptance is judged on the terminal miss
+                            // of the path `propagate` traces at the engine's tolerance,
+                            // which is the path the operator sees.
                             let Some(homed) = home_terminal(
                                 &search_tracer,
                                 &tx,
                                 &rx,
                                 hops,
-                                // The bracket MIDPOINT. See `ElevationScan::brackets`:
+                                // The bracket midpoint. See `ElevationScan::brackets`:
                                 // seeding this any closer to the root changes which
                                 // ray Newton converges to.
                                 0.5 * (bracket.0 + bracket.1),
@@ -401,24 +363,18 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                                 f_hz,
                                 ground,
                             );
-                            // A path that did not complete is not a path. `propagate`
-                            // reports a note exactly when a hop escaped through the top
-                            // or the trace failed, i.e. when the ray never came back
-                            // down to make the next reflection - so the remaining hops
-                            // never happened and the ray never reached the receiver.
-                            // Such a path used to be pushed as a solution anyway, on the
-                            // grounds that it had SOME hop detail to show, and was drawn
-                            // on the map as a line shooting past the receiver and out
-                            // the far side of the world.
+                            // `propagate` returns a note exactly when a hop escaped or
+                            // the trace failed, so the ray never reached the receiver
+                            // and is not a solution.
                             if let Some(n) = &note {
                                 return Candidate::Failed(format!(
                                     "{} mode, {hops} hop(s): {n}",
                                     mode_label(mode)
                                 ));
                             }
-                            // The terminal miss of the REPORTED path, at the engine's
-                            // own tolerance. The search converged on a looser
-                            // integrator, so this re-measures rather than trusts it.
+                            // The terminal miss of the reported path at the engine's
+                            // tolerance, re-measured because the search used a looser
+                            // integrator.
                             let terminal_miss_m = ends.last().map_or(f64::INFINITY, |e| {
                                 central_angle(e, &rx).get() * EARTH_RADIUS_M
                             });
@@ -448,9 +404,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                                 // Two brackets of the equal-hop scan can converge onto
                                 // the same ray once the terminal point is what is being
                                 // homed, because the scan brackets a quantity the
-                                // refinement no longer targets. That is one propagation
-                                // mode, so it is listed once - keeping whichever landed
-                                // closer.
+                                // refinement no longer targets. List that mode once,
+                                // keeping whichever landed closer.
                                 match solutions.iter_mut().find(|s| is_same_ray(s, &candidate)) {
                                     Some(existing)
                                         if candidate.homing_miss_m < existing.homing_miss_m =>
@@ -496,7 +451,7 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     // The two density stacks share nothing but the read-only models, so the
     // deterministic pass and the sporadic-E pass run side by side. Their
     // diagnostics stay in separate lists and are merged below in a fixed order,
-    // with the Es pass's messages tagged as they always were.
+    // with the Es pass's messages tagged.
     let es_tuning = StepTuning::for_thin_sheet(a.sporadic_e.semi_thickness_km * 1e3);
     let (deterministic, es_pass) = rayon::join(
         || {
@@ -516,10 +471,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     errors.extend(det_errors);
     let mut solutions = deterministic.solutions;
 
-    // The probabilistic pass. Only reflections that actually turn in the Es
-    // sheet count: everything else this stack finds is a duplicate of a
-    // deterministic solution, since the sheet is the only difference between
-    // the two stacks.
+    // The probabilistic pass. Only reflections that turn in the Es sheet count;
+    // anything else duplicates a deterministic solution.
     let (es_band_lo, es_band_hi) = a.sporadic_e.attribution_band_km();
     let mut es_solutions = Vec::new();
     let mut es_saw_no_bracket = false;
@@ -552,9 +505,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
                 es_solutions.push(s);
             }
         }
-        // Es-pass errors are tagged rather than merged anonymously: an error
-        // from this pass says something about the Es sheet, not about the
-        // deterministic ionosphere the operator is mostly looking at.
+        // Es-pass errors are tagged because they concern the Es sheet rather
+        // than the deterministic ionosphere.
         errors.extend(
             es_errors
                 .into_iter()
@@ -606,10 +558,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
         StackDiagnosis {
             deterministic_no_bracket: deterministic.saw_no_bracket,
             deterministic_trace_failure: deterministic.saw_trace_failure,
-            // The sweep only ever runs on the DETERMINISTIC stack, so its
-            // "everything penetrated" verdict is evidence about F2 and E only.
-            // Letting it colour the Es report would be exactly the conflation
-            // this whole change exists to remove.
+            // The sweep runs only on the deterministic stack, so its "everything
+            // penetrated" verdict says nothing about Es.
             deterministic_penetrates: everything_penetrated,
             es_no_bracket: es_saw_no_bracket,
             es_trace_failure: es_saw_trace_failure,
@@ -634,16 +584,8 @@ pub fn solve(inputs: &Inputs, a: &Assumptions, models: &Models) -> SolveOutcome 
     }
 }
 
-/// Reduce the solutions to one report per layer.
-///
-/// The SNR carried here is continuous and unconditional: a layer that produced
-/// a path reports its SNR whether or not it clears the threshold, and the
-/// threshold is applied only by `ModeReport::state` when something needs to be
-/// coloured. A layer that produced nothing says WHY, so the caller can tell
-/// "the F2 skip zone starts here" from "this frequency reaches nothing".
-/// Everything the report builder needs to explain a layer that produced
-/// nothing, kept per stack so no evidence gathered about one can be attributed
-/// to the other.
+/// What the report builder needs to explain a layer that produced nothing,
+/// kept per stack so evidence about one is not attributed to the other.
 struct StackDiagnosis {
     deterministic_no_bracket: bool,
     deterministic_trace_failure: bool,
@@ -654,6 +596,12 @@ struct StackDiagnosis {
     es_trace_failure: bool,
 }
 
+/// Reduce the solutions to one report per layer.
+///
+/// A layer that produced a path reports its SNR whether or not it clears the
+/// threshold; `ModeReport::state` applies the threshold when colouring. A layer
+/// that produced nothing says why, so the caller can tell a skip zone from a
+/// frequency that reaches nothing.
 fn build_mode_reports(
     solutions: &[Solution],
     es_solutions: &[Solution],
@@ -686,12 +634,9 @@ fn build_mode_reports(
                     };
                     // Order matters. A ray that reflects but lands short is a
                     // skip zone; a ray that escapes at every elevation is above
-                    // the MUF; a trace that failed numerically is neither, and
-                    // must never be dressed up as a physical answer. Only the
-                    // deterministic stack has sweep evidence, so an Es layer
-                    // with no bracket and no failure is left as NoBracket
-                    // rather than being told it penetrates on someone else's
-                    // measurement.
+                    // the MUF; a trace that failed numerically is neither. Only
+                    // the deterministic stack has sweep evidence, so an Es layer
+                    // with no bracket and no failure stays NoBracket.
                     let s = if trace_failure && !no_bracket {
                         LayerStatus::Failed
                     } else if no_bracket {
@@ -866,8 +811,7 @@ mod tests {
         assert_eq!(s.num_ground_reflections, s.hops - 1);
     }
 
-    /// Absorption must be genuinely non-zero: the collision wiring is real,
-    /// not the ZeroCollisions path.
+    /// Absorption must be non-zero, i.e. the collision model is wired in.
     #[test]
     fn absorption_is_nonzero_with_real_collisions() {
         let out = run(&Inputs::default());
@@ -883,12 +827,9 @@ mod tests {
         );
     }
 
-    /// Regression guard for the "absorption ~ 0 at the terminator" bug. Past
-    /// the engine's 85 deg plane-parallel limit the D region used to be omitted
-    /// entirely, collapsing absorption to the negligible F2-only floor
-    /// (~1e-3 dB). With the Chapman grazing layer the D region is still present
-    /// and producing a few degrees past 85 deg, so both the sampled density and
-    /// the solved absorption stay meaningfully non-zero.
+    /// Past the engine's 85 deg plane-parallel limit, the Chapman grazing layer
+    /// keeps the D region producing, so both the sampled density and the solved
+    /// absorption stay well above the F2-only floor (~1e-3 dB).
     #[test]
     fn terminator_d_region_is_not_cut() {
         use skipzone::density::ElectronDensity;
@@ -896,13 +837,8 @@ mod tests {
         use skipzone::units::{Meters, Radians};
 
         // Denver -> London in January, walked in UTC to a midpoint zenith angle
-        // just past the old 85 deg cliff.
-        // The frequency is searched alongside the hour rather than fixed. The
-        // claim under test is about the D REGION at the terminator, and it needs
-        // a path to price; which band closes at a given terminator geometry is a
-        // property of whatever foF2 model is in force and is not what this test
-        // is asserting. Fixing the band would make this test fail whenever the
-        // F2 layer moved, for a reason that has nothing to do with the D region.
+        // just past 85 deg. The frequency is searched alongside the hour so the
+        // test does not depend on which band the foF2 model lets close.
         let mut chosen: Option<(Inputs, scenario::Assumptions)> = None;
         let mut utc = 17.5_f64;
         'search: while utc <= 20.0 {
@@ -929,8 +865,7 @@ mod tests {
         assert!(a.solar.is_day(), "sun is still up just past 85 deg");
 
         // The D region must still be producing at the midpoint: sample the
-        // density model actually fed to the tracer at its realised peak height.
-        // Under the old omit-past-85 logic this would be the F2 tail alone (~0).
+        // density model fed to the tracer at its realised peak height.
         let models = scenario::build_models(&inputs, &a).expect("models build");
         let mid = SphericalPoint::new(
             Meters::new(scenario::EARTH_RADIUS_M + a.d_region_peak_alt_km * 1e3),
@@ -944,8 +879,7 @@ mod tests {
             a.solar.zenith_angle_deg
         );
 
-        // And the solved path must absorb meaningfully, not collapse to the
-        // ~1e-3 dB F2-only floor that was the reported bug.
+        // The solved path must absorb well above the ~1e-3 dB F2-only floor.
         let out = solve(&inputs, &a, &models);
         let s = out
             .solutions
@@ -961,7 +895,7 @@ mod tests {
     /// The default scenario sits close to the terminator: mid-January,
     /// 18:00 UTC, midpoint near 59 N gives chi ~ 84 deg, i.e. the sun barely
     /// 6 deg above the horizon. It is (just) daylight, so a weak D region is
-    /// active. Pinned because it is a sensitive, easily-broken configuration.
+    /// active. Checked because the configuration is easy to break.
     #[test]
     fn default_scenario_is_marginal_daylight() {
         let a = scenario::resolve(&Inputs::default());
@@ -981,9 +915,8 @@ mod tests {
     }
 
     /// Well above the MUF nothing connects. With Earth curvature, a 45 MHz
-    /// signal under a 5 MHz layer does not reflect at ANY elevation, so there
-    /// is no "closest landing" to report - the sweep must then say so in plain
-    /// language rather than leaving the operator with an empty panel.
+    /// signal under a 5 MHz layer does not reflect at any elevation, so there
+    /// is no closest landing to report and the sweep must say so.
     #[test]
     fn above_muf_explains_itself_rather_than_going_silent() {
         let inputs = Inputs {
@@ -1011,9 +944,8 @@ mod tests {
         }
     }
 
-    /// A frequency that genuinely can reflect but misses the target range must
-    /// still produce ranked near-misses, which is the other half of the
-    /// requirement.
+    /// A frequency that reflects but misses the target range must still
+    /// produce ranked near-misses.
     #[test]
     fn reachable_but_wrong_range_reports_ranked_near_misses() {
         let inputs = Inputs {
@@ -1027,14 +959,8 @@ mod tests {
             ..Inputs::default()
         };
         let out = run(&inputs);
-        // The near-miss sweep runs only when NEITHER stack answered - see
-        // `solve`, where it is gated on `solutions.is_empty() &&
-        // es_solutions.is_empty()`. An Es-supported path is still an answer, so
-        // requiring an explanation when Es answered would be asking the sweep to
-        // explain a silence that is not there. This precondition used to be
-        // written against the deterministic stack alone and was never exercised,
-        // because under the previous foF2 model this geometry always produced a
-        // deterministic solution; the CCIR maps put it on Es instead.
+        // The near-miss sweep runs only when neither stack answered (see the
+        // `solutions.is_empty() && es_solutions.is_empty()` gate in `solve`).
         if out.solutions.is_empty() && out.es_solutions.is_empty() {
             assert!(
                 !out.near_misses.is_empty() || !out.sweep_notes.is_empty(),
@@ -1048,19 +974,13 @@ mod tests {
 
     /// Daytime absorption reference case.
     /// Denver -> New York at 10.1 MHz, 21 June, 19:00 UTC (local mid-afternoon at
-    /// the path midpoint). Compares the
-    /// old wiring (F2 layer only, hand-picked collision numbers) against the new
-    /// one (D region driven by solar zenith angle, neutral-atmosphere nu).
+    /// the path midpoint). Compares an F2-only stack with hand-picked collision
+    /// numbers against the full stack (D region driven by solar zenith angle,
+    /// neutral-atmosphere nu).
     ///
-    /// This used to run at 7.1 MHz. It cannot any more, and the reason is a
-    /// result rather than an inconvenience: with a real E layer in the stack, a
-    /// midday foE of ~3.5 MHz screens 7.1 MHz off F2 at every elevation below
-    /// about 28 deg, so the low-angle multi-hop F2 geometry this path needs no
-    /// longer exists. That is textbook E-layer screening and it is why daytime
-    /// 40 m long-haul is poor; `daytime_e_layer_screens_the_low_bands` pins it
-    /// directly. This test moves to a shorter daylight path at 10.1 MHz, above
-    /// the screening frequency, which still exercises exactly what it is about:
-    /// the D region and absorption.
+    /// 10.1 MHz rather than 7.1 MHz because a midday foE of ~3.5 MHz screens
+    /// 7.1 MHz off F2 below about 28 deg (see
+    /// `daytime_e_layer_screens_the_low_bands`).
     #[test]
     fn daytime_absorption_before_after() {
         use skipzone::collision::ExponentialCollisions;
@@ -1071,7 +991,7 @@ mod tests {
         // Denver -> New York, 2620 km, 21 June 19:00 UTC: local mid-afternoon
         // at the path midpoint, so the D region is at full strength. 10.1 MHz
         // is above the E-screening frequency for this geometry, so the F2 path
-        // this test is about actually exists.
+        // exists.
         let inputs = Inputs {
             freq_mhz: 10.1,
             month: 6,
@@ -1087,8 +1007,8 @@ mod tests {
         let after_models = scenario::build_models(&inputs, &a).expect("after models");
         let after = solve(&inputs, &a, &after_models);
 
-        // The previous behaviour: F2 alone, no D region, no E region, and the
-        // old hand-picked collision profile (1e5 /s at 100 km, H = 30 km).
+        // Reference: F2 alone, no D or E region, and a hand-picked collision
+        // profile (1e5 /s at 100 km, H = 30 km).
         let field = || {
             Some(
                 Igrf::from_embedded()
@@ -1118,9 +1038,8 @@ mod tests {
         };
         let before = solve(&inputs, &a, &before_models);
 
-        // Isolation run: F2 only, but with the NEW neutral-atmosphere nu.
-        // Whatever absorption survives here is F2/deviative; the rest of the
-        // AFTER figure must be genuine D-region absorption.
+        // Isolation run: F2 only, with the neutral-atmosphere nu. Absorption
+        // here is F2/deviative; the rest of the full-stack figure is D region.
         let isolate_models = scenario::Models {
             density: MultiLayer::new(vec![Box::new(f2_layer())]),
             density_with_es: None,
@@ -1144,10 +1063,8 @@ mod tests {
         let night_models = scenario::build_models(&night_inputs, &night_a).expect("night models");
         let night = solve(&night_inputs, &night_a, &night_models);
 
-        // The STRONGEST path, not the shortest-group-path one. The AFTER stack
-        // contains an E layer and so may list an E-mode solution first; the
-        // BEFORE and ISOLATE stacks are F2-only. Comparing the mode a listener
-        // would actually hear keeps the comparison like for like.
+        // Use the strongest path: the full stack may list an E-mode solution
+        // first, while the other two stacks are F2-only.
         let first_abs = |o: &SolveOutcome| best_by_snr(o).map_or(0.0, |s| s.total_absorption_db);
         let (a_before, a_after) = (first_abs(&before), first_abs(&after));
         let (a_isolate, a_night) = (first_abs(&isolate), first_abs(&night));
@@ -1160,11 +1077,9 @@ mod tests {
         assert!(a.d_region_active, "21 June local noon must be daylight");
         assert!(!after.solutions.is_empty(), "errors: {:?}", after.errors);
 
-        // With a physically-shaped nu (falling off with neutral density), the
-        // F2 region contributes essentially nothing. The old figure was an
-        // artifact of a collision profile broad enough to put collisions at
-        // F2 heights - it happened to land near the right magnitude for
-        // entirely the wrong reason.
+        // With nu falling off with neutral density, the F2 region contributes
+        // almost nothing. The broad hand-picked profile only got a plausible
+        // magnitude by putting collisions at F2 heights.
         assert!(
             a_isolate < 0.05,
             "F2-only with neutral nu should be negligible, got {a_isolate} dB"
@@ -1174,8 +1089,8 @@ mod tests {
             "absorption should now be dominated by the D region: {a_after} vs {a_isolate}"
         );
 
-        // The whole point of item 1: absorption must respond to solar zenith
-        // angle. Night must be far quieter than local noon.
+        // Absorption must respond to solar zenith angle: night must be far
+        // quieter than local noon.
         assert!(
             !night_a.d_region_active,
             "local midnight should be past the Chapman limit"
@@ -1186,14 +1101,10 @@ mod tests {
         );
     }
 
-    /// E-layer screening, pinned directly rather than left as a side effect.
-    ///
-    /// A daytime E layer of foE ~ 3.5 MHz reflects 7 MHz at every incidence
-    /// beyond about 62 deg, so the shallow launch angles a long multi-hop F2
-    /// path needs never reach F2 at all. The consequence is that the same
-    /// daytime path closes on F2 at 10.1 MHz and does not at 7.1 MHz. That
-    /// asymmetry is the observable, and it is a physical result of adding the E
-    /// layer, not a regression.
+    /// E-layer screening. A daytime E layer of foE ~ 3.5 MHz reflects 7 MHz at
+    /// every incidence beyond about 62 deg, so the shallow launches a long
+    /// multi-hop F2 path needs never reach F2. The same daytime path closes on
+    /// F2 at 10.1 MHz but not at 7.1 MHz.
     #[test]
     fn daytime_e_layer_screens_the_low_bands() {
         // Denver -> New York in local mid-afternoon: short enough that both
@@ -1232,19 +1143,12 @@ mod tests {
             "10.1 MHz should still reach F2"
         );
 
-        // Screening is a statement about LAUNCH ANGLE, and that is what this
-        // asserts. foE sec(i) at the E layer lets 10.1 MHz through at a shallow
-        // incidence but not 7.1 MHz, so the low band can only reach F2 by going
-        // over the E layer steeply - and a steep multi-hop path is absorbed to
-        // death on the way. The observable is therefore: no shallow F2 path at
-        // 7.1 MHz, a shallow one at 10.1 MHz, and an F2 SNR at 7.1 MHz that is
-        // nowhere near usable.
-        //
-        // This used to assert `LayerStatus::NoBracket` at 7.1 MHz instead. That
-        // was pinning a NUMERICAL failure as a physical result: the steep F2
-        // paths were always there, and the single-hop bisection simply failed
-        // to converge onto them, which is exactly the confusion `LayerStatus`
-        // exists to prevent.
+        // Screening is about launch angle. foE sec(i) lets 10.1 MHz through at
+        // a shallow incidence but not 7.1 MHz, so the low band reaches F2 only
+        // steeply, and a steep multi-hop path is heavily absorbed. Expect no
+        // shallow F2 path at 7.1 MHz, a shallow one at 10.1 MHz, and an
+        // unusable F2 SNR at 7.1 MHz. Steep F2 paths at 7.1 MHz do exist, so
+        // `LayerStatus::NoBracket` would be the wrong assertion.
         let shallowest = |o: &SolveOutcome| {
             o.solutions
                 .iter()
@@ -1284,7 +1188,7 @@ mod tests {
     /// Auto-detect must classify each bounce from where it actually lands, and
     /// must leave every other manual selection alone. Denver -> London crosses
     /// North America and then the Atlantic, so a multi-hop path should pick up
-    /// both land and sea bounces - the whole point of doing this per hop.
+    /// both land and sea bounces.
     #[test]
     fn auto_detect_classifies_each_bounce_from_its_own_position() {
         use crate::scenario::GroundType;
@@ -1334,15 +1238,14 @@ mod tests {
         );
     }
 
-    /// A manual selection is unchanged by any of this: one surface, applied to
-    /// every bounce, exactly as before.
+    /// A manual selection applies one surface to every bounce.
     #[test]
     fn manual_ground_still_applies_one_surface_to_the_whole_path() {
         use crate::scenario::GroundType;
 
         let inputs = Inputs {
             ground_type: GroundType::DryGround,
-            // Deliberately different, and must be ignored entirely.
+            // Different on purpose; it must be ignored.
             ground_land_fallback: GroundType::WetGround,
             ..Inputs::default()
         };
@@ -1360,7 +1263,7 @@ mod tests {
 
     /// The per-layer report is complete, consistent with the solutions it
     /// describes, and keeps the probabilistic layer separate from the
-    /// deterministic ones. This is the structural contract of item 5.
+    /// deterministic ones.
     #[test]
     fn mode_reports_cover_every_layer_and_agree_with_the_solutions() {
         for inputs in [
@@ -1392,7 +1295,7 @@ mod tests {
                 assert_eq!(r.layer, want);
                 assert_eq!(r.threshold_db, inputs.snr_threshold_db);
                 // Deterministic layers are certain; Es carries a probability
-                // and never silently claims to be certain.
+                // and never claims to be certain.
                 if want.is_deterministic() {
                     assert_eq!(r.probability, 1.0, "{} must be deterministic", want.label());
                 } else {
@@ -1434,11 +1337,9 @@ mod tests {
 
             // `best_by_snr` is deterministic-only.
             assert!(best_by_snr(&out).is_none_or(|s| s.layer != LayerMode::Es));
-            // `best_with_es_fallback` is ORDINAL, not a joint SNR maximum: a
-            // deterministic path outranks an Es one however strong the Es one
-            // looks, because an Es reflection at 100 km beats an F2 path on raw
-            // SNR by construction rather than on the merits. Es appears here
-            // only when nothing deterministic closed.
+            // `best_with_es_fallback` is ordinal: a deterministic path outranks
+            // an Es one however strong, and Es appears only when nothing
+            // deterministic closed.
             match (best_by_snr(&out), best_with_es_fallback(&out)) {
                 (Some(det), Some(any)) => {
                     assert_eq!(
@@ -1463,10 +1364,8 @@ mod tests {
         scenario::resolve(inputs).sporadic_e.probability
     }
 
-    /// The distinction that item 5 exists for, on the case that motivated it:
-    /// a 17 m signal at 400 km. F2 has no solution at that geometry, but Es
-    /// does - so the answer is emphatically NOT "nothing arrives at all", and
-    /// the output must be able to say both halves of that at once.
+    /// A 17 m signal at 400 km: F2 has no solution at that geometry but Es
+    /// does, and the output must report both.
     #[test]
     fn es_supported_path_is_reported_separately_from_a_dead_one() {
         // 2026-07-24, 03:22 UTC, 18.1 MHz, ~400 km: the WSPR geometry.
@@ -1509,8 +1408,7 @@ mod tests {
             es.note
         );
 
-        // The reflection really happened in the sheet, not somewhere else that
-        // got mislabelled.
+        // The reflection happened in the sheet.
         let (lo, hi) = scenario::resolve(&inputs).sporadic_e.attribution_band_km();
         for s in &out.es_solutions {
             let apex = s.hop_details[0].apex_alt_km;
@@ -1520,9 +1418,7 @@ mod tests {
             );
         }
 
-        // And the near-miss sweep did NOT run: something was found, so there is
-        // no "closest landing" story to tell. This is the bug the old code had -
-        // it would have painted this cell as a dead zone.
+        // The near-miss sweep did not run, since a path was found.
         assert!(out.near_misses.is_empty());
     }
 

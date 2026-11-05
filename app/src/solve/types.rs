@@ -14,9 +14,8 @@ pub fn mode_label(m: Mode) -> &'static str {
     }
 }
 
-/// Which layer a path reflected from. Attributed from the apex altitude the
-/// ENGINE reports, not assumed from the launch angle: a solution is filed under
-/// the layer it actually turned in.
+/// Which layer a path reflected from, attributed from the apex altitude the
+/// engine reports rather than from the launch angle.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LayerMode {
     F2,
@@ -47,10 +46,8 @@ impl LayerMode {
     }
 }
 
-/// Why a layer produced no solution. Distinguishing these is the point of
-/// item 5: `NoBracket` used to be swallowed and rendered identically to a
-/// genuine "nothing arrives", so a map cell inside the F2 skip zone looked the
-/// same as one beyond every possible mode.
+/// Why a layer produced no solution, so a map cell inside the F2 skip zone
+/// looks different from one beyond every possible mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LayerStatus {
     /// At least one geometry closed through this layer.
@@ -62,9 +59,8 @@ pub enum LayerStatus {
     /// Rays reflect from nothing here at any elevation - the frequency is above
     /// this layer's maximum usable frequency for every geometry.
     Penetrates,
-    /// The tracer failed on this stack. A NUMERICAL outcome, never to be shown
-    /// as a physical one: it means the model could not answer, not that nothing
-    /// arrives.
+    /// The tracer failed on this stack: a numerical outcome meaning the model
+    /// could not answer, not that nothing arrives.
     Failed,
     /// Not attempted. For Es that means "disabled, or too unlikely to be worth
     /// the second solve"; the probability says which.
@@ -88,8 +84,8 @@ impl LayerStatus {
 ///
 /// The SNR here is a continuous number and is always reported, whether or not
 /// it clears the threshold; [`ModeReport::state`] applies the threshold only
-/// for display. That separation is deliberate - the threshold is an operating
-/// preference, not a property of the ionosphere.
+/// for display, since the threshold is an operating preference rather than a
+/// property of the ionosphere.
 #[derive(Clone)]
 pub struct ModeReport {
     pub layer: LayerMode,
@@ -108,7 +104,7 @@ pub struct ModeReport {
 }
 
 impl ModeReport {
-    /// The threshold applied, FOR DISPLAY ONLY.
+    /// The threshold applied, for display only.
     #[must_use]
     pub fn state(&self) -> PathState {
         if self.status != LayerStatus::Solved {
@@ -192,8 +188,8 @@ pub struct Solution {
     /// Number of intermediate ground reflections (hops - 1 for a landed path).
     pub num_ground_reflections: u32,
     /// Basic transmission loss = free-space + absorption + ground reflection, dB.
-    /// PROPAGATION only: deliberately excludes antenna gains (carried separately
-    /// below) and any statistical excess-system-loss term.
+    /// Propagation only: excludes antenna gains (carried separately below) and
+    /// any statistical excess-system-loss term.
     pub total_system_loss_db: f64,
     /// Transmitting antenna gain (dBi) at this solution's launch elevation.
     pub tx_gain_dbi: f64,
@@ -209,7 +205,7 @@ pub struct Solution {
     /// off) the propagation loss.
     pub total_gain_db: f64,
     /// Received power, noise floor and SNR for this path: the judgment layer
-    /// that decides whether a closing geometry is actually audible. Built from
+    /// that decides whether a closing geometry is audible. Built from
     /// `total_system_loss_db - total_gain_db` plus the transmitter power and the
     /// noise floor; it changes nothing about the loss terms above.
     pub link: LinkBudget,
@@ -238,8 +234,7 @@ pub struct NearMiss {
 }
 
 pub struct SolveOutcome {
-    /// Paths through the DETERMINISTIC stack (F2 and E). These are paths that
-    /// are simply there when the model says they are.
+    /// Paths through the deterministic stack (F2 and E).
     pub solutions: Vec<Solution>,
     /// Paths that need a sporadic-E sheet. Kept apart from `solutions` rather
     /// than merged, so that no caller can accidentally report a 15 %-likely
@@ -247,8 +242,8 @@ pub struct SolveOutcome {
     /// carries its own probability.
     pub es_solutions: Vec<Solution>,
     /// One entry per layer, in `LayerMode::ALL` order: what each layer alone
-    /// had to say, with its own SNR and its own reason for failing. This is
-    /// what lets the UI distinguish "no F2 solution" from "no path at all".
+    /// had to say, with its own SNR and reason for failing, so the UI can tell
+    /// "no F2 solution" from "no path at all".
     pub mode_reports: Vec<ModeReport>,
     /// The noise floor every solution above was judged against. Present even
     /// when nothing was found, so the panel can still show what the receiver

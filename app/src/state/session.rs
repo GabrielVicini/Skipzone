@@ -136,13 +136,13 @@ impl SweepResults {
 #[derive(Default)]
 pub struct CoverageResults {
     pub cells: Vec<CoverageCell>,
-    /// The last run ended early because CANCEL was pressed.
+    /// The last run ended early because Cancel was pressed.
     pub cancelled: bool,
 }
 
 impl CoverageResults {
-    /// Is there anything on the map to clear? This is what puts the RESET
-    /// button on screen - true after a finished run and after a cancelled one.
+    /// Whether there is anything on the map to clear, which shows the Reset
+    /// button: true after a finished or cancelled run.
     #[must_use]
     pub fn has_tiles(&self) -> bool {
         !self.cells.is_empty()
@@ -233,7 +233,7 @@ impl Session {
     }
 
     /// Kick off the area coverage grid. Any tiles from a previous run are
-    /// cleared first: a new grid is a new answer, not an overlay on the old one.
+    /// cleared first.
     pub fn run_coverage(&mut self) {
         self.error = None;
         self.coverage.clear();

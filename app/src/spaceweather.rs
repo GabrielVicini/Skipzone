@@ -1,25 +1,20 @@
 //! Observed solar indices, fetched rather than assumed.
 //!
-//! The ionospheric model is driven by a sunspot number, and until now every
-//! headless run took one from the command line or fell back to a default. For a
-//! validation harness that is a hole: an SSN guessed 40 points wrong moves foF2
-//! enough to change which paths close, so a scoring run against real spots would
-//! be measuring the guess as much as the model. This module gets the real
-//! number for the day being scored, and records WHERE it came from so the report
-//! can say so.
+//! An SSN 40 points wrong moves foF2 enough to change which paths close, so a
+//! scoring run against real spots needs the observed number for the day being
+//! scored. This module fetches it and records its source for the report.
 //!
 //! Two sources, both official and both plain text:
 //!
-//! * **SIDC/SILSO EISN** - the estimated international sunspot number, issued
+//! * SIDC/SILSO EISN: the estimated international sunspot number, issued
 //!   daily. This is the right source for a date in the last few weeks, which is
 //!   what a live run scores. It is provisional: the value for a given day is
 //!   revised as more stations report, and the file says how many did.
-//! * **NOAA SWPC observed solar cycle indices** - monthly means, definitive but
+//! * NOAA SWPC observed solar cycle indices: monthly means, definitive but
 //!   only published after the month ends. The right source for anything older.
 //!
-//! Neither is interpolated into a model or a table of anything: the number is
-//! read for the date asked about, and if it cannot be had, that is reported
-//! instead of being papered over with a default.
+//! The number is read for the date asked about, with no interpolation; if it
+//! cannot be had, that is reported instead of falling back to a default.
 
 use std::fmt;
 
@@ -93,8 +88,7 @@ impl fmt::Display for Ssn {
 /// value carries its source.
 ///
 /// # Errors
-/// Both sources failing is an error rather than a silent default. A validation
-/// run against the wrong SSN is worse than one that refuses to start.
+/// Both sources failing is an error rather than a silent default.
 pub fn ssn_for(year: i32, month: u32, day: u32) -> Result<Ssn, NetError> {
     let daily = fetch_eisn().and_then(|rows| {
         pick_daily(&rows, year, month, day).ok_or_else(|| {
@@ -195,11 +189,10 @@ fn fetch_monthly(year: i32, month: u32) -> Result<Ssn, NetError> {
 
 /// Pull one month's `ssn` out of the NOAA indices JSON.
 ///
-/// Hand-scanned rather than deserialised: the document is a flat array of flat
-/// objects with two fields this needs, and a JSON dependency for that would
-/// weigh more than the twenty lines it saves. The scan is deliberately literal -
-/// it looks for the exact `"time-tag": "<tag>"` record and then the next `"ssn"`
-/// inside it - and returns `None` rather than a guess if the shape changes.
+/// Hand-scanned rather than deserialised, since a JSON dependency would weigh
+/// more than the twenty lines it saves for a flat array of flat objects. It
+/// looks for the exact `"time-tag": "<tag>"` record and then the next `"ssn"`
+/// inside it, and returns `None` if the shape changes.
 fn parse_monthly(body: &str, tag: &str) -> Option<f64> {
     let needle = format!("\"time-tag\":\"{tag}\"");
     let compact: String = body.chars().filter(|c| !c.is_whitespace()).collect();

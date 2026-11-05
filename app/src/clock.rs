@@ -13,9 +13,9 @@
 //! `i64` days and are pinned against known dates by the tests below.
 //!
 //! Nothing here feeds the physics: [`crate::solar`] derives declination from the
-//! day of year alone and deliberately ignores leap years, which is far below the
-//! accuracy of the ionospheric climatology it drives. The year exists so the
-//! operator sees a real date.
+//! day of year alone and ignores leap years, an effect far below the accuracy
+//! of the ionospheric climatology. The year exists so the operator sees a real
+//! date.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

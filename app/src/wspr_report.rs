@@ -1,19 +1,16 @@
 //! Breaking a validation run down into the places the model is weakest.
 //!
-//! [`crate::wspr::Summary`] answers "how far off is the model overall". That is
-//! the wrong grain to improve anything with: a median error of +6 dB could be a
-//! uniform +6 dB everywhere, or +1 dB on most paths and +25 dB on one band. This
-//! module cuts the same results along the axes the physics would fail along, so
-//! the report can point at a specific band, distance or illumination rather than
-//! at the model in general.
+//! [`crate::wspr::Summary`] gives the overall error, but a median of +6 dB
+//! could be +6 dB everywhere or +25 dB on one band. This module cuts the
+//! results by band, distance and illumination so the report can point at a
+//! specific weakness.
 //!
-//! Every cut reports its own sample size, and a cut with too few spots to mean
-//! anything is shown with its count rather than being hidden or padded. The
-//! caller decides what to trust; the harness does not decide for it.
+//! Every cut reports its sample size, and small cuts are shown with their
+//! count rather than hidden.
 //!
-//! The one-sided biases in [`crate::wspr`] apply to every number here: only
-//! successful decodes are published, so a "miss" is a genuine model failure but
-//! a "hit" is not evidence against false positives.
+//! The one-sided biases in [`crate::wspr`] apply here: only successful decodes
+//! are published, so a miss is a model failure but a hit says nothing about
+//! false positives.
 
 use crate::wspr::SpotResult;
 
@@ -127,11 +124,9 @@ fn group(results: &[SpotResult], key: impl Fn(&SpotResult) -> String) -> Vec<Cut
 /// The amateur band a frequency sits in, by name. Anything outside the
 /// allocations is labelled by its megahertz rather than forced into a band.
 ///
-/// The VHF bands are here even though the model has no mechanism above HF (see
-/// `wsprlive::HF_TOP_MHZ`), because a run that deliberately asks for them still
-/// has to group them: WSPR uses two dial frequencies on 6 m, and without a band
-/// name they split into a "50.294 MHz" row and a "50.295 MHz" row that are the
-/// same band.
+/// The VHF bands are included although the model has no mechanism above HF
+/// (see `wsprlive::HF_TOP_MHZ`), so a run that asks for them can still group
+/// them: WSPR uses two dial frequencies on 6 m.
 #[must_use]
 pub fn band_label(mhz: f64) -> String {
     const BANDS: [(f64, f64, &str); 15] = [
@@ -186,18 +181,13 @@ fn snr_bucket(db: f64) -> &'static str {
 
 /// How much of the headline bias is the harness's own assumptions.
 ///
-/// The overall median error is not, on its own, a statement about the physics.
-/// Two inputs to every scored spot are chosen rather than measured, and both are
-/// chosen optimistically:
+/// Two inputs to every scored spot are chosen, optimistically, rather than
+/// measured: the antenna at each end and the receiver's noise environment.
 ///
-/// * the ANTENNA at each end, which the spot does not carry, and
-/// * the receiver's NOISE ENVIRONMENT, which the spot does not carry either.
-///
-/// Both enter the modelled SNR as a straight dB offset - they change the link
-/// budget, not the ray path - so their contribution can be quantified exactly
-/// rather than argued about. That is what this does: it reports the gain the
-/// model handed itself, and what the bias would have been under each of the
-/// other noise environments. Whatever is left after those is the physics.
+/// Both enter the modelled SNR as a plain dB offset (they change the link
+/// budget, not the ray path), so their contribution can be quantified exactly.
+/// This reports the gain the model assumed and the bias under each other noise
+/// environment; what remains is the physics.
 pub struct BiasBudget {
     /// Median combined antenna gain credited, dB over both ends.
     pub median_assumed_gain_db: f64,
@@ -213,10 +203,8 @@ pub struct BiasBudget {
 /// all, whatever the ionosphere is doing.
 ///
 /// A single F2 hop tops out near 4000 km, so a 17 000 km path needs at least
-/// five of them. Scored at `max_hops = 4` such a spot CANNOT close, and
-/// counting it as a physics failure alongside a 700 km path the model genuinely
-/// could not explain buries the one real signal in the other. This separates
-/// them.
+/// five of them. At `max_hops = 4` such a spot cannot close, so it is counted
+/// separately from physics failures.
 #[must_use]
 pub fn needs_more_hops_than(km: f64, max_hops: u32) -> bool {
     const MAX_F2_HOP_KM: f64 = 4000.0;
@@ -227,10 +215,9 @@ pub fn needs_more_hops_than(km: f64, max_hops: u32) -> bool {
 
 /// Spots the model found nothing at all for, worst first by measured SNR.
 ///
-/// These are the sharpest failures in the run and the most useful thing in the
-/// report: a spot is proof that the path was open, so "no path found" is
-/// unambiguously the model missing something. A strong spot the model cannot
-/// explain is a bigger problem than a marginal one.
+/// A spot proves the path was open, so "no path found" is the model missing
+/// something, and a strong spot it cannot explain matters more than a
+/// marginal one.
 #[must_use]
 pub fn worst_misses(results: &[SpotResult], n: usize) -> Vec<&SpotResult> {
     let mut misses: Vec<&SpotResult> = results.iter().filter(|r| !r.closed()).collect();
@@ -255,7 +242,7 @@ pub fn worst_errors(results: &[SpotResult], n: usize) -> Vec<&SpotResult> {
 
 /// Quantify how much of the bias the assumptions account for.
 ///
-/// `noise_shift` supplies, per spot, the noise floor that WOULD have applied
+/// `noise_shift` supplies, per spot, the noise floor that would have applied
 /// under each alternative environment. The SNR moves by exactly the negative of
 /// the floor's change, because nothing else in the link budget depends on it.
 #[must_use]

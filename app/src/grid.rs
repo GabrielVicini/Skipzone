@@ -14,9 +14,9 @@
 //! Longitude always steps twice as coarsely as latitude, which is what makes
 //! the cells roughly square in the middle latitudes. Encoding is therefore just
 //! a mixed-radix expansion of `(lon + 180) / 2` and `lat + 90` in degrees, and
-//! decoding is the same expansion run backwards to the CENTRE of the named
-//! cell - the convention every amateur-radio tool uses, and the only choice
-//! that makes `decode(encode(p))` sit within half a cell of `p`.
+//! decoding is the same expansion run backwards to the centre of the named
+//! cell, the usual amateur-radio convention, which keeps `decode(encode(p))`
+//! within half a cell of `p`.
 
 /// Longitude cell width in degrees for each pair, most significant first.
 const LON_STEPS: [f64; 4] = [20.0, 2.0, 2.0 / 24.0, 2.0 / 240.0];
@@ -100,7 +100,7 @@ pub fn encode(lat_deg: f64, lon_deg: f64, pairs: usize) -> String {
     out
 }
 
-/// Decode a 2-, 4-, 6- or 8-character locator to the CENTRE of its cell,
+/// Decode a 2-, 4-, 6- or 8-character locator to the centre of its cell,
 /// as `(latitude, longitude)` in degrees. Returns `None` if the string is not a
 /// valid locator.
 #[must_use]

@@ -26,10 +26,8 @@ pub fn free_space_loss_db(dist_km: f64, f_mhz: f64) -> f64 {
 /// after its ionospheric reflection, so we use the average power coefficient
 /// `(|R_h|^2 + |R_v|^2)/2`; the loss is `-10 log10` of it.
 ///
-/// The coefficients themselves come from [`fresnel_coefficient`], shared with
-/// the antenna models, which need the same two numbers for their image-theory
-/// ground reflection. One implementation, so the mid-path bounce and the ground
-/// under the antenna can never disagree.
+/// The coefficients come from [`fresnel_coefficient`], shared with the antenna
+/// models' image-theory ground reflection so the two always agree.
 #[must_use]
 pub fn ground_reflection_loss_db(grazing_rad: f64, f_hz: f64, eps_r: f64, sigma: f64) -> f64 {
     let r_h = fresnel_coefficient(grazing_rad, f_hz, eps_r, sigma, Polarization::Horizontal);

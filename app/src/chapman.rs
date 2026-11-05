@@ -1,26 +1,25 @@
 //! Horizontally varying Chapman layers for the app.
 //!
-//! This is the one place the GUI carries physics of its own. It provides one
-//! reusable layer type, [`SolarChapmanLayer`], that the D, E and F2 regions are
-//! all built from, plus the Chapman grazing-incidence function `Ch(X, chi)` the
-//! photochemical ones stand on. Full derivation, sign conventions, and checks:
-//! docs/derivations/chapman-grazing.md. The engine crate is untouched.
+//! The only physics the app carries itself: one layer type,
+//! [`SolarChapmanLayer`], that the D, E and F2 regions are built from, plus the
+//! Chapman grazing-incidence function `Ch(X, chi)` the photochemical ones use.
+//! Derivation, sign conventions and checks:
+//! docs/derivations/chapman-grazing.md.
 //!
-//! Two things vary horizontally, and they are deliberately separate knobs:
+//! Two things vary horizontally, as separate settings:
 //!
-//! * The **ionising-flux slant factor** ([`SlantFactor`]). For a layer in
-//!   photochemical equilibrium this is `Ch(X, chi)` at the LOCAL solar zenith
-//!   angle of each sampled point, which is why it belongs here and not in the
-//!   engine: it replaces `ChapmanLayer::with_zenith_angle` so that absorption
-//!   and E-layer ionisation fade smoothly through the terminator instead of
-//!   switching off at the engine's 85 deg plane-parallel limit
-//!   (`MAX_CHAPMAN_ZENITH_ANGLE`), and so a path crossing the terminator is
-//!   ionised only on its sunlit part.
-//! * The **overhead-sun peak density** ([`PeakDensitySource`]), queried at each
-//!   sampled point's horizontal position. This is what lets the F2 layer follow
-//!   a foF2 map instead of being one scalar for the whole domain.
+//! * The ionising-flux slant factor ([`SlantFactor`]). For a layer in
+//!   photochemical equilibrium this is `Ch(X, chi)` at each sampled point's
+//!   local solar zenith angle. It replaces `ChapmanLayer::with_zenith_angle`
+//!   so absorption and E-layer ionisation fade smoothly through the terminator
+//!   instead of stopping at the engine's 85 deg plane-parallel limit
+//!   (`MAX_CHAPMAN_ZENITH_ANGLE`), and only the sunlit part of a path is
+//!   ionised.
+//! * The overhead-sun peak density ([`PeakDensitySource`]), queried at each
+//!   sampled point's horizontal position, so the F2 layer can follow a foF2
+//!   map.
 //!
-//! Which of the two a layer uses is a physics decision, not a style one:
+//! Which of the two a layer uses follows from its physics:
 //!
 //! | layer | slant factor | peak-density source            |
 //! |-------|--------------|--------------------------------|
@@ -28,14 +27,12 @@
 //! | E     | `Solar`      | constant overhead anchor       |
 //! | F2    | `Overhead`   | foF2 climatology (varies)      |
 //!
-//! D and E really are close to alpha-Chapman photochemical equilibrium, so
-//! their day/night behaviour is *derived* from `Ch(X, chi)`. The F2 layer is
-//! not: it is transport-dominated, which is exactly why it survives the night
-//! and why the winter anomaly exists, and why every operational prediction
-//! (CCIR, URSI, IRI) takes foF2 from an empirical map rather than a zenith-angle
-//! law. Feeding F2 a map AND a zenith law would double-count the diurnal
-//! variation, so F2 uses [`SlantFactor::Overhead`] and gets all of its
-//! horizontal structure from the map. See [`crate::fof2`].
+//! D and E are close to alpha-Chapman photochemical equilibrium, so their
+//! day/night behaviour is derived from `Ch(X, chi)`. F2 is transport-dominated
+//! (it survives the night and shows the winter anomaly), so operational
+//! predictions (CCIR, URSI, IRI) take foF2 from an empirical map. A map plus a
+//! zenith law would count the diurnal variation twice, so F2 uses
+//! [`SlantFactor::Overhead`]. See [`crate::fof2`].
 
 use skipzone::density::{DensitySample, ElectronDensity};
 use skipzone::geo::SphericalPoint;
@@ -46,9 +43,7 @@ const TWO_OVER_SQRT_PI: f64 = std::f64::consts::FRAC_2_SQRT_PI;
 /// sqrt(pi).
 const SQRT_PI: f64 = 1.772_453_850_905_516;
 
-/// Levels of the A&S 7.1.14 continued fraction evaluated in [`erfcx`]. Kept at
-/// the 48 the function was written with: the recurrence changed, the truncation
-/// depth did not.
+/// Levels of the A&S 7.1.14 continued fraction evaluated in [`erfcx`].
 const CF_DEPTH: u32 = 48;
 /// Rescale the continuants once one exceeds this, so the recurrence cannot
 /// overflow for a large argument.
@@ -88,15 +83,12 @@ pub fn erfcx(t: f64) -> f64 {
         //
         // Evaluated by the continuant (forward) recurrence
         //   A_k = t A_{k-1} + (k/2) A_{k-2},   B_k likewise,
-        // whose ratio A_n/B_n is the n-th convergent - the SAME continued
-        // fraction truncated at the SAME depth as the backward recurrence this
-        // replaces. The backward form spends one division per level, 48 of them
-        // in a single dependency chain at ~14 cycles each, and this runs twice
-        // per density sample (once for D, once for E) on the ray equations' hot
-        // path. The forward form is multiply-add only, with one division at the
-        // end. Every term is positive, so there is no cancellation and the
-        // accumulated error stays at the 1e-15 level; `erfcx_forward_recurrence_
-        // matches_backward` pins it against the backward form.
+        // whose ratio A_n/B_n is the n-th convergent. Unlike the backward
+        // recurrence (one division per level in a dependency chain), this is
+        // multiply-add with a single division at the end, which matters because
+        // it runs twice per density sample. Every term is positive, so there is
+        // no cancellation and the error stays near 1e-15;
+        // `erfcx_forward_recurrence_matches_backward` checks it.
         let (mut a_prev, mut a) = (1.0_f64, t);
         let (mut b_prev, mut b) = (0.0_f64, 1.0_f64);
         for k in 1..=CF_DEPTH {
@@ -169,12 +161,10 @@ pub fn chapman_grazing(x: f64, chi: f64) -> (f64, f64) {
 /// Overhead-sun peak density at one horizontal position, with the horizontal
 /// partials the ray equations need.
 ///
-/// The partials are with respect to the ENGINE's coordinates (colatitude
-/// theta, longitude phi, both radians), not latitude, so that a source can be
-/// dropped into [`SolarChapmanLayer`] without a sign convention being converted
-/// anywhere in between. A source whose value happens to be constant reports
-/// exactly `[0.0, 0.0]`, which is load-bearing: see
-/// [`SolarChapmanLayer::sample`].
+/// The partials are with respect to the engine's coordinates (colatitude
+/// theta, longitude phi, both radians), so no sign convention is converted on
+/// the way into [`SolarChapmanLayer`]. A constant source must report exactly
+/// `[0.0, 0.0]`; see [`SolarChapmanLayer::sample`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PeakSample {
     /// Overhead-sun peak electron density Nm, m^-3. Never negative.
@@ -196,21 +186,18 @@ impl PeakSample {
 
 /// Where a [`SolarChapmanLayer`] gets its overhead-sun peak density.
 ///
-/// This is the seam that replaces the old baked-in scalar: a layer asks the
-/// source at each sampled point's own position, so the layer varies across the
-/// domain instead of being one number for the whole Earth. Implementations must
-/// supply ANALYTIC partials - a density that varies without a matching gradient
-/// drives Hamiltonian drift, which the engine's `H = 0` diagnostic will report.
+/// A layer queries the source at each sampled point's position.
+/// Implementations must supply analytic partials: a density that varies
+/// without a matching gradient drives Hamiltonian drift, which the engine's
+/// `H = 0` diagnostic reports.
 pub trait PeakDensitySource: Send + Sync {
-    /// Sample at colatitude / longitude, radians. `lon` is NOT pre-wrapped:
+    /// Sample at colatitude / longitude, radians. `lon` is not pre-wrapped:
     /// implementations that index a table must wrap it themselves.
     fn peak(&self, colat: f64, lon: f64) -> PeakSample;
 }
 
-/// One overhead-sun peak density for the whole domain: the behaviour every
-/// layer had before [`PeakDensitySource`] existed. Kept as a first-class
-/// backend rather than a special case, because it is the honest fallback when
-/// no map is available.
+/// One overhead-sun peak density for the whole domain, the fallback when no
+/// map is available.
 pub struct ConstantPeak(pub f64);
 
 impl PeakDensitySource for ConstantPeak {
@@ -233,14 +220,14 @@ pub enum SlantFactor {
         /// Hour-angle offset so that `H = phi + hour_offset` (radians).
         hour_offset: f64,
     },
-    /// `Ch == 1` everywhere, i.e. the overhead-sun profile, with NO
+    /// `Ch == 1` everywhere, i.e. the overhead-sun profile, with no
     /// zenith-angle dependence of its own. For a layer whose peak density comes
     /// from an empirical map that already contains the diurnal variation, and
     /// which is not in photochemical equilibrium anyway (F2).
     ///
     /// With a constant peak source this reproduces the engine's
-    /// `ChapmanLayer::new` exactly, which
-    /// `tests::overhead_slant_is_bit_identical_to_engine_chapman` pins.
+    /// `ChapmanLayer::new` exactly, as
+    /// `tests::overhead_slant_is_bit_identical_to_engine_chapman` checks.
     Overhead,
 }
 
@@ -277,12 +264,12 @@ pub struct SolarChapmanLayer {
     big_x: f64,
     /// Residual peak density that survives the night, m^-3. See [`Self::floor_at`].
     night_floor_nm: f64,
-    /// How much of the photochemical peak RISE the profile actually takes.
+    /// How much of the photochemical peak rise the profile takes.
     /// See [`Self::with_rise_fraction`]. 1.0 is the textbook layer.
     rise_fraction: f64,
-    /// `rise_fraction == 1.0`, hoisted out of [`ElectronDensity::sample`]. The
-    /// full-rise arithmetic is kept as its own branch so it stays BIT-identical,
-    /// and this is a whole-solve constant, so the branch predicts perfectly.
+    /// `rise_fraction == 1.0`, precomputed for [`ElectronDensity::sample`]. The
+    /// full-rise arithmetic has its own branch so its results stay
+    /// bit-identical; the flag is constant per solve.
     full_rise: bool,
 }
 
@@ -310,15 +297,14 @@ impl SolarChapmanLayer {
 
     /// This layer with only `f` of the photochemical peak rise.
     ///
-    /// # The defect this exists to address
+    /// # Why
     ///
-    /// A textbook alpha-Chapman layer does two things as the sun sets. It thins,
-    /// to `Nm Ch^{-1/2}`, and the ENTIRE profile - wings included - translates
-    /// upward by `H ln Ch`. Both are consequences of photochemical equilibrium,
-    /// and for the ionisation peak both are right.
+    /// A textbook alpha-Chapman layer thins to `Nm Ch^{-1/2}` as the sun sets,
+    /// and the whole profile translates upward by `H ln Ch`. Both follow from
+    /// photochemical equilibrium and are right for the ionisation peak.
     ///
-    /// For ABSORPTION the translation is the dominant term and it is wrong. The
-    /// collision frequency falls on its own scale height `H_nu`, so a profile
+    /// For absorption the translation dominates and is wrong. The collision
+    /// frequency falls on its own scale height `H_nu`, so a profile
     /// that rises by `H ln Ch` loses a further `Ch^{-H/H_nu}` of the `Ne nu`
     /// product on top of the `Ch^{-1/2}` thinning. That makes the absorption
     /// zenith law
@@ -330,25 +316,21 @@ impl SolarChapmanLayer {
     /// which at `f = 1` and the shipping anchors is `n = 1.39`, against the
     /// `n ~ 0.75` that riometer and A1 absorption measurements report. No
     /// setting of the two scale heights inside their calibration bounds reaches
-    /// 0.75, and with `H_nu -> infinity` the law still floors at `n = 1/2`, so
-    /// the exponent is not something the existing anchors can chase. See
-    /// `bin/zenith_probe`, which measures every step of that.
+    /// 0.75, and with `H_nu -> infinity` the law still floors at `n = 1/2`.
+    /// `bin/zenith_probe` measures this.
     ///
-    /// # Why a fraction is the honest knob
+    /// # Why a fraction
     ///
     /// The translation assumes the whole layer is in photochemical equilibrium
-    /// with a recombination time short against the sun's motion. Near the peak
-    /// that holds. In the LOWER D region - 60 to 75 km, which is where `nu` is
-    /// largest and where the absorption kernel actually lives - it does not:
-    /// recombination there is fast enough that `Ne` tracks production at roughly
-    /// FIXED height, which is the `n = 1/2` law with no rise at all.
+    /// with a recombination time short against the sun's motion. That holds near
+    /// the peak but not in the lower D region (60 to 75 km), where `nu` is
+    /// largest and most absorption happens: there `Ne` tracks production at
+    /// roughly fixed height, the `n = 1/2` law with no rise.
     ///
-    /// So the real layer sits between the two limits, and `f` says where. It is
-    /// a shape parameter with two derived endpoints rather than a fudge factor:
+    /// The real layer sits between the two limits, and `f` says where:
     ///
-    /// * `f = 1` - the textbook layer, bit-identical to this type before the
-    ///   parameter existed, and the default from [`Self::new`];
-    /// * `f = 0` - amplitude law only, `Nm Ch^{-1/2}` at fixed height, `n = 1/2`.
+    /// * `f = 1`: the textbook layer, the default from [`Self::new`];
+    /// * `f = 0`: amplitude law only, `Nm Ch^{-1/2}` at fixed height, `n = 1/2`.
     ///
     /// # The algebra
     ///
@@ -359,13 +341,12 @@ impl SolarChapmanLayer {
     /// ```
     ///
     /// At `f = 1` the `Ch^{-1/2}` prefactor and the `+ln Ch` inside `u` cancel
-    /// exactly and this is the textbook form back again, which is why the
-    /// endpoint is not merely close but identical.
+    /// exactly, giving the textbook form.
     ///
     /// # Panics
-    /// If `f` is not finite and in `0..=1`. A rise fraction outside that has no
-    /// derived meaning, and silently clamping one would hide a caller's error in
-    /// the one parameter this model is most sensitive to.
+    /// If `f` is not finite and in `0..=1`. Values outside have no derived
+    /// meaning, and clamping would hide a caller's error in the parameter the
+    /// model is most sensitive to.
     #[must_use]
     pub fn with_rise_fraction(mut self, f: f64) -> Self {
         assert!(
@@ -379,26 +360,17 @@ impl SolarChapmanLayer {
 
     /// This layer with a residual peak density [m^-3] that survives the night.
     ///
-    /// # Why an alpha-Chapman layer needs this and does not derive it
+    /// # Why the floor is an input
     ///
     /// `Ch(X, chi)` diverges past the terminator, so a pure photochemical layer
-    /// goes to EXACTLY zero in darkness - not small, zero. For the F2 region that
-    /// is why the layer is not built this way at all (it is transport-dominated).
-    /// For the D region it is a real defect: the night D region does not vanish,
-    /// it settles onto a residual maintained by galactic cosmic rays and by
-    /// scattered Lyman-alpha on NO, neither of which switches off at sunset.
-    /// Photochemical equilibrium under a source the sun does not supply is simply
-    /// outside what a Chapman layer describes, so the floor is an INPUT to the
-    /// derivation rather than an output of it.
+    /// is exactly zero in darkness. The real night D region settles onto a
+    /// residual maintained by galactic cosmic rays and scattered Lyman-alpha on
+    /// NO, sources a Chapman layer does not describe.
     ///
-    /// The consequence of leaving it at zero is not subtle. Absorption is
-    /// proportional to `Ne nu`, so a layer that is exactly zero contributes
-    /// exactly no absorption, and the model then has NO absorption at all at
-    /// night on any band. Measured: 0.00 dB at 7 and 14 MHz on a midnight path.
-    /// Every night-time residual then has to be explained by something else, and
-    /// in a calibration the only other band-shaped terms are the atmospheric
-    /// noise anchors - which is exactly where this model's fit was driving them,
-    /// to their bounds, on the night-worked low bands.
+    /// Absorption is proportional to `Ne nu`, so without a floor there is no
+    /// night-time absorption on any band (0.00 dB at 7 and 14 MHz on a midnight
+    /// path), and a calibration pushes the atmospheric noise anchors to their
+    /// bounds to compensate.
     #[must_use]
     pub fn with_night_floor(mut self, night_floor_nm: f64) -> Self {
         self.night_floor_nm = night_floor_nm.max(0.0);
@@ -407,11 +379,10 @@ impl SolarChapmanLayer {
 
     /// The residual night layer at radius `r`: `(Ne, dNe/dr)`.
     ///
-    /// Same alpha-Chapman SHAPE as the sunlit layer and the same peak height -
-    /// the residual sits where the ionisation is, and the profile either side of
-    /// a peak is set by the neutral scale height, which does not care what made
-    /// the ions. Only the amplitude differs, and it carries no zenith dependence
-    /// because its source is not the sun.
+    /// Same alpha-Chapman shape and peak height as the sunlit layer, since the
+    /// profile either side of the peak is set by the neutral scale height. Only
+    /// the amplitude differs, with no zenith dependence because its source is
+    /// not the sun.
     fn floor_at(&self, r: f64) -> (f64, f64) {
         if self.night_floor_nm <= 0.0 {
             return (0.0, 0.0);
@@ -426,10 +397,8 @@ impl SolarChapmanLayer {
         (ne, ne * 0.5 * (emz - 1.0) / self.scale_height)
     }
 
-    /// The D-region layer as it has always been built: a constant overhead
-    /// anchor on the solar grazing branch. Kept as a named constructor so the
-    /// call site reads as the physics it is, and so the generalisation cannot
-    /// quietly change what the D region does.
+    /// The D-region layer: a constant overhead anchor on the solar grazing
+    /// branch.
     #[must_use]
     pub fn d_region(
         nm: f64,
@@ -491,8 +460,8 @@ impl SolarChapmanLayer {
 
     /// Realised peak altitude above `r_peak`, `f H ln Ch` (m). Display only.
     ///
-    /// Carries the rise fraction, so a layer built with `f < 1` reports the
-    /// height it actually peaks at rather than the textbook one.
+    /// Includes the rise fraction, so a layer built with `f < 1` reports its
+    /// own peak height.
     #[must_use]
     pub fn realised_peak_rise(&self, colat: f64, lon: f64) -> f64 {
         let (ch, _) = self.slant_at(self.zenith_angle(colat, lon));
@@ -505,8 +474,8 @@ impl SolarChapmanLayer {
 }
 
 impl SolarChapmanLayer {
-    /// The `rise_fraction < 1` branch of [`ElectronDensity::sample`], split out
-    /// so the default full-rise path keeps its original arithmetic untouched.
+    /// The `rise_fraction < 1` branch of [`ElectronDensity::sample`], kept
+    /// separate so the full-rise path keeps its own arithmetic.
     ///
     /// With `L = ln Ch` and `u = z - f L`:
     ///
@@ -533,7 +502,7 @@ impl SolarChapmanLayer {
         let u = z - self.rise_fraction * ln_ch;
         let emu = (-u).exp();
         let big_f = 0.5 * (1.0 - u - emu);
-        // Ch^{-1/2}: a sqrt rather than exp(-L/2), which is one instruction.
+        // Ch^{-1/2} as a sqrt rather than exp(-L/2).
         let thinning = 1.0 / ch.sqrt();
         if big_f < -700.0 || !thinning.is_finite() {
             let (ne, dne_dr) = self.floor_at(p.r.get());
@@ -620,12 +589,11 @@ impl ElectronDensity for SolarChapmanLayer {
 
         let peak = self.source.peak(theta, phi);
         let z = (p.r.get() - self.r_peak) / self.scale_height;
-        // `emz` and `f` below are the FULL-RISE quantities; the partial-rise
+        // `emz` and `f` below are the full-rise quantities; the partial-rise
         // branch substitutes u = z - rise_fraction ln Ch for z and carries a
-        // Ch^{-1/2} prefactor. At f = 1 the two are algebraically the same
-        // expression, so the full-rise arithmetic is kept verbatim rather than
-        // specialised out of the general one - that is what keeps the default
-        // layer bit-identical.
+        // Ch^{-1/2} prefactor. The two agree algebraically at f = 1, but the
+        // full-rise arithmetic is kept separate so the default layer stays
+        // bit-identical.
         if !self.full_rise {
             return self.sample_partial_rise(p, &peak, z, ch, dch, chi_partials);
         }
@@ -642,11 +610,10 @@ impl ElectronDensity for SolarChapmanLayer {
         }
         let ef = f.exp();
         let ne = peak.nm * ef;
-        // The floor is a LOWER BOUND on the ionisation, so it takes over wherever
-        // the sunlit layer has fallen below it - continuously, and on both sides
-        // of the terminator rather than only past it. Taking the larger of the
-        // two rather than summing them keeps a fully sunlit layer bit-identical
-        // to what it was before this existed.
+        // The floor is a lower bound on the ionisation and takes over wherever
+        // the sunlit layer falls below it, on both sides of the terminator.
+        // Taking the larger of the two rather than summing leaves a fully
+        // sunlit layer unchanged.
         let (floor_ne, floor_dr) = self.floor_at(p.r.get());
         if floor_ne > ne {
             return DensitySample {
@@ -668,10 +635,10 @@ impl ElectronDensity for SolarChapmanLayer {
                 (dne_dchi * dchi_dtheta, dne_dchi * dchi_dphi)
             }
         };
-        // Guarded rather than added unconditionally so that a constant source
-        // is BIT-IDENTICAL to the pre-generalisation layer: `x + 0.0` is not
-        // the identity on `-0.0`, and these gradients legitimately reach zero
-        // with either sign at the subsolar point and at the layer peak.
+        // Guarded rather than added unconditionally: `x + 0.0` is not the
+        // identity on `-0.0`, and these gradients reach zero with either sign at
+        // the subsolar point and the layer peak, so a constant source must skip
+        // the addition to stay bit-identical.
         if peak.d_nm[0] != 0.0 || peak.d_nm[1] != 0.0 {
             dne_dtheta += peak.d_nm[0] * ef;
             dne_dphi += peak.d_nm[1] * ef;
@@ -686,12 +653,9 @@ impl ElectronDensity for SolarChapmanLayer {
 
 #[cfg(test)]
 mod tests {
-    /// The defect this floor exists to remove, pinned from both sides.
-    ///
-    /// A pure alpha-Chapman layer is EXACTLY zero past the terminator, because
-    /// `Ch` diverges there. Absorption goes as `Ne nu`, so that is not a small
-    /// night-time absorption - it is none at all, on every band. The floor has to
-    /// leave the sunlit layer untouched and leave a real density behind at night.
+    /// A pure alpha-Chapman layer is exactly zero past the terminator. The
+    /// night floor must leave a density behind at night and leave the sunlit
+    /// layer untouched.
     #[test]
     fn the_night_floor_replaces_an_exactly_zero_night() {
         let r0 = 6_371_000.0;
@@ -732,14 +696,13 @@ mod tests {
             "a sunlit layer must be bit-identical: {bare_day:e} vs {floored_day:e}"
         );
 
-        // And the floor carries the layer's own profile shape, not a slab: it
-        // falls away from the peak in both directions.
+        // The floor has the layer's profile shape: it falls away from the peak
+        // in both directions.
         let peak = at(&floored, 85.0, night_lon);
         assert!(at(&floored, 70.0, night_lon) < peak);
         assert!(at(&floored, 100.0, night_lon) < peak);
 
-        // A zero fraction reproduces the old behaviour exactly, so nothing that
-        // relied on it can have changed silently.
+        // A zero fraction gives the bare layer exactly.
         let off = SolarChapmanLayer::d_region(nm, r_peak, 6e3, 0.0, 0.0, 0.0);
         assert_eq!(at(&off, 85.0, night_lon), 0.0);
     }
@@ -751,14 +714,11 @@ mod tests {
         SphericalPoint::new(Meters::new(r), Radians::new(colat), Radians::new(lon))
     }
 
-    /// The partial-rise branch must reduce to the textbook one at `f = 1`, and
-    /// not merely to within a tolerance - the two are the same expression.
+    /// The partial-rise branch must reduce to the textbook one at `f = 1`.
     ///
-    /// `with_rise_fraction(1.0)` sets `full_rise`, so it would take the fast
-    /// branch and test nothing. The flag is therefore forced off here to run the
-    /// GENERAL arithmetic at `f = 1` against the branch it has to agree with.
-    /// Bit-identity is not expected (the operation order differs); agreement to
-    /// a few ulps is.
+    /// `with_rise_fraction(1.0)` sets `full_rise`, so the flag is forced off
+    /// here to run the general arithmetic. The operation order differs, so
+    /// agreement is to a few ulps rather than bit for bit.
     #[test]
     fn partial_rise_reduces_to_the_textbook_layer_at_f_one() {
         const R0: f64 = 6_371_000.0;
@@ -800,13 +760,9 @@ mod tests {
         );
     }
 
-    /// The partial-rise branch's ANALYTIC gradients must match central
-    /// differences on both slant branches and with a varying peak source.
-    ///
-    /// This is the test that matters most for the new branch: a density that
-    /// varies without a matching gradient does not produce a wrong number, it
-    /// drives Hamiltonian drift along the ray, which shows up far away from
-    /// here as a solver that quietly stops conserving `H = 0`.
+    /// The partial-rise branch's analytic gradients must match central
+    /// differences on both slant branches and with a varying peak source. A
+    /// mismatched gradient shows up as Hamiltonian drift along the ray.
     #[test]
     fn partial_rise_partials_match_fd() {
         const R0: f64 = 6_371_000.0;
@@ -862,24 +818,19 @@ mod tests {
         }
     }
 
-    /// The solar-zenith law this layer imposes on absorption is DERIVED, not
-    /// free: `A ~ cos^n chi` with `n = 1/2 + H_layer/H_nu`.
-    ///
-    /// Two independent contributions, and neither is a choice:
+    /// The solar-zenith law this layer imposes on absorption is derived:
+    /// `A ~ cos^n chi` with `n = 1/2 + H_layer/H_nu`, from two contributions:
     ///
     ///   * the realised peak is `Nm Ch^{-1/2}`, worth exactly 1/2;
-    ///   * the whole profile TRANSLATES upward by `H ln Ch`, and the collision
-    ///     frequency falls on `H_nu`, so the layer loses a further
-    ///     `Ch^{-H/H_nu}` of the `Ne nu` product.
+    ///   * the profile translates upward by `H ln Ch` while the collision
+    ///     frequency falls on `H_nu`, losing a further `Ch^{-H/H_nu}` of the
+    ///     `Ne nu` product.
     ///
-    /// This is pinned because it is the single most load-bearing fact about
-    /// what a calibration of the D region can and cannot reach. `bin/mode_audit`
-    /// measures the same exponent end-to-end through a traced ray and gets
-    /// 1.3-1.5 against the shipping anchors; `bin/zenith_probe` measures it on a
-    /// bare vertical column and gets 1.386 where this formula predicts 1.396. If
-    /// this test ever fails, the relationship between the two scale heights and
-    /// the zenith law has changed, and every conclusion drawn from either tool
-    /// has to be re-derived.
+    /// This bounds what a D-region calibration can reach. `bin/mode_audit`
+    /// measures 1.3-1.5 through a traced ray at the shipping anchors, and
+    /// `bin/zenith_probe` measures 1.386 on a vertical column where this formula
+    /// predicts 1.396. If this test fails, conclusions from both tools need
+    /// re-deriving.
     #[test]
     fn the_zenith_exponent_is_one_half_plus_the_scale_height_ratio() {
         use skipzone::collision::{CollisionFrequency, ExponentialCollisions};
@@ -897,8 +848,8 @@ mod tests {
                 h_layer_km * 1e3,
                 0.0,  // declination
                 12.0, // UTC: subsolar at colat 90 deg, lon 0
-                0.0,  // no night floor - it is a chi-INDEPENDENT additive term
-                      // and would flatten the very law being measured
+                0.0,  // no night floor: a chi-independent term would flatten
+                      // the law being measured
             )
             .with_rise_fraction(rise);
             let coll = ExponentialCollisions::new(
@@ -954,9 +905,8 @@ mod tests {
             }
         }
 
-        // And across the rise fraction, which is the general law the above is
-        // the f = 1 slice of. This is the one anchor that reaches the exponent,
-        // so the relationship between it and `n` has to stay exactly this.
+        // Across the rise fraction, of which the above is the f = 1 slice. It is
+        // the one anchor that reaches the exponent.
         for h_layer in [4.0_f64, 6.0] {
             for h_nu in [5.0_f64, 6.7] {
                 for rise in [0.0_f64, 0.25, 0.5, 0.75, 1.0] {
@@ -971,19 +921,18 @@ mod tests {
             }
         }
 
-        // The f = 0 endpoint is the hard floor of the whole functional form:
-        // the Ch^{-1/2} thinning alone, with no rise term left to add to it.
-        // Nothing this layer can be configured as goes below it.
+        // The f = 0 endpoint is the floor of the functional form: Ch^{-1/2}
+        // thinning alone, with no rise term.
         let floor = exponent(6.0, 6.7, 0.0);
         assert!(
             (floor - 0.5).abs() < 0.02,
             "the f = 0 limit must be exactly the Ch^-1/2 law, n = 1/2, got {floor:.4}"
         );
 
-        // And the consequence that matters: with the SHIPPING anchors the layer
-        // is far steeper than the ~0.75 that riometer and A1 absorption
-        // measurements report, and no legal setting of the two scale heights
-        // reaches it - the floor of the box is 1/2 + 4/9.
+        // With the shipping anchors the law is far steeper than the ~0.75 that
+        // riometer and A1 absorption measurements report, and no allowed
+        // setting of the two scale heights reaches it (the box floors at
+        // 1/2 + 4/9).
         let shipping = exponent(
             crate::scenario::D_REGION_SCALE_HEIGHT_KM,
             crate::scenario::NU_SCALE_HEIGHT_KM,
@@ -993,11 +942,10 @@ mod tests {
             shipping > 1.3 && shipping < 1.45,
             "shipping anchors should give n ~ 1.39, got {shipping:.4}"
         );
-        // The tripwire, read from `calib.rs` rather than from literals so that
-        // widening a bound trips it. The smallest exponent the two scale
-        // heights can reach together is 1/2 + H_D(min)/H_nu(max); if that ever
-        // drops to the measured ~0.75, the "no calibration can reach it"
-        // conclusion in the wiki and in `bin/zenith_probe` stops being true.
+        // Read from `calib.rs` rather than literals so that widening a bound
+        // trips this. The smallest reachable exponent is
+        // 1/2 + H_D(min)/H_nu(max); if it drops to ~0.75, the conclusion in the
+        // wiki and `bin/zenith_probe` no longer holds.
         let ion = crate::calib::Anchors::default().ionosphere;
         let n_min = 0.5 + ion.d_scale_height_km.min / ion.nu_scale_height_km.max;
         assert!(
@@ -1008,13 +956,11 @@ mod tests {
         );
     }
 
-    /// The forward (continuant) recurrence evaluates the SAME continued
-    /// fraction, to the same depth, as the backward one it replaced. It is not
-    /// bit-identical - the operations differ - so this pins the agreement
-    /// instead, densely across the branch and out past the largest `t` any
-    /// layer in this crate can produce (`sqrt(X/2)` with `X = r_peak/H`, about
-    /// 23 for the D region). Every term of both recurrences is positive, so
-    /// there is no cancellation and the two stay within a few 1e-16.
+    /// The forward (continuant) recurrence evaluates the same continued
+    /// fraction to the same depth as the backward one. The operations differ,
+    /// so this checks agreement within a few 1e-16 across the branch and past
+    /// the largest `t` any layer here produces (`sqrt(X/2)` with
+    /// `X = r_peak/H`, about 23 for the D region).
     #[test]
     fn erfcx_forward_recurrence_matches_backward() {
         fn backward(t: f64) -> f64 {
@@ -1154,7 +1100,7 @@ mod tests {
         // Subsolar point (decl 0, utc 12 => hour_offset 0) is colat 90, lon 0.
         // A point 86 deg away from it sees chi ~ 86 deg: colat 4 deg, lon 0
         // gives cos chi = sin(4 deg) => chi = 86 deg, just past the engine's
-        // 85 deg plane-parallel limit where the old model refused a layer.
+        // 85 deg plane-parallel limit.
         let colat = 4.0_f64.to_radians();
         let lon = 0.0;
         let chi = layer.zenith_angle(colat, lon);
@@ -1174,7 +1120,7 @@ mod tests {
                 best_r = r;
             }
         }
-        // Finite, positive (the whole point), and thinned below the overhead Nm.
+        // Finite, positive, and thinned below the overhead Nm.
         assert!(best > 0.0 && best < 1.0e9, "terminator peak Ne = {best}");
         // Scanned peak matches Nm/sqrt(Ch) and sits above 85 km (raised).
         let want_peak = layer.realised_peak_ne(colat, lon);
@@ -1257,19 +1203,16 @@ mod tests {
         }
     }
 
-    /// THE bit-identity guard for item 1. Generalising the peak density to a
-    /// trait object must not perturb the D region by one ulp when the source
-    /// returns a constant: the whole validated absorption behaviour rides on it.
+    /// With a constant peak source, the D region must match the plain
+    /// constant-peak arithmetic bit for bit.
     ///
-    /// The `d_nm != 0` guard in `sample` exists for exactly this: adding a
-    /// literal `0.0` would turn a legitimately negative-zero gradient into
-    /// `+0.0` and break bit-identity without changing any physics.
+    /// This is what the `d_nm != 0` guard in `sample` is for: adding a literal
+    /// `0.0` would turn a negative-zero gradient into `+0.0`.
     #[test]
     fn constant_source_is_bit_identical_to_the_old_d_region() {
         let r0 = 6_371_000.0;
-        // Reference implementation: the pre-generalisation arithmetic, inlined
-        // verbatim, so this test compares against the code that was replaced
-        // rather than against the replacement's own output.
+        // Reference implementation: the constant-peak arithmetic written out
+        // inline, independent of the layer type.
         let (nm, r_peak, h) = (1.0e9, r0 + 85e3, 6e3);
         let (sin_decl, cos_decl) = 15.0_f64.to_radians().sin_cos();
         let hour_offset = 12.0 * PI / 12.0 - PI;
@@ -1337,10 +1280,9 @@ mod tests {
         }
     }
 
-    /// The second bit-identity guard: an `Overhead` layer with a constant
-    /// source must reproduce the engine's own `ChapmanLayer::new` exactly. That
-    /// is what makes it safe to move the F2 layer onto this type - the F2
-    /// profile is unchanged, and only its peak density gains structure.
+    /// An `Overhead` layer with a constant source must reproduce the engine's
+    /// `ChapmanLayer::new` exactly, so the F2 profile shape matches the engine's
+    /// and only its peak density gains structure.
     #[test]
     fn overhead_slant_is_bit_identical_to_engine_chapman() {
         use skipzone::density::ChapmanLayer;
@@ -1367,9 +1309,9 @@ mod tests {
     }
 
     /// With a varying source, all three partials must still match central
-    /// finite differences - on BOTH slant branches, because the theta/phi
-    /// gradient is then a sum of two independent terms and a sign error in
-    /// either would show up as Hamiltonian drift rather than as a wrong density.
+    /// finite differences on both slant branches. The theta/phi gradient is a
+    /// sum of two terms, and a sign error in either shows up as Hamiltonian
+    /// drift rather than a wrong density.
     #[test]
     fn varying_source_partials_match_fd() {
         let r0 = 6_371_000.0;

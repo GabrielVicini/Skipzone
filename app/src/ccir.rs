@@ -1,19 +1,11 @@
-//! CCIR foF2 and M(3000)F2: the real numerical maps, evaluated.
+//! CCIR foF2 and M(3000)F2 numerical maps, evaluated.
 //!
-//! # Why this module exists
+//! The coefficients are vendored in `data/nequick/ccir11.txt` .. `ccir22.txt`.
+//! Unlike the synthetic grid in [`crate::fof2`], they are not a
+//! latitude-by-local-time table but a Fourier series in universal time over a
+//! Legendre-like expansion in modified dip latitude (modip).
 //!
-//! [`crate::fof2`] says, in its own header, that the bundled `fof2_grid.tsv` is
-//! "an ORDER-OF-MAGNITUDE CLIMATOLOGY OF MY OWN CONSTRUCTION" and that "dropping
-//! a real IRI or CCIR table into the same file layout is a file replacement, not
-//! a code change". That statement was half right. The data really was already in
-//! the repository - `data/nequick/ccir11.txt` .. `ccir22.txt`, vendored and
-//! licensed and, until now, read by nothing. What it needed was not a file
-//! replacement but this module: the CCIR maps are not a latitude-by-local-time
-//! table, they are a Fourier series in universal time over a Legendre-like
-//! expansion in MODIFIED DIP LATITUDE, and nothing in the app knew what modip
-//! was.
-//!
-//! `bin/iono_check` measures what that buys against measured GIRO soundings.
+//! `bin/iono_check` compares them against measured GIRO soundings.
 //!
 //! # What the numbers are
 //!
@@ -53,24 +45,19 @@
 //!
 //! # Modified dip latitude
 //!
-//! `tan(modip) = I / sqrt(cos(lat))`, with `I` the magnetic dip at 300 km. It is
-//! the coordinate the F2 layer actually organises itself along - the equatorial
-//! anomaly straddles the magnetic equator, not the geographic one - and it is
-//! why [`crate::fof2::climatology_fof2`]'s own comment concedes that using
-//! geographic latitude for the anomaly crests "is a real limitation of this
-//! table".
+//! `tan(modip) = I / sqrt(cos(lat))`, with `I` the magnetic dip at 300 km. The
+//! F2 layer is organised along this coordinate: the equatorial anomaly
+//! straddles the magnetic equator, which a geographic-latitude table such as
+//! [`crate::fof2::climatology_fof2`] cannot represent.
 //!
 //! It is read from `data/nequick/modipNeQG_wrapped.txt` rather than computed
-//! from the IGRF model this project already carries, because the CCIR
-//! coefficients were fitted in the modip of their own era: recomputing the
-//! coordinate under a modern field would evaluate the map away from the
-//! coordinate it was fitted in. `tests::grid_modip_agrees_with_igrf_dip` checks
-//! the shipped grid against this project's IGRF anyway, which is what catches a
-//! transposed or misaligned lattice.
+//! from the project's IGRF model, because the CCIR coefficients were fitted in
+//! the modip of their own era. `tests::grid_modip_agrees_with_igrf_dip` still
+//! checks the grid against IGRF to catch a transposed or misaligned lattice.
 
 use std::sync::OnceLock;
 
-// --- MODIP -----------------------------------------------------------------
+// Modified dip latitude grid.
 
 /// Rows in the shipped modip grid: 37 latitudes plus one wrapped row beyond
 /// each pole.
@@ -102,9 +89,8 @@ impl ModipGrid {
     /// Parse the grid text: 39 lines of 39 free-format values in degrees.
     ///
     /// # Errors
-    /// The first structural problem found, described. A broken asset must be
-    /// reportable rather than a panic, for the same reason
-    /// [`crate::fof2::Fof2Grid::parse`] is fallible.
+    /// The first structural problem found, described, so a broken asset is
+    /// reported instead of panicking (as with [`crate::fof2::Fof2Grid::parse`]).
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut v = Box::new([[f64::NAN; MODIP_COLS]; MODIP_ROWS]);
         let mut rows = 0usize;
@@ -155,8 +141,7 @@ impl ModipGrid {
     /// The bundled grid, parsed once per process.
     ///
     /// # Errors
-    /// The parse error verbatim, so a caller can put it in front of the operator
-    /// rather than silently substituting a different coordinate.
+    /// The parse error verbatim, so a caller can show it to the operator.
     pub fn bundled() -> Result<&'static Self, &'static str> {
         static GRID: OnceLock<Result<ModipGrid, String>> = OnceLock::new();
         match GRID.get_or_init(|| Self::parse(MODIP_TEXT)) {
@@ -209,19 +194,15 @@ impl ModipGrid {
     /// Modip (deg) and its partials `(d/dlat, d/dlon)` in degrees per degree,
     /// through a C1 interpolant.
     ///
-    /// [`Self::at`] is the reference reading of the table and is what every
-    /// comparison against another implementation should use. It cannot be used
-    /// to build a ray-traced layer: the four-point Lagrange form is continuous
-    /// but its DERIVATIVE jumps at every cell edge, and the ray equations
-    /// integrate straight through those jumps - the same reason
-    /// [`crate::fof2::Fof2Plane::sample`] is bicubic Catmull-Rom rather than
-    /// bilinear.
+    /// [`Self::at`] is the reference reading of the table, for comparisons with
+    /// other implementations. Its four-point Lagrange form has a derivative that
+    /// jumps at every cell edge, which the ray equations cannot integrate
+    /// through (the same reason [`crate::fof2::Fof2Plane::sample`] is bicubic
+    /// Catmull-Rom).
     ///
-    /// So the tracer reads the same table through a Catmull-Rom tensor product,
-    /// which is C1 across cells and passes through the same nodes. The two
-    /// interpolants differ only between nodes and only because they choose
-    /// different tangents; `tests::the_two_modip_interpolants_agree` bounds the
-    /// disagreement over the whole globe.
+    /// The tracer instead reads the table through a Catmull-Rom tensor product,
+    /// which is C1 and passes through the same nodes;
+    /// `tests::the_two_modip_interpolants_agree` bounds the difference.
     #[must_use]
     pub fn sample_c1(&self, lat_deg: f64, lon_deg: f64) -> (f64, f64, f64) {
         let a = (lat_deg.clamp(-90.0, 90.0) + 90.0) / MODIP_LAT_STEP_DEG + 1.0;
@@ -238,8 +219,8 @@ impl ModipGrid {
 
         // Interpolate along latitude first, for each of the four columns, then
         // along longitude. The longitude derivative comes from interpolating
-        // the latitude-interpolated VALUES; the latitude derivative from
-        // interpolating the latitude DERIVATIVES. Same tensor-product structure
+        // the latitude-interpolated values; the latitude derivative from
+        // interpolating the latitude derivatives. Same tensor-product structure
         // as `Fof2Plane::sample`, and the partials are the interpolant's own.
         let mut vals = [0.0_f64; 4];
         let mut dlat = [0.0_f64; 4];
@@ -266,10 +247,10 @@ impl ModipGrid {
 /// Cubic Lagrange through four equally spaced samples at parameter positions
 /// `-1, 0, 1, 2`, evaluated at `x` in `[0, 1]`.
 ///
-/// Written in the `delta = 2x - 1` form the NeQuick-G reference implementation
-/// uses, so a value computed here can be compared with that implementation term
-/// for term. `tests::lagrange4_is_the_cubic_through_its_nodes` proves the form
-/// is the plain cubic interpolant and nothing else.
+/// Written in the `delta = 2x - 1` form of the NeQuick-G reference
+/// implementation, so values can be compared term for term.
+/// `tests::lagrange4_is_the_cubic_through_its_nodes` checks it is the plain
+/// cubic interpolant.
 #[must_use]
 fn lagrange4(z: [f64; 4], x: f64) -> f64 {
     if x.abs() < 1e-10 {
@@ -295,7 +276,7 @@ pub fn modip_deg(lat_deg: f64, lon_deg: f64) -> Result<f64, &'static str> {
     Ok(ModipGrid::bundled()?.at(lat_deg, lon_deg))
 }
 
-// --- The coefficient maps --------------------------------------------------
+// Coefficient maps.
 
 /// foF2 terms per month and solar-activity level.
 pub const F2_TERMS: usize = 76;
@@ -350,8 +331,7 @@ impl CcirMonth {
     ///
     /// # Errors
     /// A count mismatch or an unparsable token, described. The count check is
-    /// the load-bearing one: it is what proves the two blocks were split at the
-    /// right offset.
+    /// what shows the two blocks were split at the right offset.
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut vals = Vec::with_capacity(VALUES_PER_MONTH);
         for tok in text.split_whitespace() {
@@ -423,9 +403,8 @@ impl CcirMonth {
     /// Collapse the month to one universal time and one solar activity, which
     /// is everything a single solve needs.
     ///
-    /// R12 below zero is clamped; above 100 it extrapolates along the same line
-    /// rather than saturating, which is the same convention
-    /// [`crate::fof2::Fof2Grid::plane`] uses for its own two levels.
+    /// R12 below zero is clamped; above 100 it extrapolates along the same line,
+    /// as [`crate::fof2::Fof2Grid::plane`] does.
     #[must_use]
     pub fn plane(&self, utc_hours: f64, r12: f64) -> CcirPlane {
         let t = (r12.max(0.0) - R12_LEVELS[0]) / (R12_LEVELS[1] - R12_LEVELS[0]);
@@ -541,10 +520,8 @@ const RAD_PER_DEG: f64 = std::f64::consts::PI / 180.0;
 /// The same basis, carrying each factor's partials with respect to geographic
 /// latitude and longitude in degrees.
 ///
-/// Kept separate from [`Basis`] rather than folded into it because the ray
-/// tracer needs the gradient on every density sample and a plain evaluation
-/// (the harnesses, the UI readout) needs none of it, and the derivative arrays
-/// are most of the work.
+/// Separate from [`Basis`] because only the ray tracer needs the gradient, and
+/// the derivative arrays are most of the work.
 struct GradBasis {
     /// `(value, d/dlat, d/dlon)` for `sin(modip)^k`.
     s: [[f64; 3]; 12],
@@ -634,9 +611,8 @@ impl GradBasis {
 impl CcirPlane {
     /// foF2 (MHz) at a geographic point, given that point's modip.
     ///
-    /// Returned raw. The map is a truncated expansion and can undershoot in the
-    /// deep polar night; a consumer that needs a physical layer applies its own
-    /// floor and says so, rather than having one hidden here.
+    /// Returned raw. The truncated expansion can undershoot in the deep polar
+    /// night, so a consumer that needs a physical layer applies its own floor.
     #[must_use]
     pub fn fof2_at_modip(&self, modip_deg: f64, lat_deg: f64, lon_deg: f64) -> f64 {
         Basis::new(modip_deg, lat_deg, lon_deg).contract(&self.cf2, &F2_GEO_DEGREE)
@@ -645,9 +621,8 @@ impl CcirPlane {
     /// M(3000)F2 - the obliquity factor for a 3000 km hop - at a geographic
     /// point, given that point's modip. Dimensionless, physically 2.2 to 3.8.
     ///
-    /// Nothing consumes this yet. It is evaluated because it is the second half
-    /// of every monthly file, and getting it into its physical range is the
-    /// check that the two blocks were split at the right offset.
+    /// Nothing consumes this yet. Its landing in the physical range checks that
+    /// the two blocks of each monthly file were split at the right offset.
     #[must_use]
     pub fn m3000_at_modip(&self, modip_deg: f64, lat_deg: f64, lon_deg: f64) -> f64 {
         Basis::new(modip_deg, lat_deg, lon_deg).contract(&self.cm3, &M3000_GEO_DEGREE)
@@ -681,17 +656,14 @@ impl CcirPlane {
 /// replaced in July 2015. The recalibration multiplied the whole historical
 /// record by about this factor.
 ///
-/// It matters because the two ends of the calculation are on different scales
-/// and nothing in between says so. Every sunspot number this project handles -
-/// `spaceweather`'s SIDC and NOAA feeds, `corpus/ssn_daily.tsv` - is version 2.
-/// The CCIR maps were fitted in 1966, so their `R12 = 100` page means version
-/// 1's hundred. Feeding a version 2 number straight in overstates solar
-/// activity by 44 %.
+/// Every sunspot number this project handles (`spaceweather`'s SIDC and NOAA
+/// feeds, `corpus/ssn_daily.tsv`) is version 2, while the CCIR maps were fitted
+/// in 1966 on version 1. Feeding a version 2 number straight in overstates
+/// solar activity by 44 %.
 ///
-/// MEASURED, 2026-08-09, `bin/iono_check` over 70 219 GIRO soundings: driving
-/// the maps with the raw version 2 R12 leaves a **+0.92 MHz** bias; dividing by
-/// this factor leaves **+0.03 MHz**. Nothing was fitted to produce that - the
-/// factor is SILSO's published recalibration and the bias fell out.
+/// Measured 2026-08-09 with `bin/iono_check` over 70 219 GIRO soundings: the
+/// raw version 2 R12 leaves a +0.92 MHz bias, and dividing by this factor
+/// leaves +0.03 MHz. The factor is SILSO's published value, not a fit.
 pub const SSN_V2_OVER_V1: f64 = 1.44;
 
 /// A modern (version 2) sunspot number on the scale the CCIR maps were fitted
@@ -703,22 +675,20 @@ pub fn map_r12_from_ssn_v2(ssn_v2: f64) -> f64 {
 
 /// Numerical guard on foF2 (MHz) from the maps.
 ///
-/// This is NOT a model of the night F region - [`crate::fof2::FOF2_FLOOR_MHZ`]
-/// is that, for the synthetic climatology, and applying a floor of that size
-/// here would lift CCIR's own night values by tens of percent. This one exists
-/// only so that a truncated spherical expansion cannot hand the layer a zero or
-/// negative critical frequency in some corner nobody sampled.
-/// `tests::the_floor_does_not_bind` shows it is never reached.
+/// Not a model of the night F region (that is
+/// [`crate::fof2::FOF2_FLOOR_MHZ`], for the synthetic climatology, which would
+/// lift CCIR's night values by tens of percent). It only stops the truncated
+/// expansion from giving a zero or negative critical frequency somewhere
+/// unsampled; `tests::the_floor_does_not_bind` shows it is never reached.
 pub const CCIR_FLOOR_MHZ: f64 = 0.5;
 
 /// Peak density of the F2 layer from the CCIR maps.
 ///
 /// Holds one month, universal time and solar activity, and evaluates foF2 at
-/// each sampled point's own geographic position - not at a local solar time.
-/// That is the substantive difference from [`crate::fof2::GriddedF2Peak`]: the
-/// CCIR maps are functions of longitude AND universal time separately, so two
-/// points at the same local solar time in different sectors get different
-/// answers, which is most of what the longitude orders are for.
+/// each sampled point's geographic position. Unlike
+/// [`crate::fof2::GriddedF2Peak`], the maps depend on longitude and universal
+/// time separately, so points at the same local solar time in different
+/// sectors differ.
 pub struct CcirF2Peak {
     plane: CcirPlane,
     modip: &'static ModipGrid,
@@ -750,9 +720,8 @@ impl crate::chapman::PeakDensitySource for CcirF2Peak {
         let lon_deg = lon.to_degrees();
         let (f, df_dlat, df_dlon) = self.plane.fof2_with_gradient(self.modip, lat_deg, lon_deg);
         if !f.is_finite() || f <= CCIR_FLOOR_MHZ {
-            // At or below the guard the layer is flat by construction, so the
-            // gradient is zero rather than the expansion's - a floored value
-            // whose gradient still slopes is what drives Hamiltonian drift.
+            // At or below the guard the layer is flat, so the gradient is zero;
+            // a floored value with a sloping gradient drives Hamiltonian drift.
             let nm = skipzone::density::density_at_critical_frequency(skipzone::units::Hertz::new(
                 CCIR_FLOOR_MHZ * 1e6,
             ))
@@ -778,8 +747,8 @@ impl crate::chapman::PeakDensitySource for CcirF2Peak {
 /// hold a plane.
 ///
 /// `month` is 1 to 12, `utc_hours` is universal time, `r12` is the twelve-month
-/// smoothed sunspot number the maps are indexed by - NOT a daily sunspot number,
-/// though a caller with only a daily number will pass it and should say so.
+/// smoothed sunspot number the maps are indexed by. A caller passing a daily
+/// number should say so.
 ///
 /// # Errors
 /// The bundled asset's parse error, verbatim.
@@ -799,9 +768,8 @@ pub fn ccir_fof2(
 mod tests {
     use super::*;
 
-    /// The four-point form really is the cubic Lagrange interpolant: it passes
-    /// through all four nodes, and it reproduces a cubic polynomial exactly.
-    /// If this drifts, every modip value drifts with it.
+    /// The four-point form is the cubic Lagrange interpolant: it passes through
+    /// all four nodes and reproduces a cubic polynomial exactly.
     #[test]
     fn lagrange4_is_the_cubic_through_its_nodes() {
         // A cubic sampled at -1, 0, 1, 2 must be reproduced everywhere.
@@ -818,9 +786,8 @@ mod tests {
     }
 
     /// The shipped grid parses to the documented lattice, and the wrap rows and
-    /// columns really are the wraps the header claims. A transposed or
-    /// misaligned grid would evaluate the CCIR maps in the wrong coordinate and
-    /// nothing downstream would notice, so this is checked structurally.
+    /// columns are the documented wraps. A misaligned grid would go unnoticed
+    /// downstream.
     #[test]
     fn modip_grid_is_wrapped_as_documented() {
         let g = ModipGrid::bundled().expect("bundled modip grid parses");
@@ -841,8 +808,7 @@ mod tests {
             }
         }
 
-        // The rows beyond each pole are their in-range twins phased half a turn,
-        // which is what "across the pole" means on a sphere.
+        // The rows beyond each pole are their in-range twins phased half a turn.
         for c in 0..18 {
             assert!(
                 (g.v[0][c] - g.v[2][c + 18]).abs() < 1e-9,
@@ -882,8 +848,8 @@ mod tests {
         }
     }
 
-    /// Longitude is periodic through the interpolant, not just in the table: a
-    /// seam at one meridian would put a discontinuity into every F2 map.
+    /// Longitude is periodic through the interpolant as well as the table; a
+    /// seam would put a discontinuity into every F2 map.
     #[test]
     fn modip_is_periodic_in_longitude() {
         let g = ModipGrid::bundled().unwrap();
@@ -896,15 +862,12 @@ mod tests {
         }
     }
 
-    /// The shipped grid is the coordinate it claims to be, checked against this
-    /// project's own IGRF rather than against itself: `tan(modip) = I / sqrt(cos
-    /// lat)` with `I` the dip at 300 km.
+    /// The shipped grid matches modip computed from this project's IGRF:
+    /// `tan(modip) = I / sqrt(cos lat)` with `I` the dip at 300 km.
     ///
-    /// This is the test that catches a transposed lattice, a hemisphere flip or
-    /// an off-by-one row. It is deliberately loose: the grid is epoch ~2001 and
-    /// the IGRF model here runs at a modern epoch, so the two disagree by a
-    /// couple of degrees from secular variation alone, and more where the field
-    /// is weak. A wrong indexing would miss by tens of degrees.
+    /// Catches a transposed lattice, a hemisphere flip or an off-by-one row. The
+    /// tolerance is loose because the grid is epoch ~2001 and IGRF runs at a
+    /// modern epoch; wrong indexing would miss by tens of degrees.
     #[test]
     fn grid_modip_agrees_with_igrf_dip() {
         use skipzone::geo::SphericalPoint;
@@ -960,9 +923,8 @@ mod tests {
         );
     }
 
-    /// Every monthly file parses to exactly the documented value count. The
-    /// count is what proves the foF2 and M(3000)F2 blocks were split at the
-    /// right offset; a wrong split would still produce numbers.
+    /// Every monthly file parses to exactly the documented value count, which
+    /// checks the foF2 and M(3000)F2 blocks were split at the right offset.
     #[test]
     fn every_month_parses_to_the_documented_shape() {
         assert_eq!(VALUES_PER_MONTH, 2858);
@@ -983,9 +945,8 @@ mod tests {
     /// every hour, in every month, at both tabulated activity levels: positive,
     /// bounded, and rising with solar activity.
     ///
-    /// This is the test that fails loudly if the term ordering is wrong. A
-    /// mis-ordered expansion does not produce a slightly worse ionosphere, it
-    /// produces negative critical frequencies and tens of megahertz.
+    /// A mis-ordered expansion gives negative critical frequencies and tens of
+    /// megahertz, so this catches wrong term ordering.
     #[test]
     fn ccir_fof2_is_a_physical_ionosphere_everywhere() {
         let mut lo_min = f64::INFINITY;
@@ -1022,11 +983,9 @@ mod tests {
                 }
             }
         }
-        // Solar activity raises foF2 essentially everywhere. Not literally
-        // everywhere - the maps are fitted, and a handful of high-latitude
-        // night cells invert - so this is asserted as a fraction rather than
-        // as an absolute, and the fraction is high enough that a sign error
-        // could not pass.
+        // Solar activity raises foF2 almost everywhere; a few high-latitude
+        // night cells invert, so this asserts a fraction high enough that a
+        // sign error could not pass.
         #[allow(clippy::cast_precision_loss)]
         let frac = rising as f64 / total as f64;
         assert!(
@@ -1034,8 +993,8 @@ mod tests {
             "foF2 rises with R12 in only {:.1}% of cells",
             100.0 * frac
         );
-        // And the global span is the one an ionosphere has: a night-time floor
-        // of a megahertz or two and a daytime anomaly crest in the teens.
+        // The global span: a night-time floor of a megahertz or two and a
+        // daytime anomaly crest in the teens.
         assert!(
             lo_min < 3.0,
             "quiet-sun minimum foF2 {lo_min:.2} MHz is too high"
@@ -1046,9 +1005,8 @@ mod tests {
         );
     }
 
-    /// M(3000)F2 lands in its physical range. Independent of foF2, and it is
-    /// what confirms the second block of every file is being read as itself
-    /// rather than as a continuation of the first.
+    /// M(3000)F2 lands in its physical range, confirming the second block of
+    /// each file is read as itself.
     #[test]
     fn m3000_is_in_its_physical_range() {
         for month in [1u32, 6, 12] {
@@ -1094,8 +1052,7 @@ mod tests {
 
     /// The C1 interpolant used by the tracer and the reference Lagrange form
     /// used for comparison read the same table, so they must agree at the nodes
-    /// exactly and closely between them. The bound is what says "reading the
-    /// map through a C1 interpolant is not a different map".
+    /// exactly and closely between them.
     #[test]
     fn the_two_modip_interpolants_agree() {
         let g = ModipGrid::bundled().unwrap();
@@ -1122,11 +1079,9 @@ mod tests {
             "modip interpolants differ by {worst:.3} deg at {at:?}"
         );
 
-        // That is the wrong quantity to bound, though, and this is the right
-        // one. foF2 depends on modip only through sin(modip), whose derivative
-        // vanishes at exactly the poles where the two forms disagree most, so
-        // the disagreement that reaches the tracer is far smaller than the
-        // disagreement in the coordinate.
+        // What matters is foF2, which depends on modip through sin(modip). Its
+        // derivative vanishes at the poles, where the two forms disagree most,
+        // so the foF2 difference is far smaller.
         let mut worst_f: f64 = 0.0;
         let mut at_f = (0u32, 0.0, 0.0, 0.0);
         for month in [1u32, 4, 7, 10] {
@@ -1171,11 +1126,8 @@ mod tests {
         }
     }
 
-    /// The C1 sampler's partials are the partials of the function it is
-    /// actually returning, checked against central differences of itself, and
-    /// they are continuous across a cell boundary. The second half is the whole
-    /// reason this interpolant exists: a gradient that jumps is what the
-    /// Lagrange form does and what the ray equations cannot integrate.
+    /// The C1 sampler's partials match central differences of its own values
+    /// and are continuous across a cell boundary, unlike the Lagrange form's.
     #[test]
     fn modip_c1_partials_are_exact_and_continuous() {
         let g = ModipGrid::bundled().unwrap();
@@ -1199,8 +1151,7 @@ mod tests {
         }
 
         // Straddle a lattice line in each axis. The C1 form must match across
-        // it; the reference Lagrange form is allowed not to, and is shown not
-        // to, so this is measuring something real.
+        // it; the reference Lagrange form does not, so the check is meaningful.
         let eps = 1e-7;
         let mut jump_c1: f64 = 0.0;
         let mut jump_ref: f64 = 0.0;
@@ -1222,9 +1173,8 @@ mod tests {
     }
 
     /// The foF2 gradient the tracer consumes matches central differences of the
-    /// foF2 the tracer consumes. A gradient that disagrees with its own field
-    /// does not produce a slightly wrong number here; it drives Hamiltonian
-    /// drift far away in the solver.
+    /// foF2 the tracer consumes. An inconsistent gradient drives Hamiltonian
+    /// drift in the solver.
     #[test]
     fn fof2_gradient_matches_finite_differences() {
         let grid = ModipGrid::bundled().unwrap();
@@ -1248,10 +1198,9 @@ mod tests {
         }
     }
 
-    /// The peak source's partials, in ENGINE coordinates, against central
-    /// differences of its own Ne. This is the check that the two chain-rule
-    /// factors carry the right signs; a flipped sign is invisible in the
-    /// density and fatal in the tracer. Mirrors
+    /// The peak source's partials, in engine coordinates, against central
+    /// differences of its own Ne. Checks the signs of the two chain-rule
+    /// factors, which are invisible in the density but break the tracer. Mirrors
     /// `fof2::tests::gridded_peak_partials_match_fd`.
     #[test]
     fn ccir_peak_partials_match_fd() {
@@ -1281,8 +1230,8 @@ mod tests {
         }
     }
 
-    /// The numerical guard is a guard and not a model: it is never reached, at
-    /// either tabulated activity level, in any month, anywhere.
+    /// The numerical guard is never reached, at either tabulated activity
+    /// level, in any month, anywhere.
     #[test]
     fn the_floor_does_not_bind() {
         let mut lowest = f64::INFINITY;
@@ -1325,8 +1274,8 @@ mod tests {
 
     /// The behaviours the F2 layer is known for, as trends rather than
     /// absolutes. These are the same claims `fof2::climatology_trends_are_as_
-    /// documented` makes about the synthetic climatology, asked of the real
-    /// maps - and unlike that one, nothing here was constructed to satisfy them.
+    /// documented` makes about the synthetic climatology, asked of the CCIR
+    /// maps, which were not constructed to satisfy them.
     #[test]
     fn ccir_reproduces_the_known_f2_behaviours() {
         // Afternoon exceeds pre-dawn at a midlatitude station. Lindau, Germany
@@ -1337,11 +1286,10 @@ mod tests {
         let night = c.plane(3.0, 80.0).fof2(lat, lon).unwrap();
         assert!(day > night, "equinox day {day:.2} <= night {night:.2}");
 
-        // The equatorial anomaly: crests either side of the MAGNETIC equator in
-        // the afternoon, standing above the trough between them. Taken along
-        // 285 E (the American sector), where the magnetic equator sits well
-        // north of the geographic one - which is exactly the structure a
-        // geographic-latitude climatology cannot produce.
+        // The equatorial anomaly: crests either side of the magnetic equator in
+        // the afternoon, above the trough between them. Taken along 285 E (the
+        // American sector), where the magnetic equator sits well north of the
+        // geographic one, which a geographic-latitude climatology cannot produce.
         let p = c.plane(19.0, 80.0); // ~14 LST at -75 E
         let dip_eq = (-40..=40)
             .map(f64::from)
@@ -1361,7 +1309,7 @@ mod tests {
              {south_crest:.2} / {trough:.2} / {north_crest:.2}"
         );
 
-        // The winter anomaly: midlatitude winter DAY exceeds summer day.
+        // The winter anomaly: midlatitude winter day exceeds summer day.
         let jan = CcirMonth::bundled(1).unwrap().plane(12.0, 80.0);
         let jul = CcirMonth::bundled(7).unwrap().plane(12.0, 80.0);
         let (w, s) = (jan.fof2(50.0, 0.0).unwrap(), jul.fof2(50.0, 0.0).unwrap());
