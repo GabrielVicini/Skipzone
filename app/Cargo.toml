@@ -1,5 +1,6 @@
 [package]
 name = "skipzone-app"
+license = "MIT"
 version = "0.1.0"
 edition = "2024"
 description = "Interactive point-to-point HF ray tracing application for the Skipzone engine"

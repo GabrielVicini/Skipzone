@@ -10,6 +10,7 @@ name = "skipzone"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+license = "MIT"
 description = "3D ionospheric HF ray tracing: Haselgrove equations with full Appleton-Hartree magnetoionic theory"
 
 # The engine is single-threaded by design. It has no parallelism seam and no

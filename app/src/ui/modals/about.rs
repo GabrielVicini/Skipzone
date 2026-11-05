@@ -31,8 +31,8 @@ fn body(ui: &mut Ui) {
     );
     ui.add_space(6.0);
     ui.label(
-        "Copyright \u{00A9} 2026 Gabriel Vicini. Licensed under the GNU General Public \
-         License v3.0 (GPL-3.0). See LICENSE for the full text.",
+        "Copyright \u{00A9} 2026 Gabriel Vicini. Licensed under the MIT License. \
+         See LICENSE for the full text.",
     );
     ui.add_space(10.0);
     hint(

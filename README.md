@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![edition](https://img.shields.io/badge/edition-2024-orange)](Cargo.toml)
-[![license](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-brightgreen)](Cargo.toml)
 [![build](https://github.com/GabrielVicini/Skipzone/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/GabrielVicini/Skipzone/actions/workflows/ci.yml)
 [![docs](https://img.shields.io/badge/docs-derivations-1D76DB)](docs/derivations)
@@ -163,8 +163,12 @@ there. The app tracks whatever `eframe` requires, which moves.
 
 ## License
 
-All files are governed under GPL-3.0, see [LICENSE](LICENSE), except where noted
-otherwise. The bundled NeQuick reference data under `data/nequick/` is EUPL v1.2
-and carries its own notice; see [data/nequick/README.md](data/nequick/README.md).
+MIT, except `data/nequick/` (EUPL-1.2). See [LICENSE](LICENSE).
+
+The bundled NeQuick reference data under `data/nequick/` is EUPL v1.2 and
+carries its own notice; see [data/nequick/README.md](data/nequick/README.md).
+The other bundled data keeps its upstream terms: the IGRF-14 coefficients in
+`data/igrf14coeffs.txt` are published by IAGA and freely available, and the Natural
+Earth shapefiles in `app/src/assets/` are public domain.
 
 For any licensing concerns or questions, email `hello@vicini.io`.

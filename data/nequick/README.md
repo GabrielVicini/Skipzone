@@ -24,7 +24,7 @@ default.
 
 ## Licence
 
-EUPL v1.2, (C) European Union 2019. This is **not** the GPL-3.0 that covers the
+EUPL v1.2, (C) European Union 2019. This is **not** the MIT licence that covers the
 rest of the repository; it is one of the exemptions the top-level `LICENSE`
 refers to. Article 5 of the EUPL requires the notice to travel with the data, so
 `_SOURCE_AND_LICENSE.txt` must not be deleted or moved away from these files.
