@@ -1,7 +1,7 @@
 //! Fetch a reproducible WSPR calibration corpus once and write it to disk.
 //!
 //! ```text
-//! cargo run --release -p skipzone-app --bin wspr_corpus -- \
+//! cargo run --release -p skipzone-lab --bin wspr_corpus -- \
 //!     --from 2026-07-02 --days 7 --out corpus/fit.tsv --neg corpus/fit_neg.tsv
 //! ```
 //!
@@ -27,14 +27,14 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
-use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative, Rejections};
-use skipzone_app::spaceweather::{self, Ssn, SsnSource};
-use skipzone_app::wspr::{WsprSpot, parse_spots};
-use skipzone_app::wsprlive::{
+use skipzone_iono::grid;
+use skipzone_lab::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative, Rejections};
+use skipzone_lab::spaceweather::{self, Ssn, SsnSource};
+use skipzone_lab::wspr::{WsprSpot, parse_spots};
+use skipzone_lab::wsprlive::{
     self as wsprlive, BusiestFilter, CorpusQuery, HygieneCensus, StationEnd, Window,
     cycle_census_tsv,
 };
-use skipzone_iono::grid;
 use skipzone_predict::scenario;
 
 /// UTC hours the negatives schedule walks. Es occurrence and D-region
@@ -566,7 +566,7 @@ fn describe_corpus(spots: &[CorpusSpot]) {
     let mut by_day: BTreeMap<(i32, u32, u32), usize> = BTreeMap::new();
     for s in spots {
         *by_band
-            .entry(skipzone_app::wspr_report::band_label(s.spot.freq_mhz).to_string())
+            .entry(skipzone_lab::wspr_report::band_label(s.spot.freq_mhz).to_string())
             .or_default() += 1;
         *by_hour.entry(s.spot.timestamp.3).or_default() += 1;
         *by_day.entry(s.date()).or_default() += 1;

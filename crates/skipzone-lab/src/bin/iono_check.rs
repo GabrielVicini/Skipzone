@@ -24,7 +24,7 @@
 //!
 //! Run:
 //! ```text
-//! cargo run --release -p skipzone-app --bin iono_check
+//! cargo run --release -p skipzone-lab --bin iono_check
 //! ```
 
 use std::collections::BTreeMap;

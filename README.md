@@ -80,10 +80,10 @@ skipzone/
 │   └── src/
 │       ├── assets/     # bundled coastline shapefiles
 │       └── bin/        # hfpredict, the headless engine-only CLI
-├── app/                # skipzone-app: egui desktop application
-│   ├── Cargo.toml
+├── crates/skipzone-lab/      # validation and calibration against measurements
 │   └── src/
 │       └── bin/        # validation and calibration harnesses
+├── app/                # skipzone-app: egui desktop application
 ├── docs/derivations/   # the physics, derived before it was implemented
 └── wiki/               # project wiki (GitHub wiki source)
 ```
@@ -119,20 +119,20 @@ in [Command Line Tools](https://github.com/GabrielVicini/Skipzone/wiki/Command-L
 | Tool | Crate | What it does |
 |---|---|---|
 | `hfpredict` | predict | Headless first-order path predictor. Engine only, no app code. |
-| `wspr_corpus` | app | Fetches a reproducible WSPR corpus once and writes it to disk. |
-| `wspr_calibrate` | app | Fits the unverified anchors against that corpus, treating station effects as nuisance parameters. |
-| `wspr_validate` | app | Scores the model against a saved list of WSPR spots. |
-| `wspr_live_check` | app | Fetches live spots and the observed sunspot number, then scores against them. |
-| `iono_check` | app | Scores the ionosphere model against measured ionosonde foF2 and foE. |
-| `mode_audit` | app | Explains why the solver admitted a path and what it charged it. |
-| `solve_digest` | app | Stable fingerprint of everything `solve()` produces, over a scenario grid. |
-| `profile_solve` | app | Counts where the time in one solve actually goes. |
-| `gen_fof2_grid` | app | Regenerates the bundled foF2 climatology table. |
+| `wspr_corpus` | lab | Fetches a reproducible WSPR corpus once and writes it to disk. |
+| `wspr_calibrate` | lab | Fits the unverified anchors against that corpus, treating station effects as nuisance parameters. |
+| `wspr_validate` | lab | Scores the model against a saved list of WSPR spots. |
+| `wspr_live_check` | lab | Fetches live spots and the observed sunspot number, then scores against them. |
+| `iono_check` | lab | Scores the ionosphere model against measured ionosonde foF2 and foE. |
+| `mode_audit` | lab | Explains why the solver admitted a path and what it charged it. |
+| `solve_digest` | lab | Stable fingerprint of everything `solve()` produces, over a scenario grid. |
+| `profile_solve` | lab | Counts where the time in one solve actually goes. |
+| `gen_fof2_grid` | lab | Regenerates the bundled foF2 climatology table. |
 
 Run any of them with:
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_validate -- --help
+cargo run --release -p skipzone-lab --bin wspr_validate -- --help
 ```
 
 ## Accuracy Report

@@ -64,7 +64,7 @@ Two invariants hold and are worth checking whenever this area is touched:
    supplies one that calls `request_repaint`; a headless caller supplies
    `sweep::no_wake()`.
 
-That second point is why the harnesses in `app/src/bin/` can drive exactly the
+That second point is why the harnesses in `crates/skipzone-lab/src/bin/` can drive exactly the
 same solver and model code the GUI does, rather than a parallel copy of it. It
 is also why `app/src/main.rs` is thin: the app is a library with a binary on
 top, not a binary with some helpers.

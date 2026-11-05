@@ -49,7 +49,7 @@ Fetches a reproducible WSPR corpus once and writes it to disk, so that every
 later calibration run scores the same spots.
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_corpus -- \
+cargo run --release -p skipzone-lab --bin wspr_corpus -- \
     --from 2026-07-02 --days 7 --out corpus/fit.tsv --neg corpus/fit_neg.tsv
 ```
 
@@ -63,12 +63,12 @@ The calibration driver. Fits the unverified anchors against the saved corpus
 with transmitter and receiver effects treated as nuisance parameters.
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_calibrate -- \
+cargo run --release -p skipzone-lab --bin wspr_calibrate -- \
     --fit corpus/fit.tsv --holdout corpus/holdout.tsv --negatives corpus/fit_neg.tsv
 ```
 
 It is the largest tool in the project and is split into modules under
-`app/src/bin/wspr_calibrate/`:
+`crates/skipzone-lab/src/bin/wspr_calibrate/`:
 
 | Module | Contents |
 |---|---|
@@ -92,7 +92,7 @@ missing file is a hard error, not a silent fallback.
 Scores the model against a saved list of WSPR spots.
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_validate -- spots.tsv [--ssn 70] [--quiet]
+cargo run --release -p skipzone-lab --bin wspr_validate -- spots.tsv [--ssn 70] [--quiet]
 ```
 
 ### `wspr_live_check`
@@ -101,14 +101,14 @@ Fetches real WSPR spots and the observed sunspot number, scores the model
 against them, and reports where it falls behind.
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_live_check
-cargo run --release -p skipzone-app --bin wspr_live_check -- --minutes 20 --limit 300
-cargo run --release -p skipzone-app --bin wspr_live_check -- --band 14 --at "2026-07-24 03:22"
-cargo run --release -p skipzone-app --bin wspr_live_check -- --file spots.tsv --ssn 119
+cargo run --release -p skipzone-lab --bin wspr_live_check
+cargo run --release -p skipzone-lab --bin wspr_live_check -- --minutes 20 --limit 300
+cargo run --release -p skipzone-lab --bin wspr_live_check -- --band 14 --at "2026-07-24 03:22"
+cargo run --release -p skipzone-lab --bin wspr_live_check -- --file spots.tsv --ssn 119
 ```
 
 This is the only tool that reaches the network by default. It goes through
-`app/src/net.rs`, which is one file with one function so that "what does this
+`crates/skipzone-lab/src/net.rs`, which is one file with one function so that "what does this
 program talk to" has a single answer.
 
 ### `iono_check`
@@ -119,8 +119,8 @@ error to hide in, so the comparison is a straight measurement of model error in
 MHz with nothing absorbed and nothing fitted.
 
 ```bash
-cargo run --release -p skipzone-app --bin iono_check
-cargo run --release -p skipzone-app --bin iono_check -- path/to/obs.tsv --ssn=corpus/ssn_daily.tsv --fit=corpus/fit.tsv
+cargo run --release -p skipzone-lab --bin iono_check
+cargo run --release -p skipzone-lab --bin iono_check -- path/to/obs.tsv --ssn=corpus/ssn_daily.tsv --fit=corpus/fit.tsv
 ```
 
 Inputs and their defaults:
@@ -159,7 +159,7 @@ Answers "why did the solver admit this path, and what did it charge it". Prints
 the D-region decomposition and the night-floor leverage for a chosen scenario.
 
 ```bash
-cargo run --release -p skipzone-app --bin mode_audit
+cargo run --release -p skipzone-lab --bin mode_audit
 ```
 
 ### `zenith_probe`
@@ -171,7 +171,7 @@ absorption kernel `Ne nu / (omega^2 + nu^2)` up a bare vertical column, so the
 exponent that comes out is the layer's own.
 
 ```bash
-cargo run --release -p skipzone-app --bin zenith_probe
+cargo run --release -p skipzone-lab --bin zenith_probe
 ```
 
 It prints the measured exponent against the derived `1/2 + H_D/H_nu`, checks
@@ -187,7 +187,7 @@ Answers two questions a flat calibration row cannot distinguish between: is the
 anchor reaching the solver at all, and does the corpus have any leverage on it.
 
 ```bash
-cargo run --release -p skipzone-app --bin rise_wiring_check -- corpus/fit.tsv 1200
+cargo run --release -p skipzone-lab --bin rise_wiring_check -- corpus/fit.tsv 1200
 ```
 
 First it solves one high-sun low-band path at several rise fractions and prints
@@ -206,9 +206,9 @@ This is the tool that makes a performance change safe: capture a digest before,
 make the change, capture one after, and diff.
 
 ```bash
-cargo run --release -p skipzone-app --bin solve_digest > before.txt
+cargo run --release -p skipzone-lab --bin solve_digest > before.txt
 # make the change
-cargo run --release -p skipzone-app --bin solve_digest > after.txt
+cargo run --release -p skipzone-lab --bin solve_digest > after.txt
 diff before.txt after.txt
 ```
 
@@ -223,7 +223,7 @@ density, field and collision evaluations, and the raw cost of one evaluation of
 each model.
 
 ```bash
-cargo run --release -p skipzone-app --bin profile_solve
+cargo run --release -p skipzone-lab --bin profile_solve
 ```
 
 The instrumentation is entirely app-side. The engine models are wrapped in
@@ -236,7 +236,7 @@ counting decorators, so nothing in the engine is modified to be measurable.
 Regenerates `crates/skipzone-iono/src/assets/fof2_grid.tsv`, the bundled foF2 climatology table.
 
 ```bash
-cargo run -p skipzone-app --bin gen_fof2_grid
+cargo run -p skipzone-lab --bin gen_fof2_grid
 ```
 
 The table is data, bundled and checked in, so nothing is computed or fetched at

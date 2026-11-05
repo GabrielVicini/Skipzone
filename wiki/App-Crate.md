@@ -2,7 +2,7 @@
 
 The point-to-point application, and everything that is not the ray tracer. It is
 a library with a thin `main.rs` on top, so the headless harnesses in
-`app/src/bin/` drive exactly the same model and solver code the GUI does rather
+`crates/skipzone-lab/src/bin/` drive exactly the same model and solver code the GUI does rather
 than a parallel copy.
 
 The layer stack and its two invariants are in

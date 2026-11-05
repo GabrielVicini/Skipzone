@@ -3158,10 +3158,8 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
- "skipzone",
  "skipzone-iono",
  "skipzone-predict",
- "ureq",
 ]
 
 [[package]]
@@ -3169,6 +3167,16 @@ name = "skipzone-iono"
 version = "0.1.0"
 dependencies = [
  "skipzone",
+]
+
+[[package]]
+name = "skipzone-lab"
+version = "0.1.0"
+dependencies = [
+ "skipzone",
+ "skipzone-iono",
+ "skipzone-predict",
+ "ureq",
 ]
 
 [[package]]

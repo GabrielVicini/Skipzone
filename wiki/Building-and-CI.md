@@ -29,7 +29,7 @@ cargo build --release --package skipzone --lib
 That builds the engine alone, with none of the app's dependency tree.
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_validate -- --help
+cargo run --release -p skipzone-lab --bin wspr_validate -- --help
 ```
 
 That runs one of the harnesses. See [Command Line Tools](Command-Line-Tools).

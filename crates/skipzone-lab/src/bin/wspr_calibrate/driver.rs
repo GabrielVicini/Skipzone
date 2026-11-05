@@ -7,10 +7,10 @@ use crate::negatives::*;
 use crate::report::*;
 use crate::solving::*;
 
-use skipzone_app::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative};
-use skipzone_app::fit::{self, Cached, CachedParams, Fit, StationEffects};
-use skipzone_app::wspr::WSPR_DECODE_THRESHOLD_DB;
-use skipzone_app::wspr_report::band_label;
+use skipzone_lab::corpus::{self, CorpusSpot, MIN_SPOTS_PER_STATION, Negative};
+use skipzone_lab::fit::{self, Cached, CachedParams, Fit, StationEffects};
+use skipzone_lab::wspr::WSPR_DECODE_THRESHOLD_DB;
+use skipzone_lab::wspr_report::band_label;
 use skipzone_predict::antenna::AntennaConfig;
 use skipzone_predict::calib::{Anchors, AtmosphericAnchors};
 use skipzone_predict::compute::{ComputePool, PoolConfig};

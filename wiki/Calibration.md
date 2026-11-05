@@ -1,6 +1,6 @@
 # Calibration
 
-`crates/skipzone-predict/src/calib.rs`, `app/src/fit.rs`, `app/src/corpus.rs`, and the
+`crates/skipzone-predict/src/calib.rs`, `crates/skipzone-lab/src/fit.rs`, `crates/skipzone-lab/src/corpus.rs`, and the
 `wspr_calibrate` binary.
 
 **Read this page before believing any calibrated number in the project.** The

@@ -86,7 +86,7 @@ fn main() {
 /// shift varies by several dB, the law is identifiable and the null result
 /// comes from looking at too few spots.
 fn corpus_leverage(path: &str, max_spots: usize) {
-    use skipzone_app::corpus;
+    use skipzone_lab::corpus;
     use skipzone_predict::compute::{ComputePool, PoolConfig};
 
     let Ok(text) = std::fs::read_to_string(path) else {

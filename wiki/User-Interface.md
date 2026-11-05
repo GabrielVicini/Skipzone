@@ -127,5 +127,5 @@ calls `wake()`, egui schedules a frame, and `Session::drain` picks up the
 current-epoch messages on the next one.
 
 That indirection is what keeps the computation layer free of egui, and it is
-what lets the harnesses in `app/src/bin/` drive the same solver headlessly with
+what lets the harnesses in `crates/skipzone-lab/src/bin/` drive the same solver headlessly with
 `sweep::no_wake()`.

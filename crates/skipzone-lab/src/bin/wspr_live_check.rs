@@ -2,15 +2,15 @@
 //! against them, and report where it falls behind.
 //!
 //! ```text
-//! cargo run --release -p skipzone-app --bin wspr_live_check
-//! cargo run --release -p skipzone-app --bin wspr_live_check -- --minutes 20 --limit 300
-//! cargo run --release -p skipzone-app --bin wspr_live_check -- --band 14 --at "2026-07-24 03:22"
-//! cargo run --release -p skipzone-app --bin wspr_live_check -- --file spots.tsv --ssn 119
+//! cargo run --release -p skipzone-lab --bin wspr_live_check
+//! cargo run --release -p skipzone-lab --bin wspr_live_check -- --minutes 20 --limit 300
+//! cargo run --release -p skipzone-lab --bin wspr_live_check -- --band 14 --at "2026-07-24 03:22"
+//! cargo run --release -p skipzone-lab --bin wspr_live_check -- --file spots.tsv --ssn 119
 //! ```
 //!
 //! Every spot is solved through the same chain as the GUI's RUN TRACE, at the
 //! spot's own time, frequency, power and endpoints, with nothing tuned. Read
-//! the module docs of `skipzone_app::wspr` before drawing conclusions: only
+//! the module docs of `skipzone_lab::wspr` before drawing conclusions: only
 //! successful decodes are published, so the hit rate cannot see false
 //! positives.
 //!
@@ -19,11 +19,11 @@
 
 use std::process::ExitCode;
 
-use skipzone_app::spaceweather::{self, Ssn, SsnSource};
-use skipzone_app::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
-use skipzone_app::wspr_report::{self, Breakdown};
-use skipzone_app::wsprlive::{Query, Window};
 use skipzone_iono::grid;
+use skipzone_lab::spaceweather::{self, Ssn, SsnSource};
+use skipzone_lab::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
+use skipzone_lab::wspr_report::{self, Breakdown};
+use skipzone_lab::wsprlive::{Query, Window};
 use skipzone_predict::compute::{ComputePool, PoolConfig};
 use skipzone_predict::noise::NoiseEnvironment;
 use skipzone_predict::scenario::{self, Inputs};

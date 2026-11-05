@@ -28,17 +28,5 @@
 //! mentions egui.
 
 pub mod app;
-/// A saved, reproducible WSPR corpus for calibration. Harness-only.
-pub mod corpus;
-/// Two-way fixed-effects calibration against measured WSPR spots. Harness-only.
-pub mod fit;
-/// Outbound HTTP, used only by the validation harnesses.
-pub mod net;
-/// Observed solar indices, fetched rather than assumed.
-pub mod spaceweather;
 pub mod state;
 pub mod ui;
-pub mod wspr;
-pub mod wspr_report;
-/// Live WSPR spot retrieval.
-pub mod wsprlive;

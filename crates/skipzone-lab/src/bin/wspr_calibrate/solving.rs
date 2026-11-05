@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use skipzone_app::corpus::{self, CorpusSpot};
-use skipzone_app::fit::{self, Cached};
-use skipzone_app::wspr::WsprSpot;
+use skipzone_lab::corpus::{self, CorpusSpot};
+use skipzone_lab::fit::{self, Cached};
+use skipzone_lab::wspr::WsprSpot;
 use skipzone_predict::compute::ComputePool;
 use skipzone_predict::scenario::{self, Inputs};
 use skipzone_predict::solve;

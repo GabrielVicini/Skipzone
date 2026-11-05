@@ -3,8 +3,8 @@
 
 use crate::solving::*;
 
-use skipzone_app::fit::{self, Cached};
-use skipzone_app::wspr::WSPR_DECODE_THRESHOLD_DB;
+use skipzone_lab::fit::{self, Cached};
+use skipzone_lab::wspr::WSPR_DECODE_THRESHOLD_DB;
 /// Leave-one-day-out refits, giving the interval that matters.
 pub(crate) struct Jackknife {
     pub(crate) n: usize,

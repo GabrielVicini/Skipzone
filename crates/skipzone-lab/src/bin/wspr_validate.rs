@@ -1,7 +1,7 @@
 //! Score the model against a list of WSPR spots.
 //!
 //! ```text
-//! cargo run --release -p skipzone-app --bin wspr_validate -- spots.tsv [--ssn 70] [--quiet]
+//! cargo run --release -p skipzone-lab --bin wspr_validate -- spots.tsv [--ssn 70] [--quiet]
 //! ```
 //!
 //! Reads a tab-separated spot list (timestamp, TX call, MHz, SNR, TX grid, dBm,
@@ -9,7 +9,7 @@
 //! GUI's RUN TRACE uses, and reports modelled minus measured SNR per spot plus
 //! the median error, the spread and the hit rate over the paths that closed.
 //!
-//! Read the module documentation of `skipzone_app::wspr` before drawing a
+//! Read the module documentation of `skipzone_lab::wspr` before drawing a
 //! conclusion from the numbers: WSPR SNRs are in a 2500 Hz reference bandwidth,
 //! the antennas at both ends are assumed rather than known, and the database
 //! records only successes - so the hit rate cannot see false positives.
@@ -19,7 +19,7 @@
 
 use std::process::ExitCode;
 
-use skipzone_app::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
+use skipzone_lab::wspr::{SpotResult, Summary, WsprSpot, parse_spots};
 use skipzone_predict::compute::{ComputePool, PoolConfig};
 use skipzone_predict::scenario::{self, Inputs};
 use skipzone_predict::solve;

@@ -123,7 +123,7 @@ Not in the repository. It is gitignored working data.
 To build one from scratch:
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_corpus -- \
+cargo run --release -p skipzone-lab --bin wspr_corpus -- \
     --from 2026-07-02 --days 7 --out corpus/fit.tsv --neg corpus/fit_neg.tsv
 ```
 
@@ -132,7 +132,7 @@ See [Command Line Tools](Command-Line-Tools).
 
 ## Network access
 
-Exactly one module reaches the network: `app/src/net.rs`, one function, 60
+Exactly one module reaches the network: `crates/skipzone-lab/src/net.rs`, one function, 60
 second timeout, identified User-Agent. The GUI and the solver never call it. The
 services are:
 

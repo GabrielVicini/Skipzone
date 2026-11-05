@@ -67,9 +67,9 @@ deliberate commit with its own test, not part of the run that suggested it.
 Use `solve_digest`.
 
 ```bash
-cargo run --release -p skipzone-app --bin solve_digest > before.txt
+cargo run --release -p skipzone-lab --bin solve_digest > before.txt
 # make the change
-cargo run --release -p skipzone-app --bin solve_digest > after.txt
+cargo run --release -p skipzone-lab --bin solve_digest > after.txt
 diff before.txt after.txt
 ```
 

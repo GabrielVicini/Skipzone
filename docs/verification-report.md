@@ -367,21 +367,21 @@ cargo test --release --workspace
 ```
 
 ```bash
-cargo run --release -p skipzone-app --bin iono_check
+cargo run --release -p skipzone-lab --bin iono_check
 ```
 
 ```bash
-cargo run --release -p skipzone-app --bin zenith_probe
+cargo run --release -p skipzone-lab --bin zenith_probe
 ```
 
 ```bash
-cargo run --release -p skipzone-app --bin solve_digest
+cargo run --release -p skipzone-lab --bin solve_digest
 ```
 
 The full WSPR calibration that produced section 5.2, roughly one hour:
 
 ```bash
-cargo run --release -p skipzone-app --bin wspr_calibrate -- --fit corpus/fit.tsv --holdout corpus/holdout_month.tsv --negatives corpus/fit_neg.tsv --scan 300
+cargo run --release -p skipzone-lab --bin wspr_calibrate -- --fit corpus/fit.tsv --holdout corpus/holdout_month.tsv --negatives corpus/fit_neg.tsv --scan 300
 ```
 
 `corpus/` is gitignored working data. `iono_check` and the WSPR harnesses fetch

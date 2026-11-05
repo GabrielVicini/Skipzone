@@ -2,11 +2,11 @@
 //! transmitter and receiver effects treated as nuisance parameters.
 //!
 //! ```text
-//! cargo run --release -p skipzone-app --bin wspr_calibrate -- \
+//! cargo run --release -p skipzone-lab --bin wspr_calibrate -- \
 //!     --fit corpus/fit.tsv --holdout corpus/holdout.tsv --negatives corpus/fit_neg.tsv
 //! ```
 //!
-//! Read `skipzone_app::fit`'s module documentation before believing any number
+//! Read `skipzone_lab::fit`'s module documentation before believing any number
 //! this prints. Absolute levels (antenna gain, noise floor) cannot be
 //! identified from WSPR, because they are constant per station and absorbed
 //! into that station's effect. What is calibrated is how the signal varies

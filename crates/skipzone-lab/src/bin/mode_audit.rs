@@ -20,7 +20,7 @@
 //!
 //! Run:
 //! ```text
-//! cargo run --release -p skipzone-app --bin mode_audit
+//! cargo run --release -p skipzone-lab --bin mode_audit
 //! ```
 
 use std::process::ExitCode;

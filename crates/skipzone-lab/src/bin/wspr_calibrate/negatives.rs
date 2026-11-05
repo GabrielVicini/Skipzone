@@ -8,9 +8,9 @@ use crate::solving::*;
 
 use std::collections::BTreeMap;
 
-use skipzone_app::corpus::Negative;
-use skipzone_app::fit::{self, Cached, CachedParams, NegativeScore, Spread};
-use skipzone_app::wspr::WSPR_DECODE_THRESHOLD_DB;
+use skipzone_lab::corpus::Negative;
+use skipzone_lab::fit::{self, Cached, CachedParams, NegativeScore, Spread};
+use skipzone_lab::wspr::WSPR_DECODE_THRESHOLD_DB;
 use skipzone_predict::calib::AtmosphericAnchors;
 use skipzone_predict::compute::ComputePool;
 use skipzone_predict::noise::{self};

@@ -1,0 +1,20 @@
+[package]
+name = "skipzone-lab"
+license = "MIT"
+version = "0.1.0"
+edition = "2024"
+description = "Validation and calibration of the Skipzone model against measured WSPR spots, ionosonde data and solar indices"
+publish = false
+
+[lib]
+name = "skipzone_lab"
+
+[dependencies]
+skipzone = { path = "../skipzone" }
+skipzone-iono = { path = "../skipzone-iono" }
+skipzone-predict = { path = "../skipzone-predict" }
+# HTTPS for the validation harness only: it fetches live WSPR spots and the
+# current solar indices. The GUI and solver never touch the network, and the
+# workspace split keeps this dependency out of the engine crate. Pure-Rust TLS
+# avoids a system library.
+ureq = { version = "3", default-features = false, features = ["rustls"] }

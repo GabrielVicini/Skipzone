@@ -10,10 +10,10 @@ use crate::solving::*;
 
 use std::collections::BTreeMap;
 
-use skipzone_app::fit::{
+use skipzone_lab::fit::{
     self, Cached, CachedParams, EffectDistribution, Fit, Spread, StationEffects,
 };
-use skipzone_app::wspr_report::band_label;
+use skipzone_lab::wspr_report::band_label;
 use skipzone_predict::calib::{Anchors, AtmosphericAnchors};
 use skipzone_predict::noise::NoiseFloor;
 use skipzone_predict::scenario::{self, Inputs};

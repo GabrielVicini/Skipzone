@@ -834,7 +834,7 @@ mod tests {
     /// Running the same candidate frequencies across all cores must give
     /// bit-identical per-frequency results to running them one at a time. It
     /// prints both timings and the thread count. Run with:
-    ///   cargo test -p skipzone-app --release parallel_matches_sequential -- --nocapture
+    ///   cargo test -p skipzone-predict --release parallel_matches_sequential -- --nocapture
     #[test]
     fn parallel_matches_sequential_and_reports_timing() {
         use crate::compute::{ComputePool, Execution, PoolConfig, available_cores};

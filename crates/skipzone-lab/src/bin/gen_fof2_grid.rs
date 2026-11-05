@@ -10,7 +10,7 @@
 //! anything.
 //!
 //! ```text
-//! cargo run -p skipzone-app --bin gen_fof2_grid
+//! cargo run -p skipzone-lab --bin gen_fof2_grid
 //! ```
 
 use std::fmt::Write as _;
@@ -68,7 +68,7 @@ fn main() -> std::io::Result<()> {
 
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../crates/skipzone-iono/src/assets/fof2_grid.tsv"
+        "/../skipzone-iono/src/assets/fof2_grid.tsv"
     );
     std::fs::write(path, &out)?;
     println!("wrote {path} ({} bytes)", out.len());

@@ -14,7 +14,7 @@
 //!
 //! Run:
 //! ```text
-//! cargo run --release -p skipzone-app --bin solve_digest > before.txt
+//! cargo run --release -p skipzone-lab --bin solve_digest > before.txt
 //! ```
 
 use std::process::ExitCode;

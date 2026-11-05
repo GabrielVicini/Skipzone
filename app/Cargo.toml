@@ -11,16 +11,10 @@ name = "skipzone-app-bin"
 path = "src/main.rs"
 
 [dependencies]
-skipzone = { path = "../crates/skipzone" }
 skipzone-iono = { path = "../crates/skipzone-iono" }
 skipzone-predict = { path = "../crates/skipzone-predict" }
 eframe = "0.35"
 egui = "0.35"
-# HTTPS for the validation harness only: it fetches live WSPR spots and the
-# current solar indices. The GUI and solver never touch the network, and the
-# workspace split keeps this dependency out of the engine crate. Pure-Rust TLS
-# avoids a system library.
-ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 # Not clippy-pedantic, unlike the engine crate: pedantic lints on egui layout
 # code add churn without catching bugs.
