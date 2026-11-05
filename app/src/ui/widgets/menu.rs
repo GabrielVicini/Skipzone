@@ -71,3 +71,11 @@ pub fn item(ui: &mut Ui, label: &str) -> bool {
     ui.add(Button::new(label).fill(Color32::TRANSPARENT))
         .clicked()
 }
+
+/// A dropdown line that can be disabled. Returns true when clicked; a
+/// disabled line explains itself on hover.
+pub fn item_enabled(ui: &mut Ui, label: &str, enabled: bool, why_not: &str) -> bool {
+    ui.add_enabled(enabled, Button::new(label).fill(Color32::TRANSPARENT))
+        .on_disabled_hover_text(why_not)
+        .clicked()
+}

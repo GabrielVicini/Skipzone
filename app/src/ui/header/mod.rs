@@ -21,7 +21,7 @@ pub fn draw(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch, out: &
         .frame(theme::header_frame())
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                menus::menu_bar(ui, scratch, out);
+                menus::menu_bar(ui, state, scratch, out);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     status::status(ui, state);
                 });

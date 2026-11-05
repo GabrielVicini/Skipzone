@@ -55,14 +55,21 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
         }
         Action::SelectSolution(index) => state.ui.selection.selected = Some(index),
         Action::CloseTrace => state.ui.trace_open = false,
+        // A job of the same kind already running is left to finish, and the
+        // request only shows its readout. The views disable these buttons
+        // then too.
         Action::Calculate => {
             // Re-running replaces what the panel is showing; the panel
             // itself stays where the operator sized it.
-            calculate(state, jobs);
+            if state.results.busy != Busy::Solving {
+                calculate(state, jobs);
+            }
             state.ui.trace_open = true;
         }
         Action::BestFrequency => {
-            find_best_frequency(state, jobs);
+            if !matches!(state.results.busy, Busy::Sweeping { .. }) {
+                find_best_frequency(state, jobs);
+            }
             state.ui.modals.best_freq = true;
         }
         Action::FitPath => state.ui.map.needs_fit = true,
@@ -73,7 +80,9 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
             InputChange::Date(today).apply(&mut state.inputs);
         }
         Action::RunCoverage => {
-            run_coverage(state, jobs);
+            if !matches!(state.results.busy, Busy::Covering { .. }) {
+                run_coverage(state, jobs);
+            }
             state.ui.modals.coverage = true;
         }
         Action::CancelCoverage => cancel_coverage(state, jobs),
@@ -546,5 +555,26 @@ mod tests {
         assert_eq!(s.ui.selection.selected, Some(n - 1));
         assert_eq!(s.results.main.solutions().len(), n);
         assert!(!s.ui.trace_open);
+    }
+
+    /// A job of the same kind is not restarted while it runs; starting the
+    /// other kind supersedes it.
+    #[test]
+    fn a_running_job_is_not_restarted_by_its_own_kind() {
+        let (mut s, jobs) = setup();
+        apply(&mut s, &jobs, [Action::RunCoverage]);
+        let running = jobs.generation();
+        apply(&mut s, &jobs, [Action::RunCoverage]);
+        assert_eq!(jobs.generation(), running, "no second grid");
+        absorb_all(&mut s, &jobs);
+        assert!(s.results.coverage.has_tiles(), "the first grid finished");
+        assert!(!s.results.coverage.cancelled);
+
+        apply(&mut s, &jobs, [Action::Calculate]);
+        let solving = jobs.generation();
+        apply(&mut s, &jobs, [Action::Calculate]);
+        assert_eq!(jobs.generation(), solving, "no second solve");
+        absorb_all(&mut s, &jobs);
+        assert!(s.results.busy.is_idle());
     }
 }
