@@ -7,22 +7,25 @@
 use egui::{Popup, RectAlign, RichText, Slider, Ui};
 
 use crate::state::AppState;
+use crate::ui::actions::{Action, InputChange};
 use crate::ui::scratch::ViewScratch;
 use crate::ui::theme::{self, MUTED};
-use crate::ui::widgets::{calendar, fields};
+use crate::ui::widgets::calendar::{self, Pick};
+use crate::ui::widgets::fields;
 use skipzone_iono::clock;
 
-pub fn overlay(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
+pub fn overlay(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
     ui.vertical(|ui| {
-        time_control(ui, state, scratch);
+        time_control(ui, state, scratch, out);
         ui.add_space(6.0);
-        date_control(ui, state, scratch);
+        date_control(ui, state, scratch, out);
     });
 }
 
 /// `HH:MM` on the left, the slider filling the rest: one control, two ways to
 /// set the same value.
-fn time_control(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
+fn time_control(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
+    let current = state.inputs.scenario.utc_hours;
     theme::floating_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
             let valid = clock::parse_hours(&scratch.time_text).is_some();
@@ -30,29 +33,29 @@ fn time_control(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
             if response.changed()
                 && let Some(hours) = clock::parse_hours(&scratch.time_text)
             {
-                state.inputs.scenario.utc_hours = hours;
+                out.push(Action::SetInput(InputChange::UtcHours(hours)));
             }
             ui.label(RichText::new("UTC").small().color(MUTED));
 
-            let mut hours = state.inputs.scenario.utc_hours;
+            let mut hours = current;
             let slider = ui.add(
                 Slider::new(&mut hours, 0.0..=24.0)
                     .show_value(false)
                     .handle_shape(egui::style::HandleShape::Rect { aspect_ratio: 0.5 }),
             );
             if slider.changed() {
-                state.inputs.scenario.utc_hours = hours;
+                out.push(Action::SetInput(InputChange::UtcHours(hours)));
             }
             // The text follows the value whenever it is not being typed into.
             if !response.has_focus() {
-                scratch.time_text = clock::format_hours(state.inputs.scenario.utc_hours);
+                scratch.time_text = clock::format_hours(current);
             }
         });
     });
 }
 
 /// `YYYY-MM-DD` with a calendar button beside it.
-fn date_control(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
+fn date_control(ui: &mut Ui, state: &AppState, scratch: &mut ViewScratch, out: &mut Vec<Action>) {
     theme::floating_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
             let date = state.inputs.date();
@@ -61,11 +64,11 @@ fn date_control(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
             if response.changed()
                 && let Some(typed) = clock::parse_date(&scratch.date_text)
             {
-                set_date(state, typed);
+                out.push(Action::SetInput(InputChange::Date(typed)));
                 scratch.calendar.show_month_of(typed);
             }
             if !response.has_focus() {
-                scratch.date_text = clock::format_date(state.inputs.date());
+                scratch.date_text = clock::format_date(date);
             }
 
             let button = ui
@@ -88,18 +91,18 @@ fn date_control(ui: &mut Ui, state: &mut AppState, scratch: &mut ViewScratch) {
                 .and_then(|inner| inner.inner);
             scratch.calendar.open = open;
 
-            if let Some(picked) = picked {
-                set_date(state, picked);
-                scratch.date_text = clock::format_date(picked);
-                scratch.calendar.open = false;
+            match picked {
+                Some(Pick::Day(day)) => {
+                    out.push(Action::SetInput(InputChange::Date(day)));
+                    scratch.date_text = clock::format_date(day);
+                    scratch.calendar.open = false;
+                }
+                Some(Pick::Today) => {
+                    out.push(Action::SetDateToday);
+                    scratch.calendar.open = false;
+                }
+                None => {}
             }
         });
     });
-}
-
-fn set_date(state: &mut AppState, date: clock::CivilDate) {
-    let inputs = &mut state.inputs.scenario;
-    inputs.year = date.year;
-    inputs.month = date.month;
-    inputs.day_of_month = date.day;
 }

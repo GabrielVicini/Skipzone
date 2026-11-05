@@ -10,7 +10,7 @@
 use egui::{Button, Color32, Context, RichText, Ui, vec2};
 
 use crate::state::AppState;
-use crate::ui::actions::Action;
+use crate::ui::actions::{Action, InputChange};
 use crate::ui::theme::{self, ACCENT, MUTED};
 use crate::ui::widgets::chart::{Chart, Series};
 use crate::ui::widgets::{band, card, data_grid, hint, kv, section};
@@ -104,7 +104,7 @@ fn body(
             .button(format!("Tune to {:.2} MHz", nearest(points, freq).freq_mhz))
             .clicked()
     {
-        out.push(Action::TuneTo(nearest(points, freq).freq_mhz));
+        out.push(tune_to(nearest(points, freq).freq_mhz));
     }
 }
 
@@ -132,9 +132,14 @@ fn controls(ui: &mut Ui, best: Option<SweepBest>, params: Params, out: &mut Vec<
                 .button(format!("Tune to best ({:.2} MHz)", best.point.freq_mhz))
                 .clicked()
         {
-            out.push(Action::TuneTo(best.point.freq_mhz));
+            out.push(tune_to(best.point.freq_mhz));
         }
     });
+}
+
+/// Adopt a frequency found by the sweep as the tuned frequency.
+fn tune_to(freq_mhz: f64) -> Action {
+    Action::SetInput(InputChange::Freq(freq_mhz))
 }
 
 /// The three charts. Returns the frequency under the pointer, if any.

@@ -5,6 +5,8 @@
 //! back. Each frame the app absorbs the responses, draws, then updates with
 //! the actions the draw produced, in order.
 
+use skipzone_iono::clock;
+
 use crate::jobs::{Jobs, Request, Response};
 use crate::state::{AppState, Busy};
 use crate::ui::actions::{Action, InputChange};
@@ -32,7 +34,10 @@ pub fn update(state: &mut AppState, action: Action, jobs: &Jobs) {
         Action::FitPath => state.ui.map.needs_fit = true,
         Action::ZoomIn => state.ui.map.pending_zoom *= ZOOM_STEP,
         Action::ZoomOut => state.ui.map.pending_zoom /= ZOOM_STEP,
-        Action::TuneTo(freq_mhz) => state.inputs.scenario.freq_mhz = freq_mhz,
+        Action::SetDateToday => {
+            let (today, _) = clock::utc_now();
+            InputChange::Date(today).apply(&mut state.inputs);
+        }
         Action::RunCoverage => {
             run_coverage(state, jobs);
             state.ui.modals.coverage = true;
@@ -266,9 +271,9 @@ mod tests {
             &jobs,
             [
                 Action::ShowSettings,
-                Action::TuneTo(7.1),
+                Action::SetInput(InputChange::Freq(7.1)),
                 Action::ShowAbout,
-                Action::TuneTo(10.1),
+                Action::SetInput(InputChange::Freq(10.1)),
             ],
         );
         assert!(s.ui.modals.settings);
@@ -309,5 +314,42 @@ mod tests {
             (s.inputs.scenario.tx_lat, s.inputs.scenario.tx_lon),
             (-5.0, 30.0)
         );
+    }
+
+    /// A mode change seeds the bandwidth and threshold from its preset.
+    #[test]
+    fn choosing_a_mode_seeds_its_bandwidth_and_threshold() {
+        let (mut s, jobs) = setup();
+        let mode = skipzone_predict::noise::OperatingMode::ALL
+            .into_iter()
+            .find(|m| *m != s.inputs.scenario.op_mode)
+            .expect("more than one mode");
+        apply(&mut s, &jobs, [Action::SetInput(InputChange::OpMode(mode))]);
+        let inputs = &s.inputs.scenario;
+        assert_eq!(inputs.op_mode, mode);
+        assert_eq!(
+            (inputs.bandwidth_hz, inputs.snr_threshold_db),
+            mode.defaults()
+        );
+    }
+
+    /// The time and date controls write the scenario's clock fields, and the
+    /// night toggle only the display preference.
+    #[test]
+    fn time_date_and_night_edits_land_in_the_inputs() {
+        let (mut s, jobs) = setup();
+        let date = skipzone_iono::clock::CivilDate::new(2027, 3, 21);
+        apply(
+            &mut s,
+            &jobs,
+            [
+                Action::SetInput(InputChange::UtcHours(6.5)),
+                Action::SetInput(InputChange::Date(date)),
+                Action::SetInput(InputChange::ShowTerminator(false)),
+            ],
+        );
+        assert!((s.inputs.scenario.utc_hours - 6.5).abs() < 1e-12);
+        assert_eq!(s.inputs.date(), date);
+        assert!(!s.inputs.display.show_terminator);
     }
 }

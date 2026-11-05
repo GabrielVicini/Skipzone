@@ -7,7 +7,7 @@
 use egui::{ComboBox, DragValue, RichText, Ui};
 
 use crate::state::AppState;
-use crate::ui::actions::Action;
+use crate::ui::actions::{Action, InputChange, edited};
 use crate::ui::theme::{self, MUTED};
 use skipzone_predict::noise::{OperatingMode, dbm_from_watts};
 
@@ -18,17 +18,18 @@ const POWER_LEVELS_W: [f64; 10] = [
 
 const CONTROL_WIDTH: f32 = 176.0;
 
-pub fn overlay(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
+pub fn overlay(ui: &mut Ui, state: &AppState, out: &mut Vec<Action>) {
+    let inputs = &state.inputs.scenario;
     ui.vertical(|ui| {
         ui.set_width(CONTROL_WIDTH);
 
         theme::floating_frame().show(ui, |ui| {
             ui.set_width(CONTROL_WIDTH - 20.0);
-            frequency(ui, state);
+            out.extend(frequency(ui, inputs.freq_mhz));
             ui.add_space(6.0);
-            mode(ui, state);
+            out.extend(mode(ui, inputs.op_mode));
             ui.add_space(6.0);
-            power(ui, state);
+            out.extend(power(ui, inputs.tx_power_w));
         });
 
         ui.add_space(6.0);
@@ -51,53 +52,52 @@ pub fn overlay(ui: &mut Ui, state: &mut AppState, out: &mut Vec<Action>) {
     });
 }
 
-fn frequency(ui: &mut Ui, state: &mut AppState) {
+fn frequency(ui: &mut Ui, freq_mhz: f64) -> Option<Action> {
     ui.label(RichText::new("Frequency").small().color(MUTED));
-    ui.add_sized(
-        [ui.available_width(), 20.0],
-        DragValue::new(&mut state.inputs.scenario.freq_mhz)
-            .speed(0.05)
-            .range(0.5..=60.0)
-            .suffix(" MHz"),
-    );
+    let freq = edited(freq_mhz, |f| {
+        ui.add_sized(
+            [ui.available_width(), 20.0],
+            DragValue::new(f)
+                .speed(0.05)
+                .range(0.5..=60.0)
+                .suffix(" MHz"),
+        );
+    })?;
+    Some(Action::SetInput(InputChange::Freq(freq)))
 }
 
-fn mode(ui: &mut Ui, state: &mut AppState) {
+fn mode(ui: &mut Ui, op_mode: OperatingMode) -> Option<Action> {
     ui.label(RichText::new("Mode").small().color(MUTED));
+    let mut picked = None;
     ComboBox::from_id_salt("mode_select")
         .width(ui.available_width())
-        .selected_text(state.inputs.scenario.op_mode.label())
+        .selected_text(op_mode.label())
         .show_ui(ui, |ui| {
             for m in OperatingMode::ALL {
                 // The preset seeds the bandwidth and threshold; both stay
                 // editable in Settings, so the verdict is never decided by a
                 // constant baked into the code.
-                if ui
-                    .selectable_value(&mut state.inputs.scenario.op_mode, m, m.label())
-                    .clicked()
-                {
-                    let (bandwidth_hz, threshold_db) = m.defaults();
-                    state.inputs.scenario.bandwidth_hz = bandwidth_hz;
-                    state.inputs.scenario.snr_threshold_db = threshold_db;
+                if ui.selectable_label(op_mode == m, m.label()).clicked() {
+                    picked = Some(m);
                 }
             }
         });
+    picked.map(|m| Action::SetInput(InputChange::OpMode(m)))
 }
 
-fn power(ui: &mut Ui, state: &mut AppState) {
+fn power(ui: &mut Ui, tx_power_w: f64) -> Option<Action> {
     ui.label(RichText::new("Power").small().color(MUTED));
-    ComboBox::from_id_salt("power_select")
-        .width(ui.available_width())
-        .selected_text(format_power(state.inputs.scenario.tx_power_w))
-        .show_ui(ui, |ui| {
-            for watts in POWER_LEVELS_W {
-                ui.selectable_value(
-                    &mut state.inputs.scenario.tx_power_w,
-                    watts,
-                    format_power(watts),
-                );
-            }
-        });
+    let watts = edited(tx_power_w, |w| {
+        ComboBox::from_id_salt("power_select")
+            .width(ui.available_width())
+            .selected_text(format_power(*w))
+            .show_ui(ui, |ui| {
+                for watts in POWER_LEVELS_W {
+                    ui.selectable_value(w, watts, format_power(watts));
+                }
+            });
+    })?;
+    Some(Action::SetInput(InputChange::TxPower(watts)))
 }
 
 fn format_power(watts: f64) -> String {

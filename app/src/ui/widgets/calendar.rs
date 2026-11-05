@@ -8,8 +8,17 @@ use crate::ui::scratch::CalendarState;
 use crate::ui::theme::{ACCENT, MUTED};
 use skipzone_iono::clock::{self, CivilDate, MONTH_NAMES, WEEKDAY_INITIALS};
 
-/// Draw the picker. Returns the date if one was clicked.
-pub fn picker(ui: &mut Ui, cal: &mut CalendarState, selected: CivilDate) -> Option<CivilDate> {
+/// What the operator picked.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pick {
+    Day(CivilDate),
+    /// The Today button. The caller reads the clock, so the picker stays a
+    /// pure function of what it is given.
+    Today,
+}
+
+/// Draw the picker. Returns what was clicked, if anything.
+pub fn picker(ui: &mut Ui, cal: &mut CalendarState, selected: CivilDate) -> Option<Pick> {
     let mut picked = None;
 
     ui.horizontal(|ui| {
@@ -67,7 +76,7 @@ pub fn picker(ui: &mut Ui, cal: &mut CalendarState, selected: CivilDate) -> Opti
                     button.fill(Color32::TRANSPARENT)
                 };
                 if ui.add(button).clicked() {
-                    picked = Some(date);
+                    picked = Some(Pick::Day(date));
                 }
                 column += 1;
                 if column.is_multiple_of(7) {
@@ -78,9 +87,7 @@ pub fn picker(ui: &mut Ui, cal: &mut CalendarState, selected: CivilDate) -> Opti
 
     ui.add_space(2.0);
     if ui.button("Today (UTC)").clicked() {
-        let (today, _) = clock::utc_now();
-        cal.show_month_of(today);
-        picked = Some(today);
+        picked = Some(Pick::Today);
     }
 
     picked

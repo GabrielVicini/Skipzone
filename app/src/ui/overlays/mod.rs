@@ -43,7 +43,7 @@ pub fn draw(ctx: &Context, state: &mut AppState, scratch: &mut ViewScratch, out:
         "overlay_time_date",
         over_map,
         Align2::LEFT_BOTTOM,
-        |ui| time_date::overlay(ui, state, scratch),
+        |ui| time_date::overlay(ui, state, scratch, out),
     );
 
     // Bottom right: map framing.
