@@ -1,11 +1,11 @@
 # Command Line Tools
 
 Besides the desktop app, Skipzone ships a terminal predictor, `hfpredict`,
-and eleven harnesses that check the model against measurements. You need none
+and twelve harnesses that check the model against measurements. You need none
 of them to use the app. Every command below runs from the repository root, and
 each tool builds on first use.
 
-Only two tools touch the network: `wspr_corpus` and `wspr_live_check`. Three
+Only two tools touch the network: `wspr_corpus` and `wspr_live_check`. Four
 read a `corpus/` directory of fetched data that is not in the repository. The
 table below marks both.
 
@@ -56,6 +56,7 @@ prediction code as the GUI.
 | `wspr_validate` | Score the model against a saved list of WSPR spots | A spot file |
 | `wspr_live_check` | Fetch live WSPR spots and the sunspot number, score the model and list the worst misses | Network, unless given `--file` and `--ssn` |
 | `iono_check` | Score the modelled foF2 and foE against measured ionosonde values, in MHz | `corpus/` |
+| `benchmark` | Score the model, and the ITU-R P.533 baseline, on frozen corpora with month and region hold-outs | Frozen corpus files with a manifest; no network |
 | `mode_audit` | Show why the solver admits a path and what absorption it charges it | Nothing |
 | `zenith_probe` | Measure the solar-zenith law the D region produces, without tracing a ray | Nothing |
 | `rise_wiring_check` | Check that the D-region rise anchor reaches a solve, and how much leverage the corpus has on it | `corpus/` |
@@ -111,6 +112,31 @@ cargo run --release -p skipzone-lab --bin iono_check -- \
 `iono_check` takes its flags as `--name=VALUE`. Add `--propose` to print
 suggested anchor changes as well as the error. It fits nothing itself.
 
+### Benchmarking
+
+```bash
+# Score every corpus named by a manifest; writes results.tsv, rows.tsv and report.md
+cargo run --release -p skipzone-lab --bin benchmark -- run \
+    --manifest corpus/benchmark/wspr-v1/MANIFEST.tsv --out corpus/benchmark/runs/first
+
+# Compare two runs, paired on the rows both scored
+cargo run --release -p skipzone-lab --bin benchmark -- compare \
+    corpus/benchmark/runs/before/results.tsv corpus/benchmark/runs/after/results.tsv
+
+# Write ITURHFProp input files, to run P.533 on another machine
+cargo run --release -p skipzone-lab --bin benchmark -- p533-inputs \
+    --manifest corpus/benchmark/wspr-v1/MANIFEST.tsv --out corpus/benchmark/p533
+```
+
+`benchmark` needs no network. It reads only files listed in a corpus
+`MANIFEST.tsv`, checks each file's SHA-256 first, and stops if one differs. It
+reads WSPR, Reverse Beacon Network, NCDXF beacon and GIRO ionosonde files.
+Pass the ITURHFProp outputs back with `--p533 corpus/benchmark/p533`.
+[The accuracy roadmap](https://github.com/GabrielVicini/Skipzone/blob/master/docs/notes/accuracy-roadmap.md)
+describes the corpora, the splits and the metrics. No tool fetches the
+benchmark corpora yet. `--help` lists every flag. The synthetic test fixtures
+are in `crates/skipzone-lab/tests/fixtures/benchmark/`.
+
 ### Diagnostics
 
 ```bash
@@ -138,6 +164,8 @@ cargo run --release -p skipzone-lab --bin rise_wiring_check -- corpus/fit.tsv 12
 | `holdout.tsv` | `wspr_corpus`, over a different span | `wspr_calibrate` |
 | `ionosonde.tsv` | Fetched by hand from the Lowell GIRO DIDBase | `iono_check` |
 | `ssn_daily.tsv` | SILSO daily sunspot number, as tab-separated year, month, day, SSN | `iono_check` |
+| `benchmark/<name>-v<N>/` | A frozen corpus and its `MANIFEST.tsv`, fetched once and never refetched under the same version | `benchmark` |
+| `benchmark/runs/` | One directory per `benchmark run` | `benchmark compare` |
 
 No tool in the repository fetches the ionosonde or SILSO files. If
 `iono_check` cannot read `ssn_daily.tsv` or `fit.tsv`, it carries on with a
