@@ -1,0 +1,54 @@
+# ITURHFProp groups for the benchmark.
+# manifest: wspr-fixture-v1 c07ad7b75febd2c1d1f4c2baedc848d4d5e80247cc4912550ae8ae4db8cc64c9
+# Run each in/<id>.in with ITURHFProp, writing out/<id>.out, then pass this
+# directory to `benchmark run --p533`.
+# group	source	tx_lat	tx_lon	rx_lat	rx_lon	year	month	hour	ssn	ssn_source	freqs_khz
+G	g000000	wspr	32.5000	-97.0000	42.5000	-89.0000	2026	1	18	118	r12 file	7040
+G	g000001	wspr	32.5000	-97.0000	42.5000	-89.0000	2026	7	18	110	mean daily SSN (no R12 in corpus)	7040
+G	g000002	wspr	32.5000	-97.0000	42.5000	-71.0000	2026	1	18	118	r12 file	7040
+G	g000003	wspr	32.5000	-97.0000	42.5000	-71.0000	2026	7	18	110	mean daily SSN (no R12 in corpus)	7040
+G	g000004	wspr	41.5000	-73.0000	42.5000	-89.0000	2026	1	18	118	r12 file	7040
+G	g000005	wspr	41.5000	-73.0000	42.5000	-89.0000	2026	7	18	110	mean daily SSN (no R12 in corpus)	7040
+G	g000006	wspr	41.5000	-73.0000	42.5000	-71.0000	2026	1	18	118	r12 file	7040
+G	g000007	wspr	41.5000	-73.0000	42.5000	-71.0000	2026	7	18	110	mean daily SSN (no R12 in corpus)	7040
+G	g000008	wspr	48.5000	11.0000	51.5000	-1.0000	2026	1	12	118	r12 file	7040
+G	g000009	wspr	48.5000	11.0000	51.5000	-1.0000	2026	7	12	110	mean daily SSN (no R12 in corpus)	7040
+G	g000010	wspr	48.5000	11.0000	52.5000	13.0000	2026	1	12	118	r12 file	7040
+G	g000011	wspr	48.5000	11.0000	52.5000	13.0000	2026	7	12	110	mean daily SSN (no R12 in corpus)	7040
+G	g000012	wspr	51.5000	1.0000	51.5000	-1.0000	2026	1	12	118	r12 file	7040
+G	g000013	wspr	51.5000	1.0000	51.5000	-1.0000	2026	7	12	110	mean daily SSN (no R12 in corpus)	7040
+G	g000014	wspr	51.5000	1.0000	52.5000	13.0000	2026	1	12	118	r12 file	7040
+G	g000015	wspr	51.5000	1.0000	52.5000	13.0000	2026	7	12	110	mean daily SSN (no R12 in corpus)	7040
+# row	group	freq_khz
+R	wspr-fixture-v1/negatives.tsv#0	g000010	7040
+R	wspr-fixture-v1/negatives.tsv#1	g000000	7040
+R	wspr-fixture-v1/negatives.tsv#2	g000011	7040
+R	wspr-fixture-v1/negatives.tsv#3	g000001	7040
+R	wspr-fixture-v1/spots.tsv#0	g000012	7040
+R	wspr-fixture-v1/spots.tsv#1	g000014	7040
+R	wspr-fixture-v1/spots.tsv#10	g000006	7040
+R	wspr-fixture-v1/spots.tsv#11	g000004	7040
+R	wspr-fixture-v1/spots.tsv#12	g000002	7040
+R	wspr-fixture-v1/spots.tsv#13	g000000	7040
+R	wspr-fixture-v1/spots.tsv#14	g000013	7040
+R	wspr-fixture-v1/spots.tsv#15	g000015	7040
+R	wspr-fixture-v1/spots.tsv#16	g000009	7040
+R	wspr-fixture-v1/spots.tsv#17	g000007	7040
+R	wspr-fixture-v1/spots.tsv#18	g000005	7040
+R	wspr-fixture-v1/spots.tsv#19	g000003	7040
+R	wspr-fixture-v1/spots.tsv#2	g000008	7040
+R	wspr-fixture-v1/spots.tsv#20	g000013	7040
+R	wspr-fixture-v1/spots.tsv#21	g000015	7040
+R	wspr-fixture-v1/spots.tsv#22	g000009	7040
+R	wspr-fixture-v1/spots.tsv#23	g000011	7040
+R	wspr-fixture-v1/spots.tsv#24	g000007	7040
+R	wspr-fixture-v1/spots.tsv#25	g000005	7040
+R	wspr-fixture-v1/spots.tsv#26	g000003	7040
+R	wspr-fixture-v1/spots.tsv#27	g000001	7040
+R	wspr-fixture-v1/spots.tsv#3	g000006	7040
+R	wspr-fixture-v1/spots.tsv#4	g000004	7040
+R	wspr-fixture-v1/spots.tsv#5	g000002	7040
+R	wspr-fixture-v1/spots.tsv#6	g000012	7040
+R	wspr-fixture-v1/spots.tsv#7	g000014	7040
+R	wspr-fixture-v1/spots.tsv#8	g000008	7040
+R	wspr-fixture-v1/spots.tsv#9	g000010	7040

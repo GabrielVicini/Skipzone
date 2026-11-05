@@ -157,7 +157,8 @@ pub fn band_label(mhz: f64) -> String {
 /// Path-length buckets chosen at the geometry boundaries that matter: one hop
 /// of E, one hop of F2, then multi-hop, then the very long paths where the
 /// equal-hop geometry and the great-circle assumption are under most strain.
-fn distance_bucket(km: f64) -> &'static str {
+#[must_use]
+pub fn distance_bucket(km: f64) -> &'static str {
     match km {
         k if k < 1000.0 => "a) < 1000 km",
         k if k < 2500.0 => "b) 1000-2500 km",

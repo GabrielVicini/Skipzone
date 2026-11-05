@@ -1,0 +1,5 @@
+# corpus: iono-fixture-v1
+# synthetic: yes
+file	kind	sha256	rows	fetched_utc	source	licence	attribution
+ionosonde.tsv	ionosonde	faf87bdc39046b9a9044e5daddb5f8dcc0f6184be38c1f1c03cf686adebecec0	5	-	synthetic fixture	none (invented data)	none
+ssn.tsv	ssn-daily	54b58df66d3ec185ea80925f5b1aa2d4d3ebd68142a22e28b5ce396d49f829e1	2	-	synthetic fixture	none (invented data)	none

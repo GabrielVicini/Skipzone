@@ -8,6 +8,8 @@
 //! It is the only crate with network access. It depends on the engine
 //! (`skipzone`), `skipzone-iono` and `skipzone-predict`, and never on the app.
 
+/// The accuracy benchmark over frozen corpora. Harness-only.
+pub mod benchmark;
 /// A saved, reproducible WSPR corpus for calibration. Harness-only.
 pub mod corpus;
 /// Two-way fixed-effects calibration against measured WSPR spots. Harness-only.

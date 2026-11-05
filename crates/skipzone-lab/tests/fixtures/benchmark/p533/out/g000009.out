@@ -1,0 +1,4 @@
+* SYNTHETIC FIXTURE: invented values in the column layout the benchmark
+* expects. Not output from a real ITURHFProp run; confirm the real header.
+Month, Hour, Freq, SNR, SNRLD, SNRUD, BMUF, BCR, DomMode
+07, 12, 7.040, -24.0, 8.0, 6.0, 9.5, 69.0, 1F2
