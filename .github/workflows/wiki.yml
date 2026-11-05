@@ -1,0 +1,66 @@
+name: Wiki
+
+on:
+  push:
+    branches: [master]
+    paths: ["wiki/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: sync wiki/ to the GitHub wiki
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check for WIKI_TOKEN
+        id: token
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN }}
+        run: |
+          if [ -z "$WIKI_TOKEN" ]; then
+            echo "::notice::WIKI_TOKEN secret is not set, skipping wiki sync."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          path: source
+
+      # GITHUB_TOKEN cannot push to a wiki, so this uses a fine-grained PAT
+      # with Contents read/write on this repository.
+      - name: Clone wiki
+        if: steps.token.outputs.present == 'true'
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN }}
+        run: |
+          url="https://x-access-token:${WIKI_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          if ! git clone --depth 1 "$url" wiki-repo; then
+            echo "::error::Could not clone the wiki. Create its first page once in the web UI, and check that WIKI_TOKEN has Contents read/write on this repository."
+            exit 1
+          fi
+
+      - name: Sync and push
+        if: steps.token.outputs.present == 'true'
+        working-directory: wiki-repo
+        run: |
+          # Mirror wiki/ exactly, so pages deleted there are deleted here too.
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a ../source/wiki/. ./
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already matches wiki/ at ${GITHUB_SHA}."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Sync from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          git push origin HEAD
