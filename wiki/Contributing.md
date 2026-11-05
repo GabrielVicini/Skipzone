@@ -58,7 +58,7 @@ python3 scripts/check-boundaries.py
 cargo deny --workspace --all-features check     # needs: cargo install cargo-deny
 ```
 
-If you changed anything under `docs/` or `wiki/`, also run the docs link check:
+If you changed `docs/`, the README or a `docs/` citation in code, also run the docs link check:
 
 ```bash
 python3 scripts/check-docs.py
@@ -193,7 +193,7 @@ runs on every push to `master` and every pull request.
 | `test` | `cargo test --workspace --all-targets` on Ubuntu 24.04, Windows and macOS, then `cargo build -p skipzone --lib` to prove the engine builds alone |
 | `msrv` | `cargo check` of `skipzone`, `skipzone-iono` and `skipzone-predict`, each on the `rust-version` its `Cargo.toml` declares |
 | `docs` | `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS=-D warnings` |
-| `boundaries` | `scripts/check-boundaries.py`, the dependency rule in [Architecture](Architecture#the-dependency-rule) |
+| `boundaries` | `scripts/check-boundaries.py` (the dependency rule in [Architecture](Architecture#the-dependency-rule)) and `scripts/check-docs.py` (every derivation is cited and every citation resolves) |
 | `deny` | `cargo deny` advisories, then bans, licences and sources, configured in `deny.toml` |
 
 Two more workflows run on their own triggers. `wiki.yml` mirrors `wiki/` to
